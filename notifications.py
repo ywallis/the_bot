@@ -1,6 +1,6 @@
 import smtplib
 import time
-from config_bitmart import *
+from config import *
 
 
 def send_email(subject, message):

@@ -1,18 +1,13 @@
 import logging
-import ccxt
 from datetime import datetime
 import time
 
 # from notifications import send_email
 
-from config_bitmart import *
+from config import *
 
 logger = logging.getLogger(__name__)
 
-# Initialize clients
-
-gate_client = ccxt.gateio({'apiKey': gateio_sub_key, 'secret': gateio_sub_secret})
-bitmart_client = ccxt.bitmart({'apiKey': bitmart_key, 'secret': bitmart_secret, 'uid': bitmart_UID})
 
 # Retrieve current gate.io fee
 
@@ -26,6 +21,9 @@ def retrieve_books(exchange, side, ticker):
 
     if exchange == 'bitmart':
         return bitmart_client.fetch_order_book(symbol=ticker)[side]
+
+    if exchange == 'mexc':
+        return mexc_client.fetch_order_book(symbol=ticker)[side]
 
 
 def order_book_matcher(bids, asks, spread=1.002, sizing=0.7, max_order_size=10, min_order_size=0.01):
@@ -109,6 +107,10 @@ def place_sell_order(pair, exchange, price, quantity):
 
         bitmart_client.create_limit_sell_order(symbol=pair, amount=quantity, price=price)
 
+    if exchange == 'mexc':
+
+        mexc_client.create_limit_sell_order(symbol=pair, amount=quantity, price=price)
+
     print(f'Placed a {quantity} ALPH sell order on {exchange} for {price}.')
     logger.info(f'Placed a {quantity} ALPH sell order on {exchange} for {price}.')
 
@@ -122,11 +124,15 @@ def place_buy_order(pair, exchange, price, quantity):
 
         quantity_with_fee = round(quantity * fee_ratio, 2)
 
-        gate_client.create_limit_sell_order(symbol=pair, amount=quantity_with_fee, price=price)
+        gate_client.create_limit_buy_order(symbol=pair, amount=quantity_with_fee, price=price)
 
     if exchange == 'bitmart':
 
-        bitmart_client.create_limit_sell_order(symbol=pair, amount=quantity, price=price)
+        bitmart_client.create_limit_buy_order(symbol=pair, amount=quantity, price=price)
+
+    if exchange == 'mexc':
+
+        mexc_client.create_limit_buy_order(symbol=pair, amount=quantity, price=price)
 
     print(f'Placed a {quantity} ALPH buy order on {exchange} for {price}.')
     logger.info(f'Placed a {quantity} ALPH buy order on {exchange} for {price}.')
@@ -146,6 +152,12 @@ def retrieve_balance(exchange, ticker):
 
         return balance_bitmart
 
+    if exchange == 'mexc':
+
+        balance_mexc = mexc_client.fetch_balance()[ticker]['free']
+
+        return balance_mexc
+
 
 def check_if_solvent(buy_exchange, sell_exchange, price, quantity):
 
@@ -155,8 +167,26 @@ def check_if_solvent(buy_exchange, sell_exchange, price, quantity):
         return False
 
 
-def overwatch(pair):
-    time.sleep(2)
+def overwatch_mexc(pair):
+    gate_price = gate_client.fetch_ticker(symbol=pair)['last']
+    mexc_price = mexc_client.fetch_ticker(symbol=pair)['last']
+
+    all_prices = {'mexc': mexc_price, 'gate': gate_price}
+
+    lowest = min(all_prices, key=all_prices.get)
+    highest = max(all_prices, key=all_prices.get)
+
+    spread = round((all_prices[highest] / all_prices[lowest] - 1) * 100, 2)
+
+    print(f'Watching at {datetime.now()}.'
+          f'\nLowest price on {lowest} for {all_prices[lowest]}, '
+          f'highest on {highest} for {all_prices[highest]} ({spread}%).')
+
+    return all_prices, lowest, highest
+
+
+def overwatch_bitmart(pair):
+    time.sleep(3)
     gate_price = gate_client.fetch_ticker(symbol=pair)['last']
     bitmart_price = bitmart_client.fetch_ticker(symbol=pair)['last']
 
@@ -172,7 +202,6 @@ def overwatch(pair):
           f'highest on {highest} for {all_prices[highest]} ({spread}%).')
 
     return all_prices, lowest, highest
-
 
 # bitmart_client.create_limit_buy_order(symbol='ALPH/USDT', amount=3, price=2.44)
 # bitmart_client.create_limit_sell_order(symbol='ALPH/USDT', amount=3, price=2.42)
