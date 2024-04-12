@@ -9,7 +9,7 @@ def get_balance_status(client):
 
     all_balances = client.fetch_balance()
     for ticker in all_balances['free']:
-        print(f"{round(all_balances['free'][ticker], 2)} {ticker} available on {client.name}")
+        print(f"{ticker} {round(all_balances['free'][ticker], 2)} available on {client.name}")
 
 
 def get_order_status(client, ticker):
