@@ -1,8 +1,9 @@
 import pandas as pd
 import os
+import time
 from datetime import datetime, date
 from config import gate_client, bitmart_client, mexc_client, path_to_NAS
-import ccxt
+
 
 def get_balance_status(client):
 
@@ -30,7 +31,7 @@ def get_order_status(client, ticker):
         print(f"Total of {open_sell_orders_total} sells open on {client.name}.")
 
 
-def get_trades(client, ticker):
+def download_trades(client, ticker):
     today = str(date.today())
     trades_with_fee = []
     output_path = f'{path_to_NAS}{ticker.split("/")[0]}/{today}_{client.name}.csv'
@@ -51,15 +52,23 @@ def get_trades(client, ticker):
     clean.to_csv(output_path, header=True)
 
 
+bot_activated = True
+
+while bot_activated:
+    print(f'Status at {datetime.now()}')
+
+    get_balance_status(mexc_client)
+    get_balance_status(gate_client)
+    get_order_status(mexc_client, ticker='ALPH/USDT')
+    get_order_status(gate_client, ticker='ALPH/USDT')
+    download_trades(mexc_client, 'ALPH/USDT')
+    download_trades(gate_client, 'ALPH/USDT')
+    # get_trades(bitmart_client, 'ALPH/USDT')
+    print('Cycle done')
+    time.sleep(30)
+
+
 # bitmart_client.create_limit_buy_order(symbol='ALPH/USDT', amount=100, price=0.2)
 # bitmart_client.create_limit_sell_order(symbol='ALPH/USDT', amount=10, price=10)
 # gate_client.cancel_all_orders()
 # bitmart_client.cancel_all_orders()
-
-# get_balance_status(mexc_client)
-# get_balance_status(gate_client)
-# get_order_status(mexc_client, ticker='ALPH/USDT')
-# get_order_status(gate_client, ticker='ALPH/USDT')
-get_trades(mexc_client, 'ALPH/USDT')
-get_trades(gate_client, 'ALPH/USDT')
-# get_trades(bitmart_client, 'ALPH/USDT')
