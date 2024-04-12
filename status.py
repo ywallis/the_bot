@@ -26,9 +26,9 @@ def get_order_status(client, ticker):
         print(f"Open {order['side']} order on {client.name} at {order['price']}, "
               f"{round(order['remaining'], 2)} of {round(order['amount'], 2)} remaining.")
     if open_buy_orders_total != 0:
-        print(f"Total of {open_buy_orders_total} buys open on {client.name}.")
+        print(f"Total of {round(open_buy_orders_total, 2)} buys open on {client.name}.")
     if open_sell_orders_total != 0:
-        print(f"Total of {open_sell_orders_total} sells open on {client.name}.")
+        print(f"Total of {round(open_sell_orders_total, 2)} sells open on {client.name}.")
 
 
 def download_trades(client, ticker):
