@@ -1,6 +1,9 @@
 import logging
 import time
 from datetime import date, datetime
+
+import requests.exceptions
+
 from boiler import *
 from notifications import send_email
 from config import *
@@ -49,6 +52,9 @@ while bot_activated:
                     except RuntimeError:
                         print("Going too fast.")
                         time.sleep(10)
+
+                    except requests.exceptions.HTTPError:
+                        print('HTTP Error')
                 else:
                     print('Insufficient funds!')
                     logger.info('Insufficient funds!')

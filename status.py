@@ -63,18 +63,3 @@ def get_trades(client, ticker):
 get_trades(mexc_client, 'ALPH/USDT')
 get_trades(gate_client, 'ALPH/USDT')
 # get_trades(bitmart_client, 'ALPH/USDT')
-# print(gate_client.has)
-
-# test = gate_client.fetch_my_trades('ALPH/USDT', 1708732800000, params={'until': 1708819200000})
-# testing = True
-# start = 1712823081000
-#
-# while testing:
-#     test = mexc_client.fetch_my_trades(symbol='ALPH/USDT', limit=1, params={'startTime': start})
-#
-#     # print(test)
-#     for trades in test:
-#         # print(trades)
-#         print(trades['datetime'])
-#     start -= 100000000
-#     print(start)
