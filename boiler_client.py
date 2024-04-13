@@ -14,16 +14,9 @@ logger = logging.getLogger(__name__)
 gate_fee = gate_client.fetch_trading_fee(symbol='ALPH/USDT')['taker']
 
 
-def retrieve_books(exchange, side, ticker):
+def retrieve_books(client, side, ticker):
 
-    if exchange == 'gate':
-        return gate_client.fetch_order_book(symbol=ticker)[side]
-
-    if exchange == 'bitmart':
-        return bitmart_client.fetch_order_book(symbol=ticker)[side]
-
-    if exchange == 'mexc':
-        return mexc_client.fetch_order_book(symbol=ticker)[side]
+    return client.fetch_order_book(symbol=ticker)[side]
 
 
 def order_book_matcher(bids, asks, spread=1.002, sizing=0.7, max_order_size=10, min_order_size=0.01):
@@ -97,66 +90,36 @@ def order_book_matcher(bids, asks, spread=1.002, sizing=0.7, max_order_size=10, 
             dynamic_arb = False
 
 
-def place_sell_order(pair, exchange, price, quantity):
+def place_sell_order(pair, client, price, quantity):
 
-    if exchange == 'gate':
+    client.create_limit_sell_order(symbol=pair, amount=quantity, price=price)
 
-        gate_client.create_limit_sell_order(symbol=pair, amount=quantity, price=price)
-
-    if exchange == 'bitmart':
-
-        bitmart_client.create_limit_sell_order(symbol=pair, amount=quantity, price=price)
-
-    if exchange == 'mexc':
-
-        mexc_client.create_limit_sell_order(symbol=pair, amount=quantity, price=price)
-
-    print(f'Placed a {quantity} ALPH sell order on {exchange} for {price}.')
-    logger.info(f'Placed a {quantity} ALPH sell order on {exchange} for {price}.')
+    print(f'Placed a {quantity} {pair} sell order on {client.name} for {price}.')
+    logger.info(f'Placed a {quantity} {pair} sell order on {client.name} for {price}.')
 
 
-def place_buy_order(pair, exchange, price, quantity):
+def place_buy_order(pair, client, price, quantity):
 
-    if exchange == 'gate':
+    if client.name == 'Gate.io':
 
         # Apply current fee level
         fee_ratio = 1 / (1 - gate_fee)
 
         quantity_with_fee = round(quantity * fee_ratio, 2)
 
-        gate_client.create_limit_buy_order(symbol=pair, amount=quantity_with_fee, price=price)
+        client.create_limit_buy_order(symbol=pair, amount=quantity_with_fee, price=price)
 
-    if exchange == 'bitmart':
+    else:
 
-        bitmart_client.create_limit_buy_order(symbol=pair, amount=quantity, price=price)
+        client.create_limit_buy_order(symbol=pair, amount=quantity, price=price)
 
-    if exchange == 'mexc':
-
-        mexc_client.create_limit_buy_order(symbol=pair, amount=quantity, price=price)
-
-    print(f'Placed a {quantity} ALPH buy order on {exchange} for {price}.')
-    logger.info(f'Placed a {quantity} ALPH buy order on {exchange} for {price}.')
+    print(f'Placed a {quantity} {pair} buy order on {client.name} for {price}.')
+    logger.info(f'Placed a {quantity} {pair} buy order on {client.name} for {price}.')
 
 
-def retrieve_balance(exchange, ticker):
+def retrieve_balance(client, ticker):
 
-    if exchange == 'gate':
-
-        balance_gate = gate_client.fetch_balance()[ticker]['free']
-
-        return balance_gate
-
-    if exchange == 'bitmart':
-
-        balance_bitmart = bitmart_client.fetch_balance()[ticker]['free']
-
-        return balance_bitmart
-
-    if exchange == 'mexc':
-
-        balance_mexc = mexc_client.fetch_balance()[ticker]['free']
-
-        return balance_mexc
+    return client.fetch_balance()[ticker]['free']
 
 
 def check_if_solvent(buy_exchange, sell_exchange, price, quantity):
@@ -205,6 +168,27 @@ def overwatch_bitmart(pair):
 
 # bitmart_client.create_limit_buy_order(symbol='ALPH/USDT', amount=3, price=2.44)
 # bitmart_client.create_limit_sell_order(symbol='ALPH/USDT', amount=3, price=2.42)
+# print(gate_fee)
 
 
-# print(gate_client.fetch_trading_fee(symbol='ALPH/USDT'))
+def overwatch(client_a, client_b, pair, spread):
+
+    last_a = client_a.fetch_ticker(pair)['ask']
+    last_b = client_b.fetch_ticker(pair)['bid']
+    bid_a = client_a.fetch_ticker(pair)['bid']
+    ask_a = client_a.fetch_ticker(pair)['ask']
+    bid_b = client_b.fetch_ticker(pair)['bid']
+    ask_b = client_b.fetch_ticker(pair)['ask']
+
+    # FAKE!! REMEMBER TO INVERT
+    if bid_b >= ask_a * spread:
+        print(client_a.name)
+        return client_a, client_b
+
+    if bid_a >= ask_b * spread:
+        print(client_b.name)
+        return client_b, client_a
+
+
+buy_client, sell_client = overwatch(gate_client, mexc_client, 'ALPH/USDT', 1)
+print(f'Buy on {buy_client.name}, sell on {sell_client.name}')
