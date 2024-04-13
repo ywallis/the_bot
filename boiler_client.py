@@ -173,14 +173,16 @@ def overwatch_bitmart(pair):
 
 def overwatch(client_a, client_b, pair, spread):
 
-    last_a = client_a.fetch_ticker(pair)['ask']
-    last_b = client_b.fetch_ticker(pair)['bid']
-    bid_a = client_a.fetch_ticker(pair)['bid']
-    ask_a = client_a.fetch_ticker(pair)['ask']
-    bid_b = client_b.fetch_ticker(pair)['bid']
-    ask_b = client_b.fetch_ticker(pair)['ask']
+    ticker_a = client_a.fetch_ticker(pair)
+    ticker_b = client_b.fetch_ticker(pair)
+    last_a = ticker_a['last']
+    bid_a = ticker_a['bid']
+    ask_a = ticker_a['ask']
+    last_b = ticker_b['last']
+    bid_b = ticker_b['bid']
+    ask_b = ticker_b['ask']
 
-    # FAKE!! REMEMBER TO INVERT
+
     if bid_b >= ask_a * spread:
         print(client_a.name)
         return client_a, client_b
@@ -190,5 +192,12 @@ def overwatch(client_a, client_b, pair, spread):
         return client_b, client_a
 
 
-buy_client, sell_client = overwatch(gate_client, mexc_client, 'ALPH/USDT', 1)
-print(f'Buy on {buy_client.name}, sell on {sell_client.name}')
+# buy_client, sell_client = overwatch(gate_client, mexc_client, 'ALPH/USDT', 1)
+# print(f'Buy on {buy_client.name}, sell on {sell_client.name}')
+#
+# bids = retrieve_books(sell_client, 'bids', 'ALPH/USDT')
+# asks = retrieve_books(buy_client, 'asks', 'ALPH/USDT')
+#
+#
+# target_ask, target_bid, order_size = order_book_matcher(bids, asks, spread=1)
+# print(target_ask, target_bid, order_size)
