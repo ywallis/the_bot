@@ -131,6 +131,9 @@ def check_if_solvent(buy_exchange, sell_exchange, price, quantity):
 
 
 def overwatch(client_a, client_b, pair, spread):
+    # Manual rate limiting for BitMart
+    if client_b.name == 'BitMart':
+        time.sleep(1)
 
     ticker_a = client_a.fetch_ticker(pair)
     ticker_b = client_b.fetch_ticker(pair)
@@ -156,6 +159,7 @@ def overwatch(client_a, client_b, pair, spread):
 
     if bid_a >= ask_b * spread:
         return client_b, client_a
+
 
 # buy_client, sell_client = overwatch(gate_client, mexc_client, 'ALPH/USDT', 1)
 # print(f'Buy on {buy_client.name}, sell on {sell_client.name}')
