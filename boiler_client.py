@@ -130,47 +130,6 @@ def check_if_solvent(buy_exchange, sell_exchange, price, quantity):
         return False
 
 
-def overwatch_mexc(pair):
-    gate_price = gate_client.fetch_ticker(symbol=pair)['last']
-    mexc_price = mexc_client.fetch_ticker(symbol=pair)['last']
-
-    all_prices = {'mexc': mexc_price, 'gate': gate_price}
-
-    lowest = min(all_prices, key=all_prices.get)
-    highest = max(all_prices, key=all_prices.get)
-
-    spread = round((all_prices[highest] / all_prices[lowest] - 1) * 100, 2)
-
-    print(f'Watching at {datetime.now()}.'
-          f'\nLowest price on {lowest} for {all_prices[lowest]}, '
-          f'highest on {highest} for {all_prices[highest]} ({spread}%).')
-
-    return all_prices, lowest, highest
-
-
-def overwatch_bitmart(pair):
-    time.sleep(3)
-    gate_price = gate_client.fetch_ticker(symbol=pair)['last']
-    bitmart_price = bitmart_client.fetch_ticker(symbol=pair)['last']
-
-    all_prices = {'bitmart': bitmart_price, 'gate': gate_price}
-
-    lowest = min(all_prices, key=all_prices.get)
-    highest = max(all_prices, key=all_prices.get)
-
-    spread = round((all_prices[highest] / all_prices[lowest] - 1) * 100, 2)
-
-    print(f'Watching at {datetime.now()}.'
-          f'\nLowest price on {lowest} for {all_prices[lowest]}, '
-          f'highest on {highest} for {all_prices[highest]} ({spread}%).')
-
-    return all_prices, lowest, highest
-
-# bitmart_client.create_limit_buy_order(symbol='ALPH/USDT', amount=3, price=2.44)
-# bitmart_client.create_limit_sell_order(symbol='ALPH/USDT', amount=3, price=2.42)
-# print(gate_fee)
-
-
 def overwatch(client_a, client_b, pair, spread):
 
     ticker_a = client_a.fetch_ticker(pair)
@@ -182,15 +141,21 @@ def overwatch(client_a, client_b, pair, spread):
     bid_b = ticker_b['bid']
     ask_b = ticker_b['ask']
 
+    all_prices = {client_a.name: last_a, client_b.name: last_b}
+    lowest = min(all_prices, key=all_prices.get)
+    highest = max(all_prices, key=all_prices.get)
+
+    spread = round((all_prices[highest] / all_prices[lowest] - 1) * 100, 2)
+
+    print(f'Watching at {datetime.now()}.'
+          f'\nLowest price on {lowest} for {all_prices[lowest]}, '
+          f'highest on {highest} for {all_prices[highest]} ({spread}%).')
 
     if bid_b >= ask_a * spread:
-        print(client_a.name)
         return client_a, client_b
 
     if bid_a >= ask_b * spread:
-        print(client_b.name)
         return client_b, client_a
-
 
 # buy_client, sell_client = overwatch(gate_client, mexc_client, 'ALPH/USDT', 1)
 # print(f'Buy on {buy_client.name}, sell on {sell_client.name}')

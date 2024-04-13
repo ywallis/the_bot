@@ -15,20 +15,17 @@ logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.DEBUG, file
 logger = logging.getLogger(__name__)
 
 all_prices = {}
-buy_client = ''
-sell_client = ''
+buy_client = None
+sell_client = None
 
 bot_activated = True
 funds_low_email_sent = False
 
 while bot_activated:
     try:
-        print('Watching')
         buy_client, sell_client = overwatch(client_a, client_b, current_ticker, min_spread)
-        print('Retrieving books')
         bids = retrieve_books(sell_client, side='bids', ticker=current_ticker)
         asks = retrieve_books(buy_client, side='asks', ticker=current_ticker)
-        print('Books gotten')
 
         # Placeholder for exchange and direction dependent spread/sizing definition
 
