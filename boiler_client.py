@@ -9,11 +9,6 @@ from config import *
 logger = logging.getLogger(__name__)
 
 
-# Retrieve current gate.io fee
-
-gate_fee = gate_client.fetch_trading_fee(symbol='ALPH/USDT')['taker']
-
-
 def retrieve_books(client, side, ticker):
 
     return client.fetch_order_book(symbol=ticker)[side]
@@ -131,34 +126,38 @@ def check_if_solvent(buy_exchange, sell_exchange, price, quantity):
 
 
 def overwatch(client_a, client_b, pair, spread):
-    # Manual rate limiting for BitMart
-    if client_b.name == 'BitMart':
-        time.sleep(1)
+    watching = True
+    while watching:
+        # Manual rate limiting for BitMart
+        if client_b.name == 'BitMart':
+            time.sleep(1.5)
 
-    ticker_a = client_a.fetch_ticker(pair)
-    ticker_b = client_b.fetch_ticker(pair)
-    last_a = ticker_a['last']
-    bid_a = ticker_a['bid']
-    ask_a = ticker_a['ask']
-    last_b = ticker_b['last']
-    bid_b = ticker_b['bid']
-    ask_b = ticker_b['ask']
+        ticker_a = client_a.fetch_ticker(pair)
+        ticker_b = client_b.fetch_ticker(pair)
+        last_a = ticker_a['last']
+        bid_a = ticker_a['bid']
+        ask_a = ticker_a['ask']
+        last_b = ticker_b['last']
+        bid_b = ticker_b['bid']
+        ask_b = ticker_b['ask']
 
-    all_prices = {client_a.name: last_a, client_b.name: last_b}
-    lowest = min(all_prices, key=all_prices.get)
-    highest = max(all_prices, key=all_prices.get)
+        all_prices = {client_a.name: last_a, client_b.name: last_b}
+        lowest = min(all_prices, key=all_prices.get)
+        highest = max(all_prices, key=all_prices.get)
 
-    spread = round((all_prices[highest] / all_prices[lowest] - 1) * 100, 2)
+        watch_spread = round((all_prices[highest] / all_prices[lowest] - 1) * 100, 2)
 
-    print(f'Watching at {datetime.now()}.'
-          f'\nLowest price on {lowest} for {all_prices[lowest]}, '
-          f'highest on {highest} for {all_prices[highest]} ({spread}%).')
+        print(f'Watching at {datetime.now()}.'
+              f'\nLowest price on {lowest} for {all_prices[lowest]}, '
+              f'highest on {highest} for {all_prices[highest]} ({watch_spread}%).')
 
-    if bid_b >= ask_a * spread:
-        return client_a, client_b
+        if bid_b >= ask_a * spread:
+            watching = False
+            return client_a, client_b
 
-    if bid_a >= ask_b * spread:
-        return client_b, client_a
+        if bid_a >= ask_b * spread:
+            watching = False
+            return client_b, client_a
 
 
 # buy_client, sell_client = overwatch(gate_client, mexc_client, 'ALPH/USDT', 1)
