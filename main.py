@@ -40,10 +40,10 @@ if __name__ == '__main__':
 
                         place_sell_order(current_ticker, sell_client, target_bid, order_size)
                         place_buy_order(current_ticker, buy_client, target_ask, order_size)
-                        send_email(subject='ALPH Bot', message=f'{sell_client} higher than '
-                                                               f'{buy_client}.'
-                                                               f'\n {order_size} ALPH orders placed for '
-                                                               f'{target_ask} and {target_bid}')
+                        # send_email(subject='ALPH Bot', message=f'{sell_client} higher than '
+                        #                                        f'{buy_client}.'
+                        #                                        f'\n {order_size} ALPH orders placed for '
+                        #                                        f'{target_ask} and {target_bid}')
                     except RuntimeError:
                         print("Going too fast.")
                         time.sleep(10)
