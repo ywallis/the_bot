@@ -36,13 +36,13 @@ while bot_activated:
             if check_if_solvent(buy_exchange=buy_client, sell_exchange=sell_client,
                                 quantity=order_size, price=target_ask):
                 try:
-                    continue
-                    # place_sell_order(current_ticker, exchange_with_highest_price, target_bid, order_size)
-                    # place_buy_order(current_ticker, exchange_with_lowest_price, target_ask, order_size)
-                    # send_email(subject='ALPH Bot', message=f'{sell_client} higher than '
-                    #                                        f'{buy_client}.'
-                    #                                        f'\n {order_size} ALPH orders placed for '
-                    #                                        f'{target_ask} and {target_bid}')
+
+                    place_sell_order(current_ticker, sell_client, target_bid, order_size)
+                    place_buy_order(current_ticker, buy_client, target_ask, order_size)
+                    send_email(subject='ALPH Bot', message=f'{sell_client} higher than '
+                                                           f'{buy_client}.'
+                                                           f'\n {order_size} ALPH orders placed for '
+                                                           f'{target_ask} and {target_bid}')
                 except RuntimeError:
                     print("Going too fast.")
                     time.sleep(10)
