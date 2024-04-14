@@ -64,3 +64,6 @@ if __name__ == '__main__':
         except KeyError:
             print('Error retrieving prices')
             logger.info('Error retrieving prices')
+
+        except requests.exceptions.HTTPError:
+            print('HTTP Error')
