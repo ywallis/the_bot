@@ -15,24 +15,18 @@ logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.DEBUG, file
 logger = logging.getLogger(__name__)
 
 all_prices = {}
-exchange_with_lowest_price = ''
-exchange_with_highest_price = ''
-current_ticker = 'ALPH/USDT'
+buy_client = None
+sell_client = None
 
-bot_activated = True
-funds_low_email_sent = False
+if __name__ == '__main__':
+    bot_activated = True
+    funds_low_email_sent = False
 
-while bot_activated:
-    try:
-        if target == 1:
-            all_prices, exchange_with_lowest_price, exchange_with_highest_price = overwatch_mexc(pair=current_ticker)
-        if target == 2:
-            all_prices, exchange_with_lowest_price, exchange_with_highest_price = overwatch_bitmart(pair=current_ticker)
-
-        if all_prices[exchange_with_highest_price] >= all_prices[exchange_with_lowest_price] * min_spread:
-
-            bids = retrieve_books(exchange_with_highest_price, side='bids', ticker=current_ticker)
-            asks = retrieve_books(exchange_with_lowest_price, side='asks', ticker=current_ticker)
+    while bot_activated:
+        try:
+            buy_client, sell_client = overwatch(client_a, client_b, current_ticker, min_spread)
+            bids = retrieve_books(sell_client, side='bids', ticker=current_ticker)
+            asks = retrieve_books(buy_client, side='asks', ticker=current_ticker)
 
             # Placeholder for exchange and direction dependent spread/sizing definition
 
@@ -40,15 +34,16 @@ while bot_activated:
                 target_ask, target_bid, order_size = order_book_matcher(bids, asks,
                                                                         spread=min_spread, sizing=current_sizing,
                                                                         max_order_size=current_max_order_size)
-                if check_if_solvent(buy_exchange=exchange_with_lowest_price, sell_exchange=exchange_with_highest_price,
+                if check_if_solvent(buy_exchange=buy_client, sell_exchange=sell_client,
                                     quantity=order_size, price=target_ask):
                     try:
-                        place_sell_order(current_ticker, exchange_with_highest_price, target_bid, order_size)
-                        place_buy_order(current_ticker, exchange_with_lowest_price, target_ask, order_size)
-                        # send_email(subject='ALPH Bot', message=f'{exchange_with_highest_price} higher than '
-                        #                                        f'{exchange_with_lowest_price}.'
-                        #                                        f'\n {order_size} ALPH orders placed for '
-                        #                                        f'{target_ask} and {target_bid}')
+
+                        place_sell_order(current_ticker, sell_client, target_bid, order_size)
+                        place_buy_order(current_ticker, buy_client, target_ask, order_size)
+                        send_email(subject='ALPH Bot', message=f'{sell_client} higher than '
+                                                               f'{buy_client}.'
+                                                               f'\n {order_size} ALPH orders placed for '
+                                                               f'{target_ask} and {target_bid}')
                     except RuntimeError:
                         print("Going too fast.")
                         time.sleep(10)
@@ -66,6 +61,6 @@ while bot_activated:
                 print("Could not match order books.")
                 logger.info("Could not match order books.")
 
-    except KeyError:
-        print('Error retrieving prices')
-        logger.info('Error retrieving prices')
+        except KeyError:
+            print('Error retrieving prices')
+            logger.info('Error retrieving prices')
