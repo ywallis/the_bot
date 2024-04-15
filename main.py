@@ -2,6 +2,7 @@ import logging
 import time
 from datetime import date, datetime
 
+import ccxt.base.errors
 import requests.exceptions
 
 from boiler import *
@@ -67,3 +68,6 @@ if __name__ == '__main__':
 
         except requests.exceptions.HTTPError:
             print('HTTP Error')
+
+        except ccxt.base.errors.NetworkError:
+            print('Network Error')
