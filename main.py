@@ -62,6 +62,8 @@ if __name__ == '__main__':
                 print("Could not match order books.")
                 logger.info("Could not match order books.")
 
+            except AttributeError:
+                print('Attribute error')
         except KeyError:
             print('Error retrieving prices')
             logger.info('Error retrieving prices')
