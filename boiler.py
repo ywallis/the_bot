@@ -159,3 +159,17 @@ def overwatch(client_a, client_b, pair, spread):
             watching = False
             return client_b, client_a
 
+
+def check_and_take(client_a, client_b, order, pair, market_side):
+    buy_filled = client_b.fetch_order(id=order['id'], symbol=pair)['filled']
+    print(f'{buy_filled} from order filled')
+    # retrieve order
+    if buy_filled != 0:
+
+        # UNCOMMENT MARKET SELL FOR PRODUCTION
+        # market sell any filled on A
+
+        # client_a.create_market_order(symbol=pair, side=market_side, amount=buy_filled)
+        print(f'Market {market_side} {buy_filled} {pair} on {client_b.name}')
+        client_b.cancel_order(id=order['id'], symbol=pair)
+        return True

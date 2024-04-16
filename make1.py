@@ -1,20 +1,21 @@
 import ccxt
 from config import gateio_key, gateio_secret, mexc_key, mexc_secret
+from boiler import check_and_take
 from datetime import datetime
 import time
 
-gate_maker = ccxt.gateio({'apiKey': gateio_key, 'secret': gateio_secret})
+gate_take = ccxt.gateio({'apiKey': gateio_key, 'secret': gateio_secret})
 mexc_maker = ccxt.mexc({'apiKey': mexc_key, 'secret': mexc_secret})
 
 
-def overwatch(client_a, client_b, pair, spread):
+def overwatch(taker_client, maker_client, pair, spread):
     buy_exists = False
     sell_exists = False
     watching = True
     while watching:
         time.sleep(1)
-        ticker_a = client_a.fetch_ticker(pair)
-        ticker_b = client_b.fetch_ticker(pair)
+        ticker_a = taker_client.fetch_ticker(pair)
+        ticker_b = maker_client.fetch_ticker(pair)
         last_a = ticker_a['last']
         bid_a = ticker_a['bid']
         ask_a = ticker_a['ask']
@@ -22,7 +23,7 @@ def overwatch(client_a, client_b, pair, spread):
         bid_b = ticker_b['bid']
         ask_b = ticker_b['ask']
 
-        all_prices = {client_a.name: last_a, client_b.name: last_b}
+        all_prices = {taker_client.name: last_a, maker_client.name: last_b}
         lowest = min(all_prices, key=all_prices.get)
         highest = max(all_prices, key=all_prices.get)
 
@@ -34,45 +35,51 @@ def overwatch(client_a, client_b, pair, spread):
 
         if ask_b >= ask_a * spread:
             if not sell_exists:
-                print(f'Make on {client_b.name}')
+                print(f'Make on {maker_client.name}')
                 print(f'Sell {ask_b}')
+                # FICTITIOUS PRICE
+
+                sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=10, price=10)
                 sell_exists = True
             else:
                 print('Sell order already present')
                 # retrieve order
                 # market sell any filled
-                # if not bottom change to bottom ask
+                if check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
+                    sell_exists = False
+
+                # if not top bid cancel
+
+                # if not bottom ask cancel
+
+                elif sell_order['price'] != ask_b:
+                    print('Order no longer at top of bids, cancelling.')
+
+                    maker_client.cancel_order(id=sell_order['id'], symbol=pair)
+
+                    buy_exists = False
 
         elif bid_a >= bid_b * spread:
             if not buy_exists:
-                print(f'Make on {client_b.name}')
+                print(f'Make on {maker_client.name}')
                 print(f'Buy {bid_b}')
 
                 # FICTITIOUS PRICE
 
-                buy_order = client_b.create_limit_buy_order(symbol=pair, amount=10, price=1)
+                buy_order = maker_client.create_limit_buy_order(symbol=pair, amount=10, price=1)
                 buy_exists = True
             else:
                 print('Buy order already present')
-                buy_filled = client_b.fetch_order(id=buy_order['id'], symbol=pair)['filled']
-                print(f'{buy_filled} from order filled')
-                # retrieve order
-                if buy_filled != 0:
+                if check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
 
-                    # ADD MARKET SELL FOR PRODUCTION
-                    # market sell any filled on A
-
-                    # client_a.create_market_order(symbol=pair, side='sell', amount=buy_filled)
-                    print(f'Market selling {buy_filled} {pair} on {client_b.name}')
-                    client_b.cancel_order(id=buy_order['id'], symbol=pair)
                     buy_exists = False
 
-                if buy_order['price'] != bid_b:
+                elif buy_order['price'] != bid_b:
                     # if not top bid cancel
 
                     print('Order no longer at top of bids, cancelling.')
 
-                    client_b.cancel_order(id=buy_order['id'], symbol=pair)
+                    maker_client.cancel_order(id=buy_order['id'], symbol=pair)
 
                     buy_exists = False
 
@@ -80,16 +87,7 @@ def overwatch(client_a, client_b, pair, spread):
             # retrieve order
             # market sell any filled
             if buy_exists:
-                print('Cancel all')
-                buy_filled = client_b.fetch_order(id=buy_order['id'], symbol=pair)
-                print(f'{buy_filled} from order filled')
-                # retrieve order
-                if buy_filled != 0:
-                    # client_a.create_market_order(symbol=pair, side='sell', amount=buy_filled)
-                    print(f'Market selling {buy_filled} {pair} on {client_b.name}')
-                client_b.cancel_order(id=buy_order['id'], symbol=pair)
-                print(f'Buy order cancelled on {client_b.name}')
-                sell_exists = False
+                check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
                 buy_exists = False
 
 
