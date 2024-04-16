@@ -89,6 +89,9 @@ def overwatch(taker_client, maker_client, pair, spread):
             if buy_exists:
                 check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
                 buy_exists = False
+            if sell_exists:
+                check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
+                sell_exists = False
 
 
 # overwatch(gate_maker, mexc_maker, 'ALPH/USDT', 1)
