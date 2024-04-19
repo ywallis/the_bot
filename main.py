@@ -71,5 +71,5 @@ if __name__ == '__main__':
         except requests.exceptions.HTTPError:
             print('HTTP Error')
 
-        except ccxt.base.errors.NetworkError as e:
+        except ccxt.NetworkError as e:
             print('Network Error')
