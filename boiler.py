@@ -170,7 +170,7 @@ def check_and_take(client_a, client_b, order, pair, market_side):
 
         # adding stable inventory condition for gateio
 
-        if market_side == 'buy' and client_a.name == Gate.io:
+        if market_side == 'buy' and client_a.name == 'Gate.io':
 
             # Apply current fee level to keep stable inventory
             fee_ratio = 1 / (1 - gate_fee)
