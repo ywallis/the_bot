@@ -161,15 +161,23 @@ def overwatch(client_a, client_b, pair, spread):
 
 
 def check_and_take(client_a, client_b, order, pair, market_side):
-    buy_filled = client_b.fetch_order(id=order['id'], symbol=pair)['filled']
+    buy_filled = float(client_b.fetch_order(id=order['id'], symbol=pair)['filled'])
     print(f'{buy_filled} from order filled')
     # retrieve order
-    if buy_filled != 0:
+    if buy_filled != 0.0:
 
-        # UNCOMMENT MARKET SELL FOR PRODUCTION
         # market sell any filled on A
 
-        # client_a.create_market_order(symbol=pair, side=market_side, amount=buy_filled)
+        # adding stable inventory condition for gateio
+
+        if market_side == 'buy' and client_a.name == Gate.io:
+
+            # Apply current fee level to keep stable inventory
+            fee_ratio = 1 / (1 - gate_fee)
+
+            buy_filled = round(buy_filled * fee_ratio, 2)
+
+        client_a.create_market_order(symbol=pair, side=market_side, amount=buy_filled)
         print(f'Market {market_side} {buy_filled} {pair} on {client_b.name}')
         client_b.cancel_order(id=order['id'], symbol=pair)
         return True
