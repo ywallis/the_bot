@@ -35,7 +35,7 @@ def download_trades(client, ticker):
     today = str(date.today())
     trades_with_fee = []
     output_path = f'{path_to_NAS}{ticker.split("/")[0]}/{today}_{client.name}.csv'
-    trades = client.fetch_my_trades(symbol=ticker, limit=1000, since=1712534400000)
+    trades = client.fetch_my_trades(symbol=ticker, limit=1000)
 
     for trade in trades:
         for fee in trade['fees']:
