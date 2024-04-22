@@ -161,10 +161,10 @@ def overwatch(client_a, client_b, pair, spread):
 
 
 def check_and_take(client_a, client_b, order, pair, market_side):
-    buy_filled = float(client_b.fetch_order(id=order['id'], symbol=pair)['filled'])
-    print(f'{buy_filled} from order filled')
+    filled = float(client_b.fetch_order(id=order['id'], symbol=pair)['filled'])
+    print(f'{filled} from order filled')
     # retrieve order
-    if buy_filled != 0.0:
+    if filled != 0.0:
 
         # market sell any filled on A
 
@@ -175,10 +175,16 @@ def check_and_take(client_a, client_b, order, pair, market_side):
             # Apply current fee level to keep stable inventory
             fee_ratio = 1 / (1 - gate_fee)
 
-            buy_filled = round(buy_filled * fee_ratio, 2)
+            filled = round(filled * fee_ratio, 2)
 
-        client_a.create_market_order(symbol=pair, side=market_side, amount=buy_filled, price=order['price'])
-        print(f'Market {market_side} {buy_filled} {pair} on {client_b.name}')
+        # Adding minimum order size condition
+
+        if float(order['price']) * filled <= 3:
+            filled = 3.1 / float(order['price'])
+
+
+        client_a.create_market_order(symbol=pair, side=market_side, amount=filled, price=order['price'])
+        print(f'Market {market_side} {filled} {pair} on {client_b.name}')
         if order['status'] == 'open':
             client_b.cancel_order(id=order['id'], symbol=pair)
         return True

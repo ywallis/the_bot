@@ -105,19 +105,23 @@ def overwatch(taker_client, maker_client, pair, spread):
                     sell_exists = False
 
 
-# overwatch(gate_take, mexc_maker, 'ALPH/USDT', 1.0025)
+if __name__ == '__main__':
+
+    overwatch(gate_take, mexc_maker, 'ALPH/USDT', 1.0025)
 
 #
 # print(gate_maker.fetch_order(id='558708798916', symbol='ALPH/USDT'))
 
-order = gate_take.create_limit_buy_order('ALPH/USDT', 10, 1)
-print(order)
-gate_take.cancel_all_orders('ALPH/USDT')
-print(gate_take.fetch_open_orders('ALPH/USDT'))
+# order = gate_take.create_limit_buy_order('ALPH/USDT', 10, 1)
+# print(order)
+# gate_take.cancel_all_orders('ALPH/USDT')
+# print(gate_take.fetch_open_orders('ALPH/USDT'))
 # time.sleep(5)
 # print(gate_maker.fetch_order(id=order['id'], symbol='ALPH/USDT')['filled'])
 # mexc_maker.cancel_order(id='C02__411066359351382016009', symbol='ALPH/USDT')
 # print(mexc_maker.fetch_open_orders('ALPH/USDT'))
 # mexc_maker.cancel_all_orders('ALPH/USDT')
+# print(mexc_maker.fetch_open_orders('ALPH/USDT'))
+
 #
 # gate_take.create_market_order()
