@@ -177,7 +177,8 @@ def check_and_take(client_a, client_b, order, pair, market_side):
 
             buy_filled = round(buy_filled * fee_ratio, 2)
 
-        client_a.create_market_order(symbol=pair, side=market_side, amount=buy_filled)
+        client_a.create_market_order(symbol=pair, side=market_side, amount=buy_filled, price=order['price'])
         print(f'Market {market_side} {buy_filled} {pair} on {client_b.name}')
-        client_b.cancel_order(id=order['id'], symbol=pair)
+        if order['status'] == 'open':
+            client_b.cancel_order(id=order['id'], symbol=pair)
         return True
