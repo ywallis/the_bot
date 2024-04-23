@@ -107,8 +107,12 @@ def overwatch(taker_client, maker_client, pair, spread):
 
 if __name__ == '__main__':
 
-    overwatch(gate_take, mexc_maker, 'ALPH/USDT', 1.0025)
+    try:
 
+        overwatch(gate_take, mexc_maker, 'ALPH/USDT', 1.0025)
+
+    except ccxt.NetworkError as e:
+        print('Network error')
 #
 # print(gate_maker.fetch_order(id='558708798916', symbol='ALPH/USDT'))
 
