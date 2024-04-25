@@ -168,6 +168,8 @@ def check_and_take(client_a, client_b, order, pair, market_side):
 
         if order['status'] == 'open':
             client_b.cancel_order(id=order['id'], symbol=pair)
+            filled = float(client_b.fetch_order(id=order['id'], symbol=pair)['filled'])
+            print(f'{filled} from order filled')
 
         # market sell any filled on A
 
