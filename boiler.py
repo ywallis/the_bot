@@ -166,6 +166,9 @@ def check_and_take(client_a, client_b, order, pair, market_side):
     # retrieve order
     if filled != 0.0:
 
+        if order['status'] == 'open':
+            client_b.cancel_order(id=order['id'], symbol=pair)
+
         # market sell any filled on A
 
         # adding stable inventory condition for gateio
@@ -184,6 +187,5 @@ def check_and_take(client_a, client_b, order, pair, market_side):
 
         client_a.create_market_order(symbol=pair, side=market_side, amount=filled, price=order['price'])
         print(f'Market {market_side} {filled} {pair} on {client_b.name}')
-        if order['status'] == 'open':
-            client_b.cancel_order(id=order['id'], symbol=pair)
+
         return True

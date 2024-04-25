@@ -113,7 +113,7 @@ if __name__ == '__main__':
 
     except ccxt.NetworkError as e:
         print('Network error')
-#
+
 # print(gate_maker.fetch_order(id='558708798916', symbol='ALPH/USDT'))
 
 # order = gate_take.create_limit_buy_order('ALPH/USDT', 10, 1)
