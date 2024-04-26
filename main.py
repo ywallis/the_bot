@@ -64,6 +64,9 @@ if __name__ == '__main__':
 
             except AttributeError:
                 print('Attribute error')
+
+            except IndexError:
+                (print('End of orderbook'))
         except KeyError:
             print('Error retrieving prices')
             logger.info('Error retrieving prices')
