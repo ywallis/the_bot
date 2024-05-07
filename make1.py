@@ -7,6 +7,9 @@ import time
 gate_take = ccxt.gateio({'apiKey': gate_maker_key, 'secret': gate_maker_secret})
 mexc_maker = ccxt.mexc({'apiKey': mexc_maker_key, 'secret': mexc_maker_secret})
 
+# Move to config asap
+maker_size = 10
+
 
 def overwatch(taker_client, maker_client, pair, spread):
     buy_exists = False
@@ -39,7 +42,7 @@ def overwatch(taker_client, maker_client, pair, spread):
                 print(f'Sell {ask_b}')
                 # FICTITIOUS PRICE
                 if check_if_solvent(gate_take, mexc_maker, ask_b, 10):
-                    sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=10, price=ask_b)
+                    sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=maker_size, price=ask_b)
                     sell_exists = True
                 else:
                     print('Insufficient funds!')
@@ -68,7 +71,7 @@ def overwatch(taker_client, maker_client, pair, spread):
 
                 # FICTITIOUS PRICE
                 if check_if_solvent(mexc_maker, gate_take, bid_b, 10):
-                    buy_order = maker_client.create_limit_buy_order(symbol=pair, amount=10, price=bid_b)
+                    buy_order = maker_client.create_limit_buy_order(symbol=pair, amount=maker_size, price=bid_b)
                     buy_exists = True
                 else:
                     print('Insufficient funds!')
@@ -93,9 +96,12 @@ def overwatch(taker_client, maker_client, pair, spread):
             if buy_exists:
                 if check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
                     buy_exists = False
+
+                # CHECK SYNTAX, and actually move to check and take function instead
                 else:
-                    maker_client.cancel_order(id=buy_order['id'], symbol=pair)
-                    buy_exists = False
+                    if buy_order.status != 'filled':
+                        maker_client.cancel_order(id=buy_order['id'], symbol=pair)
+                        buy_exists = False
 
             if sell_exists:
                 if check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
@@ -109,7 +115,7 @@ if __name__ == '__main__':
 
     try:
 
-        overwatch(gate_take, mexc_maker, 'ALPH/USDT', 1.0025)
+        overwatch(gate_take, mexc_maker, 'ALPH/USDT', 1.002)
 
     except ccxt.NetworkError as e:
         print('Network error')
