@@ -8,12 +8,15 @@ gate_take = ccxt.gateio({'apiKey': gate_maker_key, 'secret': gate_maker_secret})
 mexc_maker = ccxt.mexc({'apiKey': mexc_maker_key, 'secret': mexc_maker_secret})
 
 # Move to config asap
+mexc_maker.rateLimit = 25
 maker_size = 10
 
 
 def overwatch(taker_client, maker_client, pair, spread):
     buy_exists = False
     sell_exists = False
+    buy_order = None
+    sell_order = None
     watching = True
     while watching:
         time.sleep(1)
@@ -40,24 +43,22 @@ def overwatch(taker_client, maker_client, pair, spread):
             if not sell_exists:
                 print(f'Make on {maker_client.name}')
                 print(f'Sell {ask_b}')
-                # FICTITIOUS PRICE
-                if check_if_solvent(gate_take, mexc_maker, ask_b, 10):
+
+                if check_if_solvent(gate_take, mexc_maker, ask_b, maker_size):
                     sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=maker_size, price=ask_b)
                     sell_exists = True
                 else:
                     print('Insufficient funds!')
             else:
-                print('Sell order already present')
+                print(f"Sell order already present at {sell_order['price']}")
                 # retrieve order
                 # market sell any filled
                 if check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
                     sell_exists = False
 
-                # if not top bid cancel
-
-                # if not bottom ask cancel
-
                 elif sell_order['price'] != ask_b:
+                    # if not bottom ask cancel
+
                     print('Order no longer at bottom of asks, cancelling.')
 
                     maker_client.cancel_order(id=sell_order['id'], symbol=pair)
@@ -69,16 +70,16 @@ def overwatch(taker_client, maker_client, pair, spread):
                 print(f'Make on {maker_client.name}')
                 print(f'Buy {bid_b}')
 
-                # FICTITIOUS PRICE
-                if check_if_solvent(mexc_maker, gate_take, bid_b, 10):
+                if check_if_solvent(mexc_maker, gate_take, bid_b, maker_size):
                     buy_order = maker_client.create_limit_buy_order(symbol=pair, amount=maker_size, price=bid_b)
                     buy_exists = True
                 else:
                     print('Insufficient funds!')
             else:
-                print('Buy order already present')
+                print(f'Buy order already present at {buy_order["price"]}')
+                # retrieve order
+                # market sell any filled
                 if check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
-
                     buy_exists = False
 
                 elif buy_order['price'] != bid_b:
@@ -96,12 +97,9 @@ def overwatch(taker_client, maker_client, pair, spread):
             if buy_exists:
                 if check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
                     buy_exists = False
-
-                # CHECK SYNTAX, and actually move to check and take function instead
                 else:
-                    if buy_order.status != 'filled':
-                        maker_client.cancel_order(id=buy_order['id'], symbol=pair)
-                        buy_exists = False
+                    maker_client.cancel_order(id=buy_order['id'], symbol=pair)
+                    buy_exists = False
 
             if sell_exists:
                 if check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
@@ -109,6 +107,7 @@ def overwatch(taker_client, maker_client, pair, spread):
                 else:
                     maker_client.cancel_order(id=sell_order['id'], symbol=pair)
                     sell_exists = False
+
 
 
 if __name__ == '__main__':
@@ -119,6 +118,7 @@ if __name__ == '__main__':
 
     except ccxt.NetworkError as e:
         print('Network error')
+
 
 # print(gate_maker.fetch_order(id='558708798916', symbol='ALPH/USDT'))
 
