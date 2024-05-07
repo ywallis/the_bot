@@ -9,10 +9,10 @@ mexc_maker = ccxt.mexc({'apiKey': mexc_maker_key, 'secret': mexc_maker_secret})
 
 # Move to config asap
 mexc_maker.rateLimit = 25
-maker_size = 10
+maker_size = 15
 
 
-def overwatch(taker_client, maker_client, pair, spread):
+def make_and_take(taker_client, maker_client, pair, spread):
     buy_exists = False
     sell_exists = False
     buy_order = None
@@ -65,7 +65,7 @@ def overwatch(taker_client, maker_client, pair, spread):
 
                     sell_exists = False
 
-        elif bid_a >= bid_b * spread:
+        if bid_a >= bid_b * spread:
             if not buy_exists:
                 print(f'Make on {maker_client.name}')
                 print(f'Buy {bid_b}')
@@ -99,6 +99,7 @@ def overwatch(taker_client, maker_client, pair, spread):
                     buy_exists = False
                 else:
                     maker_client.cancel_order(id=buy_order['id'], symbol=pair)
+                    print('No more arb, cancelling buys.')
                     buy_exists = False
 
             if sell_exists:
@@ -106,6 +107,7 @@ def overwatch(taker_client, maker_client, pair, spread):
                     sell_exists = False
                 else:
                     maker_client.cancel_order(id=sell_order['id'], symbol=pair)
+                    print('No more arb, cancelling sells.')
                     sell_exists = False
 
 
@@ -113,7 +115,7 @@ if __name__ == '__main__':
 
     try:
 
-        overwatch(gate_take, mexc_maker, 'ALPH/USDT', 1.002)
+        make_and_take(gate_take, mexc_maker, 'ALPH/USDT', 1.002)
 
     except ccxt.NetworkError as e:
         print('Network error')
