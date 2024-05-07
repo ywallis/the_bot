@@ -109,7 +109,6 @@ def overwatch(taker_client, maker_client, pair, spread):
                     sell_exists = False
 
 
-
 if __name__ == '__main__':
 
     try:
