@@ -114,14 +114,6 @@ def make_and_take(taker_client, maker_client, pair, spread):
                     print('No more arb, cancelling buys.')
                     buy_exists = False
 
-            if sell_exists:
-                if check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
-                    sell_exists = False
-                else:
-                    maker_client.cancel_order(id=sell_order['id'], symbol=pair)
-                    print('No more arb, cancelling sells.')
-                    sell_exists = False
-
 
 if __name__ == '__main__':
 
