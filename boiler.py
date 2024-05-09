@@ -176,6 +176,7 @@ def check_and_take(client_a, client_b, order, pair, market_side):
     if filled != 0.0:
 
         if func_order['status'] == 'open':
+            # Add try statement with full value !
             client_b.cancel_order(id=order['id'], symbol=pair)
             filled = float(client_b.fetch_order(id=order['id'], symbol=pair)['filled'])
             print(f'{filled} from order filled')

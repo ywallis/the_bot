@@ -13,13 +13,20 @@ maker_size = 15
 
 
 def make_and_take(taker_client, maker_client, pair, spread):
+
     buy_exists = False
     sell_exists = False
     buy_order = None
     sell_order = None
     watching = True
+    buy_arbitrage = False
+    sell_arbitrage = False
+
     while watching:
-        time.sleep(1)
+        # slow watching if no open order
+        if not buy_arbitrage and not sell_arbitrage:
+            time.sleep(1)
+
         ticker_a = taker_client.fetch_ticker(pair)
         ticker_b = maker_client.fetch_ticker(pair)
         last_a = ticker_a['last']
@@ -40,6 +47,12 @@ def make_and_take(taker_client, maker_client, pair, spread):
               f'highest on {highest} for {all_prices[highest]} ({watch_spread}%).')
 
         if ask_b >= ask_a * spread:
+
+            # Introducing parameter for speed control
+
+            buy_arbitrage = True
+            print(f'Buy arb is {buy_arbitrage}')
+
             if not sell_exists:
                 print(f'Make on {maker_client.name}')
                 print(f'Sell {ask_b}')
@@ -66,6 +79,12 @@ def make_and_take(taker_client, maker_client, pair, spread):
                     sell_exists = False
         else:
 
+            # Introducing parameter for speed control
+
+            buy_arbitrage = False
+            print(f'Buy arb is {buy_arbitrage}')
+
+
             # retrieve order
             # market sell any filled
 
@@ -77,7 +96,16 @@ def make_and_take(taker_client, maker_client, pair, spread):
                     print('No more arb, cancelling sells.')
                     sell_exists = False
 
+        # Initiate second side of market making
+
         if bid_a >= bid_b * spread:
+
+            # Introducing parameter for speed control
+
+            sell_arbitrage = True
+            print(f'Sell arb is {sell_arbitrage}')
+
+
             if not buy_exists:
                 print(f'Make on {maker_client.name}')
                 print(f'Buy {bid_b}')
@@ -104,6 +132,13 @@ def make_and_take(taker_client, maker_client, pair, spread):
                     buy_exists = False
 
         else:
+
+            # Introducing parameter for speed control
+
+            sell_arbitrage = False
+            print(f'Sell arb is {sell_arbitrage}')
+
+
             # retrieve order
             # market sell any filled
             if buy_exists:
@@ -123,6 +158,12 @@ if __name__ == '__main__':
 
     except ccxt.NetworkError as e:
         print('Network error')
+
+
+# try:
+#     mexc_maker.cancel_order()
+#
+# except ccxt.BadRequest:
 
 
 # print(gate_maker.fetch_order(id='558708798916', symbol='ALPH/USDT'))
