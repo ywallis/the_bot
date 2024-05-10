@@ -51,7 +51,6 @@ def make_and_take(taker_client, maker_client, pair, spread):
             # Introducing parameter for speed control
 
             buy_arbitrage = True
-            print(f'Buy arb is {buy_arbitrage}')
 
             if not sell_exists:
                 print(f'Make on {maker_client.name}')
@@ -82,8 +81,6 @@ def make_and_take(taker_client, maker_client, pair, spread):
             # Introducing parameter for speed control
 
             buy_arbitrage = False
-            print(f'Buy arb is {buy_arbitrage}')
-
 
             # retrieve order
             # market sell any filled
@@ -103,8 +100,6 @@ def make_and_take(taker_client, maker_client, pair, spread):
             # Introducing parameter for speed control
 
             sell_arbitrage = True
-            print(f'Sell arb is {sell_arbitrage}')
-
 
             if not buy_exists:
                 print(f'Make on {maker_client.name}')
@@ -136,7 +131,6 @@ def make_and_take(taker_client, maker_client, pair, spread):
             # Introducing parameter for speed control
 
             sell_arbitrage = False
-            print(f'Sell arb is {sell_arbitrage}')
 
             # retrieve order
             # market sell any filled
