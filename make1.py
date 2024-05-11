@@ -1,15 +1,8 @@
 import ccxt
-from config import mexc_maker_key, mexc_maker_secret, gate_maker_key, gate_maker_secret
+from config import gate_take, mexc_maker, maker_size
 from boiler import check_and_take, check_if_solvent
 from datetime import datetime
 import time
-
-gate_take = ccxt.gateio({'apiKey': gate_maker_key, 'secret': gate_maker_secret})
-mexc_maker = ccxt.mexc({'apiKey': mexc_maker_key, 'secret': mexc_maker_secret})
-
-# Move to config asap
-mexc_maker.rateLimit = 25
-maker_size = 15
 
 
 def make_and_take(taker_client, maker_client, pair, spread):
@@ -56,7 +49,7 @@ def make_and_take(taker_client, maker_client, pair, spread):
                 print(f'Make on {maker_client.name}')
                 print(f'Sell {ask_b}')
 
-                if check_if_solvent(gate_take, mexc_maker, ask_b, maker_size):
+                if check_if_solvent(taker_client, maker_client, ask_b, maker_size):
                     sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=maker_size, price=ask_b)
                     sell_exists = True
                 else:
@@ -73,9 +66,15 @@ def make_and_take(taker_client, maker_client, pair, spread):
 
                     print('Order no longer at bottom of asks, cancelling.')
 
-                    maker_client.cancel_order(id=sell_order['id'], symbol=pair)
+                    try:
+                        maker_client.cancel_order(id=sell_order['id'], symbol=pair)
 
-                    sell_exists = False
+                    except ccxt.BadRequest:
+                        print(f'Order has been fully filled, taking {sell_order["amount"]}')
+                        check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
+
+                    if check_if_solvent(taker_client, maker_client, ask_b, maker_size):
+                        sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=maker_size, price=ask_b)
         else:
 
             # Introducing parameter for speed control
@@ -89,8 +88,13 @@ def make_and_take(taker_client, maker_client, pair, spread):
                 if check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
                     sell_exists = False
                 else:
-                    maker_client.cancel_order(id=sell_order['id'], symbol=pair)
                     print('No more arb, cancelling sells.')
+                    try:
+                        maker_client.cancel_order(id=sell_order['id'], symbol=pair)
+
+                    except ccxt.BadRequest:
+                        print(f'Order has been fully filled, taking {sell_order["amount"]}')
+                        check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
                     sell_exists = False
 
         # Initiate second side of market making
@@ -105,7 +109,7 @@ def make_and_take(taker_client, maker_client, pair, spread):
                 print(f'Make on {maker_client.name}')
                 print(f'Buy {bid_b}')
 
-                if check_if_solvent(mexc_maker, gate_take, bid_b, maker_size):
+                if check_if_solvent(maker_client, taker_client, bid_b, maker_size):
                     buy_order = maker_client.create_limit_buy_order(symbol=pair, amount=maker_size, price=bid_b)
                     buy_exists = True
                 else:
@@ -121,10 +125,15 @@ def make_and_take(taker_client, maker_client, pair, spread):
                     # if not top bid cancel
 
                     print('Order no longer at top of bids, cancelling.')
+                    try:
+                        maker_client.cancel_order(id=buy_order['id'], symbol=pair)
 
-                    maker_client.cancel_order(id=buy_order['id'], symbol=pair)
+                    except ccxt.BadRequest:
+                        print(f'Order has been fully filled, taking {sell_order["amount"]}')
+                        check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
 
-                    buy_exists = False
+                    if check_if_solvent(maker_client, taker_client, bid_b, maker_size):
+                        buy_order = maker_client.create_limit_buy_order(symbol=pair, amount=maker_size, price=bid_b)
 
         else:
 
@@ -138,8 +147,13 @@ def make_and_take(taker_client, maker_client, pair, spread):
                 if check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
                     buy_exists = False
                 else:
-                    maker_client.cancel_order(id=buy_order['id'], symbol=pair)
                     print('No more arb, cancelling buys.')
+                    try:
+                        maker_client.cancel_order(id=buy_order['id'], symbol=pair)
+
+                    except ccxt.BadRequest:
+                        print(f'Order has been fully filled, taking {sell_order["amount"]}')
+                        check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
                     buy_exists = False
 
 
@@ -153,11 +167,5 @@ if __name__ == '__main__':
         print('Network error')
 
 
-# try:
-#     mexc_maker.cancel_order()
-#
-# except ccxt.BadRequest:
-
-
+# In case of emergencies, kill all open orders on maker client.
 # mexc_maker.cancel_all_orders('ALPH/USDT')
-

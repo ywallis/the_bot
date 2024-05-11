@@ -1,10 +1,6 @@
-import logging
-import time
-from datetime import date, datetime
-
-import ccxt.base.errors
+# import logging
+from datetime import date
 import requests.exceptions
-
 from boiler import *
 from notifications import send_email
 from config import *
@@ -25,6 +21,9 @@ if __name__ == '__main__':
 
     while bot_activated:
         try:
+
+            # Overwatch fetches prices and best bid / ask from 2 exchanges, and assess an arbitrage opportunity.
+
             buy_client, sell_client = overwatch(client_a, client_b, current_ticker, min_spread)
             bids = retrieve_books(sell_client, side='bids', ticker=current_ticker)
             asks = retrieve_books(buy_client, side='asks', ticker=current_ticker)
@@ -41,10 +40,7 @@ if __name__ == '__main__':
 
                         place_sell_order(current_ticker, sell_client, target_bid, order_size)
                         place_buy_order(current_ticker, buy_client, target_ask, order_size)
-                        # send_email(subject='ALPH Bot', message=f'{sell_client} higher than '
-                        #                                        f'{buy_client}.'
-                        #                                        f'\n {order_size} ALPH orders placed for '
-                        #                                        f'{target_ask} and {target_bid}')
+
                     except RuntimeError:
                         print("Going too fast.")
                         time.sleep(10)

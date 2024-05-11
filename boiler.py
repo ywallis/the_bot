@@ -2,6 +2,8 @@ import logging
 from datetime import datetime
 import time
 
+import ccxt
+
 # from notifications import send_email
 
 from config import gate_fee
@@ -127,7 +129,8 @@ def retrieve_balance(client, ticker):
 
 def check_if_solvent(buy_exchange, sell_exchange, price, quantity):
 
-    if quantity * price * 1.02 < retrieve_balance(buy_exchange, 'USDT') and quantity * 1.02 < retrieve_balance(sell_exchange, 'ALPH'):
+    if (quantity * price * 1.02 < retrieve_balance(buy_exchange, 'USDT')
+            and quantity * 1.02 < retrieve_balance(sell_exchange, 'ALPH')):
         return True
     else:
         return False
@@ -178,10 +181,14 @@ def check_and_take(client_a, client_b, order, pair, market_side):
         if func_order['status'] == 'open':
 
             # Add try, to prevent issues with orders filled in the meantime
+            try:
+                client_b.cancel_order(id=order['id'], symbol=pair)
+                filled = float(client_b.fetch_order(id=order['id'], symbol=pair)['filled'])
+                print(f'{filled} from order filled')
 
-            client_b.cancel_order(id=order['id'], symbol=pair)
-            filled = float(client_b.fetch_order(id=order['id'], symbol=pair)['filled'])
-            print(f'{filled} from order filled')
+            except ccxt.BadRequest:
+                print(f'Order has been fully filled, taking {func_order["amount"]}')
+                filled = func_order['amount']
 
             # Add except including a print statement and a change of filled value to total of order
 
@@ -205,3 +212,42 @@ def check_and_take(client_a, client_b, order, pair, market_side):
         print(f'Market {market_side} {filled} {pair} on {client_b.name}')
 
         return True
+
+
+def overwatch_unified(client_a, client_b, pair, spread):
+    watching = True
+    while watching:
+        # Manual rate limiting for BitMart
+        if client_b.name == 'BitMart':
+            time.sleep(1.5)
+
+        ticker_a = client_a.fetch_ticker(pair)
+        ticker_b = client_b.fetch_ticker(pair)
+        last_a = ticker_a['last']
+        bid_a = ticker_a['bid']
+        ask_a = ticker_a['ask']
+        last_b = ticker_b['last']
+        bid_b = ticker_b['bid']
+        ask_b = ticker_b['ask']
+
+        all_prices = {client_a.name: last_a, client_b.name: last_b}
+        lowest = min(all_prices, key=all_prices.get)
+        highest = max(all_prices, key=all_prices.get)
+
+        watch_spread = round((all_prices[highest] / all_prices[lowest] - 1) * 100, 2)
+
+        print(f'Watching at {datetime.now()}.'
+              f'\nLowest price on {lowest} for {all_prices[lowest]}, '
+              f'highest on {highest} for {all_prices[highest]} ({watch_spread}%).')
+
+        if bid_b >= ask_a * spread:
+            watching = False
+            return client_a, client_b
+
+        if bid_a >= ask_b * spread:
+            watching = False
+            return client_b, client_a
+
+
+def take_take():
+    pass
