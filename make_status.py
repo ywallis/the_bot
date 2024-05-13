@@ -2,7 +2,7 @@ from datetime import date
 import os
 import pandas as pd
 from config import path_to_NAS
-from make1 import gate_take, mexc_maker
+from config import gate_take, mexc_maker
 
 
 def download_trades(client, ticker):

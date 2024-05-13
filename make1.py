@@ -75,6 +75,7 @@ def make_and_take(taker_client, maker_client, pair, spread):
 
                     if check_if_solvent(taker_client, maker_client, ask_b, maker_size):
                         sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=maker_size, price=ask_b)
+                        print(f'Sell {ask_b}')
         else:
 
             # Introducing parameter for speed control
@@ -134,6 +135,7 @@ def make_and_take(taker_client, maker_client, pair, spread):
 
                     if check_if_solvent(maker_client, taker_client, bid_b, maker_size):
                         buy_order = maker_client.create_limit_buy_order(symbol=pair, amount=maker_size, price=bid_b)
+                        print(f'Buy {bid_b}')
 
         else:
 
