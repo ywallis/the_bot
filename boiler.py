@@ -32,7 +32,7 @@ def order_book_matcher(bids, asks, spread=1.002, sizing=0.7, max_order_size=10, 
         highest_bid_quantity = float(highest_bid[1])
 
         cumulative_bid += highest_bid_quantity
-        print(f'Cumulative bid quantity is: {cumulative_bid}')
+        print(f'Cumulative bid quantity is: {round(cumulative_bid, 2)}')
 
         lowest_ask = asks[ask_counter]
 
@@ -40,7 +40,7 @@ def order_book_matcher(bids, asks, spread=1.002, sizing=0.7, max_order_size=10, 
         lowest_ask_quantity = float(lowest_ask[1])
 
         cumulative_ask += lowest_ask_quantity
-        print(f'Cumulative ask quantity is: {cumulative_ask}')
+        print(f'Cumulative ask quantity is: {round(cumulative_ask, 2)}')
 
         # Define arbitrage condition
 
