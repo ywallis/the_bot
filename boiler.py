@@ -50,7 +50,9 @@ def order_book_matcher(bids, asks, spread=1.002, sizing=0.7, max_order_size=10, 
 
             target_ask = float(asks[(ask_counter + 2)][0])
             target_bid = float(bids[(bid_counter + 2)][0])
-            order_size = round(min(highest_bid_quantity, lowest_ask_quantity) * sizing, 2)
+            # Implementing cumulative bid/ask
+            # order_size = round(min(highest_bid_quantity, lowest_ask_quantity) * sizing, 2)
+            order_size = round(min(cumulative_bid, cumulative_ask) * sizing, 2)
 
             print(f'Optimal spread currently between {lowest_ask_price} and {highest_bid_price}.'
                   f'\nTargeting a sell for {target_bid} and a buy for {target_ask} with a quantity of {order_size}.')

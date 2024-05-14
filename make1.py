@@ -1,12 +1,18 @@
 import ccxt
 from config import gate_take, mexc_maker, maker_size
 from boiler import check_and_take, check_if_solvent
-from datetime import datetime
+from datetime import datetime, date
 import time
+import logging
+
+today = str(date.today())
+
+logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.DEBUG, filename=f'./Logs/{today}.txt')
+logger = logging.getLogger(__name__)
 
 
 def make_and_take(taker_client, maker_client, pair, spread):
-
+    logger.info('Testing')
     buy_exists = False
     sell_exists = False
     buy_order = None
@@ -95,11 +101,13 @@ def make_and_take(taker_client, maker_client, pair, spread):
 
                     except ccxt.BadRequest:
                         print(f'Order has been fully filled, taking {sell_order["amount"]}')
-                        check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
+                        if check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
+                            sell_exists = False
 
                     if check_if_solvent(taker_client, maker_client, ask_b, maker_size):
                         sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=maker_size, price=ask_b)
                         print(f'Sell {ask_b}')
+                        sell_exists = True
         else:
 
             # Introducing parameter for speed control
@@ -155,11 +163,13 @@ def make_and_take(taker_client, maker_client, pair, spread):
 
                     except ccxt.BadRequest:
                         print(f'Order has been fully filled, taking {sell_order["amount"]}')
-                        check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
+                        if check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
+                            buy_exists = False
 
                     if check_if_solvent(maker_client, taker_client, bid_b, maker_size):
                         buy_order = maker_client.create_limit_buy_order(symbol=pair, amount=maker_size, price=bid_b)
                         print(f'Buy {bid_b}')
+                        buy_exists = True
 
         else:
 
@@ -193,6 +203,8 @@ if __name__ == '__main__':
 
         except ccxt.NetworkError as e:
             print('Network error')
+            logger.info('Network error')
+
 
 
 # In case of emergencies, kill all open orders on maker client.
