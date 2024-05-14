@@ -14,6 +14,30 @@ def make_and_take(taker_client, maker_client, pair, spread):
     watching = True
     buy_arbitrage = False
     sell_arbitrage = False
+    open_orders = maker_client.fetch_open_orders(pair)
+    open_buy_count = 0
+    open_sell_count = 0
+
+    # Check for hanging orders in case of errors
+
+    for order in open_orders:
+        if order['side'] == 'buy':
+            buy_order = order
+            buy_exists = True
+            open_buy_count += 1
+
+        if order['side'] == 'sell':
+            sell_order = order
+            sell_exists = True
+            open_sell_count += 1
+
+    # Kill all open orders if more than 1 per side.
+
+    if open_buy_count > 1 or open_sell_count > 1:
+        print('Too many orders for current logic, cancelling all!')
+        maker_client.cancel_all_orders(pair)
+        buy_exists = False
+        sell_exists = False
 
     while watching:
         # slow watching if no open order
@@ -159,15 +183,25 @@ def make_and_take(taker_client, maker_client, pair, spread):
                     buy_exists = False
 
 
+making = True
+
 if __name__ == '__main__':
 
-    try:
+    while making is True:
+        try:
+            make_and_take(gate_take, mexc_maker, 'ALPH/USDT', 1.009)
 
-        make_and_take(gate_take, mexc_maker, 'ALPH/USDT', 1.002)
-
-    except ccxt.NetworkError as e:
-        print('Network error')
+        except ccxt.NetworkError as e:
+            print('Network error')
 
 
 # In case of emergencies, kill all open orders on maker client.
 # mexc_maker.cancel_all_orders('ALPH/USDT')
+
+# mexc_maker.create_limit_buy_order('ALPH/USDT', 20, 1)
+# mexc_maker.create_limit_sell_order('ALPH/USDT', 20, 10)
+# mexc_maker.create_limit_buy_order('ALPH/USDT', 20, 1)
+# mexc_maker.create_limit_sell_order('ALPH/USDT', 20, 10)
+orders = mexc_maker.fetch_open_orders('ALPH/USDT')
+print(orders)
+print(len(orders))
