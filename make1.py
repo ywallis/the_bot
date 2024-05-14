@@ -189,7 +189,7 @@ if __name__ == '__main__':
 
     while making is True:
         try:
-            make_and_take(gate_take, mexc_maker, 'ALPH/USDT', 1.009)
+            make_and_take(gate_take, mexc_maker, 'ALPH/USDT', 1.002)
 
         except ccxt.NetworkError as e:
             print('Network error')
@@ -198,10 +198,3 @@ if __name__ == '__main__':
 # In case of emergencies, kill all open orders on maker client.
 # mexc_maker.cancel_all_orders('ALPH/USDT')
 
-# mexc_maker.create_limit_buy_order('ALPH/USDT', 20, 1)
-# mexc_maker.create_limit_sell_order('ALPH/USDT', 20, 10)
-# mexc_maker.create_limit_buy_order('ALPH/USDT', 20, 1)
-# mexc_maker.create_limit_sell_order('ALPH/USDT', 20, 10)
-orders = mexc_maker.fetch_open_orders('ALPH/USDT')
-print(orders)
-print(len(orders))
