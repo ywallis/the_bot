@@ -1,3 +1,4 @@
+import ccxt
 import pandas as pd
 import os
 import time
@@ -55,18 +56,20 @@ def download_trades(client, ticker):
 bot_activated = True
 
 while bot_activated:
-    print(f'Status at {datetime.now()}')
+    try:
+        print(f'Status at {datetime.now()}')
 
-    get_balance_status(mexc_client)
-    get_balance_status(gate_client)
-    get_order_status(mexc_client, ticker='ALPH/USDT')
-    get_order_status(gate_client, ticker='ALPH/USDT')
-    download_trades(mexc_client, 'ALPH/USDT')
-    download_trades(gate_client, 'ALPH/USDT')
-    # get_trades(bitmart_client, 'ALPH/USDT')
-    print('Cycle done')
-    time.sleep(30)
-
+        get_balance_status(mexc_client)
+        get_balance_status(gate_client)
+        get_order_status(mexc_client, ticker='ALPH/USDT')
+        get_order_status(gate_client, ticker='ALPH/USDT')
+        download_trades(mexc_client, 'ALPH/USDT')
+        download_trades(gate_client, 'ALPH/USDT')
+        # get_trades(bitmart_client, 'ALPH/USDT')
+        print('Cycle done')
+        time.sleep(30)
+    except ccxt.ExchangeError:
+        print('Exchange error, retrying.')
 
 # bitmart_client.create_limit_buy_order(symbol='ALPH/USDT', amount=100, price=0.2)
 # bitmart_client.create_limit_sell_order(symbol='ALPH/USDT', amount=10, price=10)
