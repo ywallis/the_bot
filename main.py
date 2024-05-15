@@ -8,9 +8,6 @@ from config import *
 today = str(date.today())
 now = datetime.now()
 
-logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.DEBUG, filename=f'./Logs/{today}.txt')
-logger = logging.getLogger(__name__)
-
 all_prices = {}
 buy_client = None
 sell_client = None
@@ -49,14 +46,12 @@ if __name__ == '__main__':
                         print('HTTP Error')
                 else:
                     print('Insufficient funds!')
-                    logger.info('Insufficient funds!')
                     if not funds_low_email_sent:
                         send_email(subject='ALPH Bot URGENT', message=f'Funds too low!')
                         funds_low_email_sent = True
 
             except TypeError:
                 print("Could not match order books.")
-                logger.info("Could not match order books.")
 
             except AttributeError:
                 print('Attribute error')
@@ -65,7 +60,6 @@ if __name__ == '__main__':
                 (print('End of orderbook'))
         except KeyError:
             print('Error retrieving prices')
-            logger.info('Error retrieving prices')
 
         except requests.exceptions.HTTPError:
             print('HTTP Error')
