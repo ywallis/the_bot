@@ -185,14 +185,15 @@ def check_and_take(client_a, client_b, order, pair, market_side):
             # Add try, to prevent issues with orders filled in the meantime
             try:
                 client_b.cancel_order(id=order['id'], symbol=pair)
+
+                # YOU MIGHT BE ABLE TO SPEED THIS UP BY ASSIGNING FILLED TO THE CANCEL ORDER
+
                 filled = float(client_b.fetch_order(id=order['id'], symbol=pair)['filled'])
                 print(f'{filled} from order filled')
 
             except ccxt.BadRequest:
-                print(f'Order has been fully filled, taking {func_order["amount"]}')
-                filled = func_order['amount']
-
-            # Add except including a print statement and a change of filled value to total of order
+                filled = float(client_b.fetch_order(id=order['id'], symbol=pair)['filled'])
+                print(f'Order has been fully filled, taking {filled}')
 
         # market sell any filled on A
 
