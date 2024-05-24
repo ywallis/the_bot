@@ -73,6 +73,7 @@ while bot_activated:
     except ccxt.RequestTimeout:
         print('Request timeout, retrying.')
 
+
 # bitmart_client.create_limit_buy_order(symbol='ALPH/USDT', amount=100, price=0.2)
 # bitmart_client.create_limit_sell_order(symbol='ALPH/USDT', amount=10, price=10)
 # gate_client.cancel_all_orders()
