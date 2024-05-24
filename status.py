@@ -70,6 +70,8 @@ while bot_activated:
         time.sleep(30)
     except ccxt.ExchangeError:
         print('Exchange error, retrying.')
+    except ccxt.RequestTimeout:
+        print('Request timeout, retrying.')
 
 # bitmart_client.create_limit_buy_order(symbol='ALPH/USDT', amount=100, price=0.2)
 # bitmart_client.create_limit_sell_order(symbol='ALPH/USDT', amount=10, price=10)

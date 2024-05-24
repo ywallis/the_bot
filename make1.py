@@ -118,6 +118,10 @@ def make_and_take(taker_client, maker_client, pair, spread):
                         if maker_client.cancel_order(id=sell_order['id'], symbol=pair)['filled'] != 0:
                             print('Order partially filled! Starting C&T')
                             check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
+
+                        else:
+                            check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
+
                         sell_exists = False
 
                     except ccxt.BadRequest as error:
@@ -217,6 +221,9 @@ def make_and_take(taker_client, maker_client, pair, spread):
                             print('Order partially filled! Starting C&T')
                             check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
 
+                        else:
+                            check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
+
                         buy_exists = False
 
                     except ccxt.BadRequest as error:
@@ -281,6 +288,6 @@ if __name__ == '__main__':
             logger.info(e)
 
 
-# In case of emergencies, kill all open orders on maker client.
+# # In case of emergencies, kill all open orders on maker client.
 # mexc_maker.cancel_all_orders('ALPH/USDT')
 
