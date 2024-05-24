@@ -1,8 +1,11 @@
-from datetime import date
+from datetime import date, datetime
 import os
+import ccxt
+import time
 import pandas as pd
 from config import path_to_NAS
 from config import gate_take, mexc_maker
+
 
 
 def download_trades(client, ticker):
@@ -26,7 +29,28 @@ def download_trades(client, ticker):
     clean.to_csv(output_path, header=True)
 
 
-download_trades(gate_take, 'ALPH/USDT')
-download_trades(mexc_maker, 'ALPH/USDT')
+def get_balance_status(client):
+
+    all_balances = client.fetch_balance()
+    for ticker in all_balances['free']:
+        print(f"{ticker} {round(all_balances['free'][ticker], 2)} available on {client.name}")
+
+
+bot_activated = True
+
+while bot_activated:
+    try:
+        print(f'Status at {datetime.now()}')
+        get_balance_status(gate_take)
+        get_balance_status(mexc_maker)
+        download_trades(gate_take, 'ALPH/USDT')
+        download_trades(mexc_maker, 'ALPH/USDT')
+        print('Cycle done')
+        time.sleep(30)
+
+    except ccxt.ExchangeError:
+        print('Exchange error, retrying.')
+    except ccxt.RequestTimeout:
+        print('Request timeout, retrying.')
 
 # print(mexc_maker.fetch_my_trades(symbol='ALPH/USDT', limit=1000))
