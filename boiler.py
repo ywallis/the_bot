@@ -250,12 +250,12 @@ def overwatch_unified(client_a, client_b, pair, spread):
               f'highest on {highest} for {all_prices[highest]} ({watch_spread}%).')
 
         if bid_b >= ask_a * spread:
-            watching = False
-            return client_a, client_b
+            pass
+            # Start take_take with client_a as buyer, client_b as seller.
 
         if bid_a >= ask_b * spread:
-            watching = False
-            return client_b, client_a
+            pass
+            # Start take_take with client_b as buyer, client_a as buyer.
 
 
 def take_take():
