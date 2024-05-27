@@ -227,6 +227,7 @@ def overwatch_unified(client_a, client_b, pair, spread):
         # Manual rate limiting for BitMart
         if client_b.name == 'BitMart':
             time.sleep(1.5)
+
         # Test - This is where the unify branch work will happen
 
         ticker_a = client_a.fetch_ticker(pair)
