@@ -104,6 +104,8 @@ def place_sell_order(pair, client, price, quantity):
     print(f'Placed a {quantity} {pair} sell order on {client.name} for {price}.')
     logger.info(f'Placed a {quantity} {pair} sell order on {client.name} for {price}.')
 
+    # Will change to market orders here to prevent hanging. Should take place in all branches!
+
 
 def place_buy_order(pair, client, price, quantity):
 
