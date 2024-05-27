@@ -72,6 +72,9 @@ def order_book_matcher(bids, asks, spread=1.002, sizing=0.7, max_order_size=10, 
             total_order_value = order_size * target_ask
 
             if total_order_value < 10.1:
+
+                # This here could be replaced by a call to the exchange defining a dynamic order minimum.
+
                 print('Order value too small.')
                 logger.info('Order value too small.')
                 if lowest_ask_quantity <= highest_bid_quantity:
