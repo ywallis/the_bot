@@ -287,6 +287,13 @@ if __name__ == '__main__':
             logger.info('Network error')
             logger.info(e)
 
+        except ccxt.ExchangeError as e:
+
+            # Has happened because of too many requests.
+            time.sleep(5)
+            print('Exchange error')
+            logger.info(e)
+
 
 # # In case of emergencies, kill all open orders on maker client.
 # mexc_maker.cancel_all_orders('ALPH/USDT')
