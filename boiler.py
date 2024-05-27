@@ -116,6 +116,8 @@ def place_buy_order(pair, client, price, quantity):
 
         client.create_limit_buy_order(symbol=pair, amount=quantity_with_fee, price=price)
 
+        # Will change to market orders here to prevent hanging. Should take place in all branches!
+
     else:
 
         client.create_limit_buy_order(symbol=pair, amount=quantity, price=price)
