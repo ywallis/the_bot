@@ -1,6 +1,7 @@
 import ccxt
 from config import gate_take, mexc_maker, maker_size
-from boiler import check_and_take, check_if_solvent
+from boiler import check_and_take, check_if_solvent, place_buy_order, place_sell_order
+from take_take import take_take
 from datetime import datetime, date
 import time
 import logging
@@ -70,6 +71,75 @@ def make_and_take(taker_client, maker_client, pair, spread):
         print(f'Watching at {datetime.now()}.'
               f'\nLowest price on {lowest} for {all_prices[lowest]}, '
               f'highest on {highest} for {all_prices[highest]} ({watch_spread}%).')
+
+        # Include taker logic
+
+        # Start take_take with client_a as buyer, client_b as seller.
+        if bid_b >= ask_a * spread:
+            pass
+            try:
+                target_ask, target_bid, order_size = take_take(taker_client, maker_client)
+
+                if check_if_solvent(buy_exchange=taker_client, sell_exchange=maker_client,
+                                    quantity=order_size, price=target_ask):
+                    try:
+
+                        place_sell_order(pair, maker_client, target_bid, order_size)
+                        place_buy_order(pair, taker_client, target_ask, order_size)
+
+                    except RuntimeError:
+                        print("Going too fast.")
+                        time.sleep(10)
+
+                else:
+                    print('Insufficient funds!')
+
+                    # # Section for email information
+                    # if not funds_low_email_sent:
+                    #     send_email(subject='ALPH Bot URGENT', message=f'Funds too low!')
+                    #     funds_low_email_sent = True
+            except TypeError:
+                print("Could not match order books.")
+
+            except AttributeError:
+                print('Attribute error')
+
+            except IndexError:
+                (print('End of orderbook'))
+
+        if bid_a >= ask_b * spread:
+            pass
+            # Start take_take with client_b as buyer, client_a as seller.
+
+            try:
+                target_ask, target_bid, order_size = take_take(maker_client, taker_client)
+
+                if check_if_solvent(buy_exchange=maker_client, sell_exchange=taker_client,
+                                    quantity=order_size, price=target_ask):
+                    try:
+
+                        place_sell_order(pair, taker_client, target_bid, order_size)
+                        place_buy_order(pair, maker_client, target_ask, order_size)
+
+                    except RuntimeError:
+                        print("Going too fast.")
+                        time.sleep(10)
+
+                else:
+                    print('Insufficient funds!')
+
+                    # # Section for email information
+                    # if not funds_low_email_sent:
+                    #     send_email(subject='ALPH Bot URGENT', message=f'Funds too low!')
+                    #     funds_low_email_sent = True
+            except TypeError:
+                print("Could not match order books.")
+
+            except AttributeError:
+                print('Attribute error')
+
+            except IndexError:
+                (print('End of orderbook'))
 
         # Sell side arbitrage
 
