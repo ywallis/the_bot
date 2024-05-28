@@ -76,7 +76,7 @@ def make_and_take(taker_client, maker_client, pair, spread):
 
         # Start take_take with client_a as buyer, client_b as seller.
         if bid_b >= ask_a * spread:
-            pass
+
             try:
                 target_ask, target_bid, order_size = take_take(taker_client, maker_client)
 
@@ -108,7 +108,7 @@ def make_and_take(taker_client, maker_client, pair, spread):
                 (print('End of orderbook'))
 
         if bid_a >= ask_b * spread:
-            pass
+
             # Start take_take with client_b as buyer, client_a as seller.
 
             try:
