@@ -7,7 +7,6 @@ from config import path_to_NAS
 from config import gate_take, mexc_maker
 
 
-
 def download_trades(client, ticker):
     today = str(date.today())
     trades_with_fee = []
@@ -16,7 +15,7 @@ def download_trades(client, ticker):
 
     for trade in trades:
         for fee in trade['fees']:
-            if fee['cost'] != 0.0:
+            if fee['cost'] != '0':
                 trade['fee_cost'] = fee['cost']
                 trade['fee_currency'] = fee['currency']
                 trade['exchange'] = client.name
