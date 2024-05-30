@@ -1,6 +1,4 @@
 import logging
-from datetime import datetime
-import time
 
 import ccxt
 
@@ -12,11 +10,18 @@ logger = logging.getLogger(__name__)
 
 
 def retrieve_books(client, side, ticker):
+    # Pointless boilerplate function?
 
     return client.fetch_order_book(symbol=ticker)[side]
 
 
-def order_book_matcher(bids, asks, spread=1.002, sizing=0.7, max_order_size=10, min_order_size=0.01):
+def order_book_matcher(bids, asks, spread, sizing, max_order_size, min_order_size=0.01):
+
+    """This function takes in two order books sides represented by lists.
+    It will then go both lists, and generate a target ask, target bid, and appropriate size to
+    extract maximum value from both books. Other inputs are floats"""
+
+    # REMOVE MIN ORDER DEFAULT EVENTUALLY
 
     dynamic_arb = True
     bid_counter = 0
@@ -99,6 +104,9 @@ def order_book_matcher(bids, asks, spread=1.002, sizing=0.7, max_order_size=10, 
 
 def place_sell_order(pair, client, price, quantity):
 
+    """This function places a sell limit order using a CCXT client.
+    It then outputs a confirmation of that order to the console and logs."""
+
     client.create_limit_sell_order(symbol=pair, amount=quantity, price=price)
 
     print(f'Placed a {quantity} {pair} sell order on {client.name} for {price}.')
@@ -108,6 +116,10 @@ def place_sell_order(pair, client, price, quantity):
 
 
 def place_buy_order(pair, client, price, quantity):
+    """This function places a buy limit order using a CCXT client.
+    It then outputs a confirmation of that order to the console and logs.
+    It includes a modification for exchanges using the base asset for fees,
+    to keep stable inventory in arbitrage setups."""
 
     if client.name == 'Gate.io':
 
@@ -128,56 +140,25 @@ def place_buy_order(pair, client, price, quantity):
     logger.info(f'Placed a {quantity} {pair} buy order on {client.name} for {price}.')
 
 
-def retrieve_balance(client, ticker):
+def check_if_solvent(buy_client, sell_client, price, quantity, pair):
+    """This function checks if two exchanges have the necessary balances to place
+    two arbitrage orders in their relevant assets."""
 
-    return client.fetch_balance()[ticker]['free']
+    base_asset = pair.split('/')[0]
+    quote_asset = pair.split('/')[1]
 
-
-def check_if_solvent(buy_exchange, sell_exchange, price, quantity):
-
-    if (quantity * price * 1.02 < retrieve_balance(buy_exchange, 'USDT')
-            and quantity * 1.02 < retrieve_balance(sell_exchange, 'ALPH')):
+    if (quantity * price * 1.02 < buy_client.fetch_balance()[quote_asset]['free']
+            and quantity * 1.02 < sell_client.fetch_balance()[base_asset]['free']):
         return True
     else:
         return False
 
 
-def overwatch(client_a, client_b, pair, spread):
-    watching = True
-    while watching:
-        # Manual rate limiting for BitMart
-        if client_b.name == 'BitMart':
-            time.sleep(1.5)
-
-        ticker_a = client_a.fetch_ticker(pair)
-        ticker_b = client_b.fetch_ticker(pair)
-        last_a = ticker_a['last']
-        bid_a = ticker_a['bid']
-        ask_a = ticker_a['ask']
-        last_b = ticker_b['last']
-        bid_b = ticker_b['bid']
-        ask_b = ticker_b['ask']
-
-        all_prices = {client_a.name: last_a, client_b.name: last_b}
-        lowest = min(all_prices, key=all_prices.get)
-        highest = max(all_prices, key=all_prices.get)
-
-        watch_spread = round((all_prices[highest] / all_prices[lowest] - 1) * 100, 2)
-
-        print(f'Watching at {datetime.now()}.'
-              f'\nLowest price on {lowest} for {all_prices[lowest]}, '
-              f'highest on {highest} for {all_prices[highest]} ({watch_spread}%).')
-
-        if bid_b >= ask_a * spread:
-            watching = False
-            return client_a, client_b
-
-        if bid_a >= ask_b * spread:
-            watching = False
-            return client_b, client_a
-
-
 def check_and_take(client_a, client_b, order, pair, market_side):
+
+    """This function checks if a placed maker order has been filled or partially filled
+    and generates an equivalent taker order on another exchange."""
+
     func_order = client_b.fetch_order(id=order['id'], symbol=pair)
     filled = float(func_order['filled'])
     print(f'{filled} from order filled')
@@ -219,44 +200,3 @@ def check_and_take(client_a, client_b, order, pair, market_side):
         print(f'Market {market_side} {filled} {pair} on {client_b.name}')
 
         return True
-
-
-def overwatch_unified(client_a, client_b, pair, spread):
-    watching = True
-    while watching:
-        # Manual rate limiting for BitMart
-        if client_b.name == 'BitMart':
-            time.sleep(1.5)
-
-        # Test - This is where the unify branch work will happen
-
-        ticker_a = client_a.fetch_ticker(pair)
-        ticker_b = client_b.fetch_ticker(pair)
-        last_a = ticker_a['last']
-        bid_a = ticker_a['bid']
-        ask_a = ticker_a['ask']
-        last_b = ticker_b['last']
-        bid_b = ticker_b['bid']
-        ask_b = ticker_b['ask']
-
-        all_prices = {client_a.name: last_a, client_b.name: last_b}
-        lowest = min(all_prices, key=all_prices.get)
-        highest = max(all_prices, key=all_prices.get)
-
-        watch_spread = round((all_prices[highest] / all_prices[lowest] - 1) * 100, 2)
-
-        print(f'Watching at {datetime.now()}.'
-              f'\nLowest price on {lowest} for {all_prices[lowest]}, '
-              f'highest on {highest} for {all_prices[highest]} ({watch_spread}%).')
-
-        if bid_b >= ask_a * spread:
-            pass
-            # Start take_take with client_a as buyer, client_b as seller.
-
-        if bid_a >= ask_b * spread:
-            pass
-            # Start take_take with client_b as buyer, client_a as buyer.
-
-
-def take_take():
-    pass

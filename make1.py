@@ -1,19 +1,14 @@
 import ccxt
-from config import gate_take, mexc_maker, maker_size
-from boiler import check_and_take, check_if_solvent, place_buy_order, place_sell_order
-from take_take import take_take
-from datetime import datetime, date
+from boiler import check_and_take, check_if_solvent, place_buy_order, place_sell_order, order_book_matcher
+from datetime import datetime
 import time
 import logging
 
-today = str(date.today())
-
-logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.DEBUG, filename=f'./Logs/{today}.txt')
 logger = logging.getLogger(__name__)
 
 
-def make_and_take(taker_client, maker_client, pair, spread):
-    logger.info('Testing')
+def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
+                  taker_spread, taker_sizing, taker_max_order_size):
     buy_exists = False
     sell_exists = False
     buy_order = None
@@ -53,16 +48,16 @@ def make_and_take(taker_client, maker_client, pair, spread):
         if not buy_arbitrage and not sell_arbitrage:
             time.sleep(1)
 
-        ticker_a = taker_client.fetch_ticker(pair)
-        ticker_b = maker_client.fetch_ticker(pair)
-        last_a = ticker_a['last']
-        bid_a = ticker_a['bid']
-        ask_a = ticker_a['ask']
-        last_b = ticker_b['last']
-        bid_b = ticker_b['bid']
-        ask_b = ticker_b['ask']
+        ticker_taker = taker_client.fetch_ticker(pair)
+        ticker_maker = maker_client.fetch_ticker(pair)
+        last_taker = ticker_taker['last']
+        bid_taker = ticker_taker['bid']
+        ask_taker = ticker_taker['ask']
+        last_maker = ticker_maker['last']
+        bid_maker = ticker_maker['bid']
+        ask_maker = ticker_maker['ask']
 
-        all_prices = {taker_client.name: last_a, maker_client.name: last_b}
+        all_prices = {taker_client.name: last_taker, maker_client.name: last_maker}
         lowest = min(all_prices, key=all_prices.get)
         highest = max(all_prices, key=all_prices.get)
 
@@ -71,21 +66,30 @@ def make_and_take(taker_client, maker_client, pair, spread):
         print(f'Watching at {datetime.now()}.'
               f'\nLowest price on {lowest} for {all_prices[lowest]}, '
               f'highest on {highest} for {all_prices[highest]} ({watch_spread}%).')
+        print('WARNING, HAVE YOU MODIFIED SPREAD')
 
         # Include taker logic
 
         # Start take_take with client_a as buyer, client_b as seller.
-        if bid_b >= ask_a * spread:
+
+        # WARNING! WRONG SPREAD
+
+        if bid_maker >= ask_taker * maker_spread:
 
             try:
-                target_ask, target_bid, order_size = take_take(taker_client, maker_client)
+                bids = maker_client.fetch_order_book(pair)['bids']
+                asks = taker_client.fetch_order_book(pair)['asks']
 
-                if check_if_solvent(buy_exchange=taker_client, sell_exchange=maker_client,
-                                    quantity=order_size, price=target_ask):
+                taker_target_ask, taker_target_bid, taker_order_size = order_book_matcher(bids, asks,
+                                                                                          taker_spread, taker_sizing,
+                                                                                          taker_max_order_size)
+
+                if check_if_solvent(buy_client=taker_client, sell_client=maker_client,
+                                    quantity=taker_order_size, price=taker_target_ask, pair=pair):
                     try:
-
-                        place_sell_order(pair, maker_client, target_bid, order_size)
-                        place_buy_order(pair, taker_client, target_ask, order_size)
+                        # Actual orders to be disabled in boiler
+                        place_sell_order(pair, maker_client, taker_target_bid, taker_order_size)
+                        place_buy_order(pair, taker_client, taker_target_ask, taker_order_size)
 
                     except RuntimeError:
                         print("Going too fast.")
@@ -94,10 +98,6 @@ def make_and_take(taker_client, maker_client, pair, spread):
                 else:
                     print('Insufficient funds!')
 
-                    # # Section for email information
-                    # if not funds_low_email_sent:
-                    #     send_email(subject='ALPH Bot URGENT', message=f'Funds too low!')
-                    #     funds_low_email_sent = True
             except TypeError:
                 print("Could not match order books.")
 
@@ -107,19 +107,24 @@ def make_and_take(taker_client, maker_client, pair, spread):
             except IndexError:
                 (print('End of orderbook'))
 
-        if bid_a >= ask_b * spread:
+        if bid_taker >= ask_maker * maker_spread:
 
             # Start take_take with client_b as buyer, client_a as seller.
 
             try:
-                target_ask, target_bid, order_size = take_take(maker_client, taker_client)
+                bids = taker_client.fetch_order_book(pair)['bids']
+                asks = maker_client.fetch_order_book(pair)['asks']
 
-                if check_if_solvent(buy_exchange=maker_client, sell_exchange=taker_client,
-                                    quantity=order_size, price=target_ask):
+                taker_target_ask, taker_target_bid, taker_order_size = order_book_matcher(bids, asks,
+                                                                                          taker_spread, taker_sizing,
+                                                                                          taker_max_order_size)
+
+                if check_if_solvent(buy_client=maker_client, sell_client=taker_client,
+                                    quantity=taker_order_size, price=taker_target_ask, pair=pair):
                     try:
 
-                        place_sell_order(pair, taker_client, target_bid, order_size)
-                        place_buy_order(pair, maker_client, target_ask, order_size)
+                        place_sell_order(pair, taker_client, taker_target_bid, taker_order_size)
+                        place_buy_order(pair, maker_client, taker_target_ask, taker_order_size)
 
                     except RuntimeError:
                         print("Going too fast.")
@@ -128,10 +133,6 @@ def make_and_take(taker_client, maker_client, pair, spread):
                 else:
                     print('Insufficient funds!')
 
-                    # # Section for email information
-                    # if not funds_low_email_sent:
-                    #     send_email(subject='ALPH Bot URGENT', message=f'Funds too low!')
-                    #     funds_low_email_sent = True
             except TypeError:
                 print("Could not match order books.")
 
@@ -143,7 +144,7 @@ def make_and_take(taker_client, maker_client, pair, spread):
 
         # Sell side arbitrage
 
-        if ask_b >= ask_a * spread:
+        if ask_maker >= ask_taker * maker_spread:
 
             # Introducing parameter for speed control
 
@@ -153,11 +154,11 @@ def make_and_take(taker_client, maker_client, pair, spread):
 
             if not sell_exists:
                 print(f'Make on {maker_client.name}')
-                print(f'Sell {ask_b}')
-                logger.info(f'Sell on {maker_client.name}, sell {ask_b}')
+                print(f'Sell {ask_maker}')
+                logger.info(f'Sell on {maker_client.name}, sell {ask_maker}')
 
-                if check_if_solvent(taker_client, maker_client, ask_b, maker_size):
-                    sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=maker_size, price=ask_b)
+                if check_if_solvent(taker_client, maker_client, ask_maker, maker_size, pair=pair):
+                    sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=maker_size, price=ask_maker)
                     sell_exists = True
                     logger.info(f'Solvent, sell order created')
 
@@ -179,7 +180,7 @@ def make_and_take(taker_client, maker_client, pair, spread):
 
                 # If the existing order is no longer at the bottom of the asks, try to cancel it and place a new one.
 
-                elif sell_order['price'] != ask_b:
+                elif sell_order['price'] != ask_maker:
                     print('Order no longer at bottom of asks, cancelling.')
                     logger.info('Order no longer at bottom of asks, cancelling.')
 
@@ -202,9 +203,10 @@ def make_and_take(taker_client, maker_client, pair, spread):
                             sell_exists = False
                             logger.info('Was filled in the mean time, C&T')
 
-                    if check_if_solvent(taker_client, maker_client, ask_b, maker_size):
-                        sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=maker_size, price=ask_b)
-                        print(f'Sell {ask_b}')
+                    if check_if_solvent(taker_client, maker_client, ask_maker, maker_size, pair=pair):
+                        sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=maker_size,
+                                                                          price=ask_maker)
+                        print(f'Sell {ask_maker}')
                         sell_exists = True
                         logger.info('Order no longer at bottom of asks, cancelling.')
         else:
@@ -243,7 +245,7 @@ def make_and_take(taker_client, maker_client, pair, spread):
 
         # Buy side arbitrage
 
-        if bid_a >= bid_b * spread:
+        if bid_taker >= bid_maker * maker_spread:
 
             # Introducing parameter for speed control
 
@@ -253,11 +255,11 @@ def make_and_take(taker_client, maker_client, pair, spread):
 
             if not buy_exists:
                 print(f'Make on {maker_client.name}')
-                print(f'Buy {bid_b}')
-                logger.info(f'Buy on {maker_client.name}, buy {bid_b}')
+                print(f'Buy {bid_maker}')
+                logger.info(f'Buy on {maker_client.name}, buy {bid_maker}')
 
-                if check_if_solvent(maker_client, taker_client, bid_b, maker_size):
-                    buy_order = maker_client.create_limit_buy_order(symbol=pair, amount=maker_size, price=bid_b)
+                if check_if_solvent(maker_client, taker_client, bid_maker, maker_size, pair=pair):
+                    buy_order = maker_client.create_limit_buy_order(symbol=pair, amount=maker_size, price=bid_maker)
                     buy_exists = True
                     logger.info(f'Solvent, buy order created')
 
@@ -279,7 +281,7 @@ def make_and_take(taker_client, maker_client, pair, spread):
 
                 # If the existing order is no longer at the top of the bids, try to cancel it and place a new one.
 
-                elif buy_order['price'] != bid_b:
+                elif buy_order['price'] != bid_maker:
                     print('Order no longer at top of bids, cancelling.')
                     logger.info('Order no longer at top of bids, cancelling.')
 
@@ -304,9 +306,9 @@ def make_and_take(taker_client, maker_client, pair, spread):
                             buy_exists = False
                             logger.info('Was filled in the mean time, C&T')
 
-                    if check_if_solvent(taker_client, maker_client, bid_b, maker_size):
-                        buy_order = maker_client.create_limit_buy_order(symbol=pair, amount=maker_size, price=bid_b)
-                        print(f'Buy {bid_b}')
+                    if check_if_solvent(taker_client, maker_client, bid_maker, maker_size, pair=pair):
+                        buy_order = maker_client.create_limit_buy_order(symbol=pair, amount=maker_size, price=bid_maker)
+                        print(f'Buy {bid_maker}')
                         buy_exists = True
                         logger.info('Order no longer at bottom of asks, cancelling.')
         else:
@@ -342,29 +344,3 @@ def make_and_take(taker_client, maker_client, pair, spread):
                         if check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
                             logger.info('Was filled in the mean time, C&T')
                             buy_exists = False
-
-
-making = True
-
-if __name__ == '__main__':
-
-    while making is True:
-        try:
-            make_and_take(gate_take, mexc_maker, 'ALPH/USDT', 1.002)
-
-        except ccxt.NetworkError as e:
-            print('Network error')
-            logger.info('Network error')
-            logger.info(e)
-
-        except ccxt.ExchangeError as e:
-
-            # Has happened because of too many requests.
-            time.sleep(5)
-            print('Exchange error')
-            logger.info(e)
-
-
-# # In case of emergencies, kill all open orders on maker client.
-# mexc_maker.cancel_all_orders('ALPH/USDT')
-
