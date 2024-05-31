@@ -39,12 +39,15 @@ def download_trades(client, ticker):
     trades = client.fetch_my_trades(symbol=ticker, limit=1000)
 
     for trade in trades:
+        if trade['fee'] is not None:
+            trade['fee_cost'] = trade['fee']['cost']
+            trade['fee_currency'] = trade['fee']['currency']
         for fee in trade['fees']:
             if float(fee['cost']) != 0:
                 trade['fee_cost'] = fee['cost']
                 trade['fee_currency'] = fee['currency']
-                trade['exchange'] = client.name
-                trades_with_fee.append(trade)
+        trade['exchange'] = client.name
+        trades_with_fee.append(trade)
 
     df = pd.DataFrame(trades_with_fee)
     df.to_csv(output_path, mode='a', header=not os.path.exists(output_path))

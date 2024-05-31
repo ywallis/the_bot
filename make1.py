@@ -182,6 +182,8 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
                 # If the existing order is no longer at the bottom of the asks, try to cancel it and place a new one.
 
+                # CONSIDER MOVING THE ELIF BELOW AT THE SAME LEVEL AS THE ELSE ABOVE
+
                 elif sell_order['price'] != ask_maker:
                     print('Order no longer at bottom of asks, cancelling.')
                     logger.info('Order no longer at bottom of asks, cancelling.')
