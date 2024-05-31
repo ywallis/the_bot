@@ -144,10 +144,20 @@ def check_if_solvent(buy_client, sell_client, price, quantity, pair):
     base_asset = pair.split('/')[0]
     quote_asset = pair.split('/')[1]
 
-    if (quantity * price * 1.02 < buy_client.fetch_balance()[quote_asset]['free']
-            and quantity * 1.02 < sell_client.fetch_balance()[base_asset]['free']):
-        return True
-    else:
+    try:
+
+        if (quantity * price * 1.02 < buy_client.fetch_balance()[quote_asset]['free']
+                and quantity * 1.02 < sell_client.fetch_balance()[base_asset]['free']):
+            return True
+        else:
+            return False
+
+    except KeyError:
+
+        # Error can occur if the subaccount never had an asset balance.
+
+        print('Insufficient funds! Are you sure the right pair is selected?')
+        logger.info('Insufficient funds! Are you sure the right pair is selected?')
         return False
 
 
