@@ -9,6 +9,11 @@ logger = logging.getLogger(__name__)
 
 def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                   taker_spread, taker_sizing, taker_max_order_size):
+
+    """This function acts as a basic market making system, with the following two logics:
+    1. A taker logic, acting immediately in two order books in case a profitable imbalance is spotted.
+    2. A maker1 logic, offering liquidity on one side, if the position can be hedged profitably on the other."""
+
     buy_exists = False
     sell_exists = False
     buy_order = None
@@ -45,8 +50,8 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
         # Slow watching if no open order
 
-        if not buy_arbitrage and not sell_arbitrage:
-            time.sleep(1)
+        # if not buy_arbitrage and not sell_arbitrage:
+        #     time.sleep(1)
 
         ticker_taker = taker_client.fetch_ticker(pair)
         ticker_maker = maker_client.fetch_ticker(pair)
@@ -66,15 +71,12 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
         print(f'Watching at {datetime.now()}.'
               f'\nLowest price on {lowest} for {all_prices[lowest]}, '
               f'highest on {highest} for {all_prices[highest]} ({watch_spread}%).')
-        print('WARNING, HAVE YOU MODIFIED SPREAD')
 
         # Include taker logic
 
         # Start take_take with client_a as buyer, client_b as seller.
 
-        # WARNING! WRONG SPREAD
-
-        if bid_maker >= ask_taker * maker_spread:
+        if bid_maker >= ask_taker * taker_spread:
 
             try:
                 bids = maker_client.fetch_order_book(pair)['bids']
@@ -107,7 +109,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
             except IndexError:
                 (print('End of orderbook'))
 
-        if bid_taker >= ask_maker * maker_spread:
+        if bid_taker >= ask_maker * taker_spread:
 
             # Start take_take with client_b as buyer, client_a as seller.
 
@@ -141,206 +143,206 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
             except IndexError:
                 (print('End of orderbook'))
-
-        # Sell side arbitrage
-
-        if ask_maker >= ask_taker * maker_spread:
-
-            # Introducing parameter for speed control
-
-            sell_arbitrage = True
-
-            # If the flag for an existing sell doesn't exist yet, create a sell order at the bottom ask.
-
-            if not sell_exists:
-                print(f'Make on {maker_client.name}')
-                print(f'Sell {ask_maker}')
-                logger.info(f'Sell on {maker_client.name}, sell {ask_maker}')
-
-                if check_if_solvent(taker_client, maker_client, ask_maker, maker_size, pair=pair):
-                    sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=maker_size, price=ask_maker)
-                    sell_exists = True
-                    logger.info(f'Solvent, sell order created')
-
-                else:
-                    print('Insufficient funds!')
-                    logger.info(f'Insufficient funds!')
-
-            # If the flag for an existing sell order exists, check if it has been filled.
-
-            else:
-                print(f"Sell order already present at {sell_order['price']}")
-                logger.info(f"Sell order already present at {sell_order['price']}")
-
-                # Check if some of the order has been filled. If yes, the order is cancelled and the flag removed.
-
-                if check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
-                    sell_exists = False
-                    logger.info(f"C&T, sell doesn't exist anymore")
-
-                # If the existing order is no longer at the bottom of the asks, try to cancel it and place a new one.
-
-                elif sell_order['price'] != ask_maker:
-                    print('Order no longer at bottom of asks, cancelling.')
-                    logger.info('Order no longer at bottom of asks, cancelling.')
-
-                    try:
-                        # If the order is partially filled, start the take process.
-                        if maker_client.cancel_order(id=sell_order['id'], symbol=pair)['filled'] != 0:
-                            print('Order partially filled! Starting C&T')
-                            check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
-
-                        else:
-                            check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
-
-                        sell_exists = False
-
-                    except ccxt.BadRequest as error:
-                        logger.info(error)
-                        print(f'Order has been fully filled, taking {sell_order["amount"]}')
-
-                        if check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
-                            sell_exists = False
-                            logger.info('Was filled in the mean time, C&T')
-
-                    if check_if_solvent(taker_client, maker_client, ask_maker, maker_size, pair=pair):
-                        sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=maker_size,
-                                                                          price=ask_maker)
-                        print(f'Sell {ask_maker}')
-                        sell_exists = True
-                        logger.info('Order no longer at bottom of asks, cancelling.')
-        else:
-
-            # The arbitrage condition is no longer there, cancel open orders after checking them.
-
-            sell_arbitrage = False
-            logger.info('Arb now false')
-
-            if sell_exists:
-
-                if check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
-                    sell_exists = False
-                    logger.info('C&T success, sell no longer exists')
-
-                else:
-                    print('No more arb, cancelling sells.')
-                    logger.info('No more arb, cancelling sells.')
-
-                    try:
-
-                        # If the order is partially filled, start the take process.
-
-                        if maker_client.cancel_order(id=sell_order['id'], symbol=pair)['filled'] != 0:
-                            print('Order partially filled! Starting C&T')
-                            check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
-                        sell_exists = False
-
-                    except ccxt.BadRequest as error:
-                        logger.info(error)
-                        print(f'Order has been fully filled, taking {sell_order["amount"]}')
-
-                        if check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
-                            logger.info('Was filled in the mean time, C&T')
-                            sell_exists = False
-
-        # Buy side arbitrage
-
-        if bid_taker >= bid_maker * maker_spread:
-
-            # Introducing parameter for speed control
-
-            buy_arbitrage = True
-
-            # If the flag for an existing buy doesn't exist yet, create a buy order at the top bid.
-
-            if not buy_exists:
-                print(f'Make on {maker_client.name}')
-                print(f'Buy {bid_maker}')
-                logger.info(f'Buy on {maker_client.name}, buy {bid_maker}')
-
-                if check_if_solvent(maker_client, taker_client, bid_maker, maker_size, pair=pair):
-                    buy_order = maker_client.create_limit_buy_order(symbol=pair, amount=maker_size, price=bid_maker)
-                    buy_exists = True
-                    logger.info(f'Solvent, buy order created')
-
-                else:
-                    print('Insufficient funds!')
-                    logger.info(f'Insufficient funds!')
-
-            # If the flag for an existing buy order exists, check if it has been filled.
-
-            else:
-                print(f"Buy order already present at {buy_order['price']}")
-                logger.info(f"Buy order already present at {buy_order['price']}")
-
-                # Check if some of the order has been filled. If yes, the order is cancelled and the flag removed.
-
-                if check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
-                    buy_exists = False
-                    logger.info(f"C&T, buy doesn't exist anymore")
-
-                # If the existing order is no longer at the top of the bids, try to cancel it and place a new one.
-
-                elif buy_order['price'] != bid_maker:
-                    print('Order no longer at top of bids, cancelling.')
-                    logger.info('Order no longer at top of bids, cancelling.')
-
-                    try:
-
-                        # If the order is partially filled, start the take process.
-
-                        if maker_client.cancel_order(id=buy_order['id'], symbol=pair)['filled'] != 0:
-                            print('Order partially filled! Starting C&T')
-                            check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
-
-                        else:
-                            check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
-
-                        buy_exists = False
-
-                    except ccxt.BadRequest as error:
-                        logger.info(error)
-                        print(f'Order has been fully filled, taking {buy_order["amount"]}')
-
-                        if check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
-                            buy_exists = False
-                            logger.info('Was filled in the mean time, C&T')
-
-                    if check_if_solvent(taker_client, maker_client, bid_maker, maker_size, pair=pair):
-                        buy_order = maker_client.create_limit_buy_order(symbol=pair, amount=maker_size, price=bid_maker)
-                        print(f'Buy {bid_maker}')
-                        buy_exists = True
-                        logger.info('Order no longer at bottom of asks, cancelling.')
-        else:
-
-            # The arbitrage condition is no longer there, cancel open orders after checking them.
-
-            buy_arbitrage = False
-            logger.info('Arb now false')
-
-            if buy_exists:
-
-                if check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
-                    buy_exists = False
-                    logger.info('C&T success, buy no longer exists')
-
-                else:
-                    print('No more arb, cancelling buys.')
-                    logger.info('No more arb, cancelling buys.')
-
-                    try:
-
-                        # If the order is partially filled, start the take process.
-
-                        if maker_client.cancel_order(id=buy_order['id'], symbol=pair)['filled'] != 0:
-                            print('Order partially filled! Starting C&T')
-                            check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
-                        buy_exists = False
-
-                    except ccxt.BadRequest as error:
-                        logger.info(error)
-                        print(f'Order has been fully filled, taking {buy_order["amount"]}')
-
-                        if check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
-                            logger.info('Was filled in the mean time, C&T')
-                            buy_exists = False
+        #
+        # # Sell side arbitrage
+        #
+        # if ask_maker >= ask_taker * maker_spread:
+        #
+        #     # Introducing parameter for speed control
+        #
+        #     sell_arbitrage = True
+        #
+        #     # If the flag for an existing sell doesn't exist yet, create a sell order at the bottom ask.
+        #
+        #     if not sell_exists:
+        #         print(f'Make on {maker_client.name}')
+        #         print(f'Sell {ask_maker}')
+        #         logger.info(f'Sell on {maker_client.name}, sell {ask_maker}')
+        #
+        #         if check_if_solvent(taker_client, maker_client, ask_maker, maker_size, pair=pair):
+        #             sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=maker_size, price=ask_maker)
+        #             sell_exists = True
+        #             logger.info(f'Solvent, sell order created')
+        #
+        #         else:
+        #             print('Insufficient funds!')
+        #             logger.info(f'Insufficient funds!')
+        #
+        #     # If the flag for an existing sell order exists, check if it has been filled.
+        #
+        #     else:
+        #         print(f"Sell order already present at {sell_order['price']}")
+        #         logger.info(f"Sell order already present at {sell_order['price']}")
+        #
+        #         # Check if some of the order has been filled. If yes, the order is cancelled and the flag removed.
+        #
+        #         if check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
+        #             sell_exists = False
+        #             logger.info(f"C&T, sell doesn't exist anymore")
+        #
+        #         # If the existing order is no longer at the bottom of the asks, try to cancel it and place a new one.
+        #
+        #         elif sell_order['price'] != ask_maker:
+        #             print('Order no longer at bottom of asks, cancelling.')
+        #             logger.info('Order no longer at bottom of asks, cancelling.')
+        #
+        #             try:
+        #                 # If the order is partially filled, start the take process.
+        #                 if maker_client.cancel_order(id=sell_order['id'], symbol=pair)['filled'] != 0:
+        #                     print('Order partially filled! Starting C&T')
+        #                     check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
+        #
+        #                 else:
+        #                     check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
+        #
+        #                 sell_exists = False
+        #
+        #             except ccxt.BadRequest as error:
+        #                 logger.info(error)
+        #                 print(f'Order has been fully filled, taking {sell_order["amount"]}')
+        #
+        #                 if check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
+        #                     sell_exists = False
+        #                     logger.info('Was filled in the mean time, C&T')
+        #
+        #             if check_if_solvent(taker_client, maker_client, ask_maker, maker_size, pair=pair):
+        #                 sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=maker_size,
+        #                                                                   price=ask_maker)
+        #                 print(f'Sell {ask_maker}')
+        #                 sell_exists = True
+        #                 logger.info('Order no longer at bottom of asks, cancelling.')
+        # else:
+        #
+        #     # The arbitrage condition is no longer there, cancel open orders after checking them.
+        #
+        #     sell_arbitrage = False
+        #     logger.info('Arb now false')
+        #
+        #     if sell_exists:
+        #
+        #         if check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
+        #             sell_exists = False
+        #             logger.info('C&T success, sell no longer exists')
+        #
+        #         else:
+        #             print('No more arb, cancelling sells.')
+        #             logger.info('No more arb, cancelling sells.')
+        #
+        #             try:
+        #
+        #                 # If the order is partially filled, start the take process.
+        #
+        #                 if maker_client.cancel_order(id=sell_order['id'], symbol=pair)['filled'] != 0:
+        #                     print('Order partially filled! Starting C&T')
+        #                     check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
+        #                 sell_exists = False
+        #
+        #             except ccxt.BadRequest as error:
+        #                 logger.info(error)
+        #                 print(f'Order has been fully filled, taking {sell_order["amount"]}')
+        #
+        #                 if check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
+        #                     logger.info('Was filled in the mean time, C&T')
+        #                     sell_exists = False
+        #
+        # # Buy side arbitrage
+        #
+        # if bid_taker >= bid_maker * maker_spread:
+        #
+        #     # Introducing parameter for speed control
+        #
+        #     buy_arbitrage = True
+        #
+        #     # If the flag for an existing buy doesn't exist yet, create a buy order at the top bid.
+        #
+        #     if not buy_exists:
+        #         print(f'Make on {maker_client.name}')
+        #         print(f'Buy {bid_maker}')
+        #         logger.info(f'Buy on {maker_client.name}, buy {bid_maker}')
+        #
+        #         if check_if_solvent(maker_client, taker_client, bid_maker, maker_size, pair=pair):
+        #             buy_order = maker_client.create_limit_buy_order(symbol=pair, amount=maker_size, price=bid_maker)
+        #             buy_exists = True
+        #             logger.info(f'Solvent, buy order created')
+        #
+        #         else:
+        #             print('Insufficient funds!')
+        #             logger.info(f'Insufficient funds!')
+        #
+        #     # If the flag for an existing buy order exists, check if it has been filled.
+        #
+        #     else:
+        #         print(f"Buy order already present at {buy_order['price']}")
+        #         logger.info(f"Buy order already present at {buy_order['price']}")
+        #
+        #         # Check if some of the order has been filled. If yes, the order is cancelled and the flag removed.
+        #
+        #         if check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
+        #             buy_exists = False
+        #             logger.info(f"C&T, buy doesn't exist anymore")
+        #
+        #         # If the existing order is no longer at the top of the bids, try to cancel it and place a new one.
+        #
+        #         elif buy_order['price'] != bid_maker:
+        #             print('Order no longer at top of bids, cancelling.')
+        #             logger.info('Order no longer at top of bids, cancelling.')
+        #
+        #             try:
+        #
+        #                 # If the order is partially filled, start the take process.
+        #
+        #                 if maker_client.cancel_order(id=buy_order['id'], symbol=pair)['filled'] != 0:
+        #                     print('Order partially filled! Starting C&T')
+        #                     check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
+        #
+        #                 else:
+        #                     check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
+        #
+        #                 buy_exists = False
+        #
+        #             except ccxt.BadRequest as error:
+        #                 logger.info(error)
+        #                 print(f'Order has been fully filled, taking {buy_order["amount"]}')
+        #
+        #                 if check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
+        #                     buy_exists = False
+        #                     logger.info('Was filled in the mean time, C&T')
+        #
+        #             if check_if_solvent(taker_client, maker_client, bid_maker, maker_size, pair=pair):
+        #                 buy_order = maker_client.create_limit_buy_order(symbol=pair, amount=maker_size, price=bid_maker)
+        #                 print(f'Buy {bid_maker}')
+        #                 buy_exists = True
+        #                 logger.info('Order no longer at bottom of asks, cancelling.')
+        # else:
+        #
+        #     # The arbitrage condition is no longer there, cancel open orders after checking them.
+        #
+        #     buy_arbitrage = False
+        #     logger.info('Arb now false')
+        #
+        #     if buy_exists:
+        #
+        #         if check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
+        #             buy_exists = False
+        #             logger.info('C&T success, buy no longer exists')
+        #
+        #         else:
+        #             print('No more arb, cancelling buys.')
+        #             logger.info('No more arb, cancelling buys.')
+        #
+        #             try:
+        #
+        #                 # If the order is partially filled, start the take process.
+        #
+        #                 if maker_client.cancel_order(id=buy_order['id'], symbol=pair)['filled'] != 0:
+        #                     print('Order partially filled! Starting C&T')
+        #                     check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
+        #                 buy_exists = False
+        #
+        #             except ccxt.BadRequest as error:
+        #                 logger.info(error)
+        #                 print(f'Order has been fully filled, taking {buy_order["amount"]}')
+        #
+        #                 if check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
+        #                     logger.info('Was filled in the mean time, C&T')
+        #                     buy_exists = False

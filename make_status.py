@@ -7,7 +7,6 @@ from config import path_to_NAS
 from config import gate_take, mexc_maker
 
 
-
 def download_trades(client, ticker):
     today = str(date.today())
     trades_with_fee = []

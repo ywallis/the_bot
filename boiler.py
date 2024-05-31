@@ -1,8 +1,5 @@
 import logging
-
 import ccxt
-
-# from notifications import send_email
 
 from config import gate_fee
 
