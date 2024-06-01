@@ -50,8 +50,11 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
         # Slow watching if no open order
 
-        # if not buy_arbitrage and not sell_arbitrage:
-        #     time.sleep(1)
+        if not buy_arbitrage and not sell_arbitrage:
+            time.sleep(1)
+
+        if maker_client.name == 'Bitmart':
+            time.sleep(1)
 
         ticker_taker = taker_client.fetch_ticker(pair)
         ticker_maker = maker_client.fetch_ticker(pair)
@@ -92,6 +95,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                         # Actual orders to be disabled in boiler
                         place_sell_order(pair, maker_client, taker_target_bid, taker_order_size)
                         place_buy_order(pair, taker_client, taker_target_ask, taker_order_size)
+                        continue
 
                     except RuntimeError:
                         print("Going too fast.")
@@ -127,6 +131,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
                         place_sell_order(pair, taker_client, taker_target_bid, taker_order_size)
                         place_buy_order(pair, maker_client, taker_target_ask, taker_order_size)
+                        continue
 
                     except RuntimeError:
                         print("Going too fast.")
