@@ -104,7 +104,8 @@ def place_sell_order(pair, client, price, quantity):
     """This function places a sell limit order using a CCXT client.
     It then outputs a confirmation of that order to the console and logs."""
 
-    client.create_limit_sell_order(symbol=pair, amount=quantity, price=price)
+    # client.create_limit_sell_order(symbol=pair, amount=quantity, price=price)
+    client.create_market_order(symbol=pair, side='sell', amount=quantity, price=price)
 
     print(f'Placed a {quantity} {pair} sell order on {client.name} for {price}.')
     logger.info(f'Placed a {quantity} {pair} sell order on {client.name} for {price}.')
@@ -125,7 +126,8 @@ def place_buy_order(pair, client, price, quantity):
 
         quantity_with_fee = round(quantity * fee_ratio, 2)
 
-        client.create_limit_buy_order(symbol=pair, amount=quantity_with_fee, price=price)
+        # client.create_limit_buy_order(symbol=pair, amount=quantity_with_fee, price=price)
+        client.create_market_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price)
 
         # Will change to market orders here to prevent hanging. Should take place in all branches!
 
