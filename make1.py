@@ -178,12 +178,8 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
                 try:
                     # If the order is partially filled, start the take process.
-                    if maker_client.cancel_order(id=sell_order['id'], symbol=pair)['filled'] != 0:
-                        print('Order partially filled! Starting C&T')
-                        check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
-
-                    else:
-                        check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
+                    maker_client.cancel_order(id=sell_order['id'], symbol=pair)
+                    check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
 
                     sell_exists = False
 
@@ -235,9 +231,8 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
                         # If the order is partially filled, start the take process.
 
-                        if maker_client.cancel_order(id=sell_order['id'], symbol=pair)['filled'] != 0:
-                            print('Order partially filled! Starting C&T')
-                            check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
+                        maker_client.cancel_order(id=sell_order['id'], symbol=pair)
+                        check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
                         sell_exists = False
 
                     except ccxt.BadRequest as error:
@@ -282,12 +277,8 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
                     # If the order is partially filled, start the take process.
 
-                    if maker_client.cancel_order(id=buy_order['id'], symbol=pair)['filled'] != 0:
-                        print('Order partially filled! Starting C&T')
-                        check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
-
-                    else:
-                        check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
+                    maker_client.cancel_order(id=buy_order['id'], symbol=pair)
+                    check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
 
                     buy_exists = False
 
@@ -338,9 +329,9 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
                         # If the order is partially filled, start the take process.
 
-                        if maker_client.cancel_order(id=buy_order['id'], symbol=pair)['filled'] != 0:
-                            print('Order partially filled! Starting C&T')
-                            check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
+                        maker_client.cancel_order(id=buy_order['id'], symbol=pair)
+                        check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
+
                         buy_exists = False
 
                     except ccxt.BadRequest as error:
