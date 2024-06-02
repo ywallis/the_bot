@@ -36,8 +36,3 @@ if __name__ == '__main__':
 # # In case of emergencies, kill all open orders on maker client.
 # Replace this by an entry in config for selection?
 # maker_client.cancel_all_orders('ALPH/USDT')
-
-
-# print(maker_client.create_limit_buy_order(pair, 10, 1))
-# print(maker_client.fetch_open_orders(pair))
-# print(maker_client.cancel_order('576052226432651264', pair))

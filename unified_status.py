@@ -4,13 +4,18 @@ import os
 import time
 from datetime import datetime, date
 from config import taker_client, maker_client, path_to_NAS
+from notifications import send_email
 
 
 def get_balance_status(client):
 
+    low_balance = False
     all_balances = client.fetch_balance()
     for ticker in all_balances['free']:
         print(f"{ticker} {round(all_balances['free'][ticker], 2)} available on {client.name}")
+        if all_balances['free'][ticker] <= 500:
+            low_balance = True
+    return low_balance
 
 
 def get_order_status(client, ticker):
@@ -57,6 +62,7 @@ def download_trades(client, ticker):
     clean.to_csv(output_path, header=True)
 
 
+email_sent = False
 bot_activated = True
 
 if __name__ == '__main__':
@@ -65,14 +71,24 @@ if __name__ == '__main__':
         try:
             print(f'Status at {datetime.now()}')
 
-            get_balance_status(maker_client)
-            get_balance_status(taker_client)
+            if get_balance_status(maker_client):
+                print(f'Low balance on {maker_client.name}')
+                if not email_sent:
+                    send_email(subject='ALPH Bot URGENT', message=f'Low balance on {maker_client.name}')
+                    email_sent = True
+            if get_balance_status(taker_client):
+                print(f'Low balance on {taker_client.name}')
+                if not email_sent:
+                    send_email(subject='ALPH Bot URGENT', message=f'Low balance on {taker_client.name}')
+                    email_sent = True
+
             get_order_status(maker_client, ticker='ALPH/USDT')
             get_order_status(taker_client, ticker='ALPH/USDT')
             download_trades(maker_client, 'ALPH/USDT')
             download_trades(taker_client, 'ALPH/USDT')
             # get_trades(bitmart_client, 'ALPH/USDT')
             print('Cycle done')
+
             time.sleep(30)
         except ccxt.ExchangeError:
             print('Exchange error, retrying.')
