@@ -53,9 +53,6 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
         if not buy_arbitrage and not sell_arbitrage:
             time.sleep(1)
 
-        if maker_client.name == 'Bitmart':
-            time.sleep(1)
-
         ticker_taker = taker_client.fetch_ticker(pair)
         ticker_maker = maker_client.fetch_ticker(pair)
         last_taker = ticker_taker['last']
