@@ -89,9 +89,13 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                 if check_if_solvent(buy_client=taker_client, sell_client=maker_client,
                                     quantity=taker_order_size, price=taker_target_ask, pair=pair):
                     try:
-                        # Actual orders to be disabled in boiler
                         place_sell_order(pair, maker_client, taker_target_bid, taker_order_size)
                         place_buy_order(pair, taker_client, taker_target_ask, taker_order_size)
+
+                        # The continue statement puts the priority on taking whenever possible,
+                        # since it is most efficient. Downside is that some orders may remain stuck
+                        # if the account is no longer solvent.
+
                         continue
 
                     except RuntimeError:
@@ -128,6 +132,11 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
                         place_sell_order(pair, taker_client, taker_target_bid, taker_order_size)
                         place_buy_order(pair, maker_client, taker_target_ask, taker_order_size)
+
+                        # The continue statement puts the priority on taking whenever possible,
+                        # since it is most efficient. Downside is that some orders may remain stuck
+                        # if the account is no longer solvent.
+
                         continue
 
                     except RuntimeError:

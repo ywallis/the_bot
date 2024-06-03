@@ -136,7 +136,7 @@ def place_buy_order(pair, client, price, quantity):
 
     else:
 
-        client.create_limit_buy_order(symbol=pair, amount=quantity, price=price)
+        client.create_market_order(symbol=pair, side='buy', amount=quantity, price=price)
 
     print(f'Placed a {quantity} {pair} buy order on {client.name} for {price}.')
     logger.info(f'Placed a {quantity} {pair} buy order on {client.name} for {price}.')
