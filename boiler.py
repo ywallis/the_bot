@@ -215,8 +215,9 @@ def check_and_take(client_a, client_b, order, pair, market_side):
         if float(order['price']) * filled <= 3:
             filled = 3.1 / float(order['price'])
 
-        client_a.create_market_order(symbol=pair, side=market_side, amount=filled)
-        # client_a.create_market_order(symbol=pair, side=market_side, amount=filled, price=order['price'])
+        # Targeting best price on taker exchange here would help keep inventory stable.
+
+        client_a.create_market_order(symbol=pair, side=market_side, amount=filled, price=order['price'])
         print(f'Market {market_side} {filled} {pair} on {client_b.name}')
 
         return True
