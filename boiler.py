@@ -132,7 +132,7 @@ def place_buy_order(pair, client, price, quantity):
         # client.create_limit_buy_order(symbol=pair, amount=quantity_with_fee, price=price)
         client.create_market_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price)
 
-    if client.name == 'MEXC Global':
+    elif client.name == 'MEXC Global':
 
         # Logic should prevent large gaps in executed quantity in times of high volatility.
         # May result in inventory deviations.
