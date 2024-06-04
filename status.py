@@ -115,8 +115,8 @@ if __name__ == '__main__':
 
             get_order_status(maker_client, ticker=pair)
             get_order_status(taker_client, ticker=pair)
-            download_trades(maker_client, pair, False)
-            download_trades(taker_client, pair, False)
+            download_trades(maker_client, pair)
+            download_trades(taker_client, pair)
             # get_trades(bitmart_client, 'ALPH/USDT')
             print('Cycle done')
 
