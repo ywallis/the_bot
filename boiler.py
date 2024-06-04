@@ -12,7 +12,7 @@ def retrieve_books(client, side, ticker):
     return client.fetch_order_book(symbol=ticker)[side]
 
 
-def order_book_matcher(bids, asks, spread, sizing, max_order_size, min_order_size=0.01):
+def order_book_matcher(bids, asks, spread, sizing, max_order_size, min_order_size=0.01, extend_spread=0):
 
     """This function takes in two order books sides represented by lists.
     It will then go both lists, and generate a target ask, target bid, and appropriate size to
@@ -52,8 +52,8 @@ def order_book_matcher(bids, asks, spread, sizing, max_order_size, min_order_siz
 
             # If the functions downstream use this with market orders, it may result in quantity deviations.
 
-            target_ask = float(asks[(ask_counter + 2)][0])
-            target_bid = float(bids[(bid_counter + 2)][0])
+            target_ask = float(asks[(ask_counter + extend_spread)][0])
+            target_bid = float(bids[(bid_counter + extend_spread)][0])
             # Implementing cumulative bid/ask
             # order_size = round(min(highest_bid_quantity, lowest_ask_quantity) * sizing, 2)
             order_size = round(min(cumulative_bid, cumulative_ask) * sizing, 2)
