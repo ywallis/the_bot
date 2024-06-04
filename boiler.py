@@ -50,6 +50,8 @@ def order_book_matcher(bids, asks, spread, sizing, max_order_size, min_order_siz
             print("This should be arbed.")
             logger.info("This should be arbed.")
 
+            # If the functions downstream use this with market orders, it may result in quantity deviations.
+
             target_ask = float(asks[(ask_counter + 2)][0])
             target_bid = float(bids[(bid_counter + 2)][0])
             # Implementing cumulative bid/ask
@@ -113,8 +115,6 @@ def place_sell_order(pair, client, price, quantity):
     print(f'Placed a {quantity} {pair} sell order on {client.name} for {price}.')
     logger.info(f'Placed a {quantity} {pair} sell order on {client.name} for {price}.')
 
-    # Will change to market orders here to prevent hanging. Should take place in all branches!
-
 
 def place_buy_order(pair, client, price, quantity):
     """This function places a buy limit order using a CCXT client.
@@ -132,7 +132,14 @@ def place_buy_order(pair, client, price, quantity):
         # client.create_limit_buy_order(symbol=pair, amount=quantity_with_fee, price=price)
         client.create_market_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price)
 
-        # Will change to market orders here to prevent hanging. Should take place in all branches!
+    if client.name == 'MEXC Global':
+
+        # Logic should prevent large gaps in executed quantity in times of high volatility.
+        # May result in inventory deviations.
+
+        cost = price * quantity
+
+        client.create_market_buy_order_with_cost(symbol=pair, cost=cost)
 
     else:
 
