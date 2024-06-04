@@ -68,6 +68,8 @@ def download_trades(client, ticker, production=True):
     else:
         output_path = f'{path_to_NAS}Test/{today}_{client.name}.csv'
 
+    # Bitmart doesn't support queries for over 200 last trades.
+
     if client.name == 'BitMart':
         trades = client.fetch_my_trades(symbol=ticker, limit=200)
     else:
@@ -86,7 +88,6 @@ def download_trades(client, ticker, production=True):
 
     df = pd.DataFrame(trades_with_fee)
     df.to_csv(output_path, mode='a', header=not os.path.exists(output_path))
-    # clean = pd.read_csv(output_path, header=0, index_col=0)
     clean = pd.read_csv(output_path, index_col=0)
     clean.drop_duplicates(subset='id', inplace=True)
     clean.to_csv(output_path, header=True)
