@@ -8,7 +8,7 @@ today = str(date.today())
 now = datetime.now()
 
 logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.DEBUG,
-                    filename=f'./Logs/{today}_maker_{maker_client.name}')
+                    filename=f'./Logs/{today}_maker_{maker_client.name}.txt')
 logger = logging.getLogger(__name__)
 
 making = True
