@@ -3,22 +3,40 @@ import pandas as pd
 import os
 import time
 from datetime import datetime, date
-from config import taker_client, maker_client, path_to_NAS
+from config import taker_client, maker_client, path_to_NAS, pair, low_balance_threshold
 from notifications import send_email
 
 
-def get_balance_status(client):
+def get_balance_status(client, ticker, threshold):
+
+    """This function allows to display the base and quote asset balances in a convenient terminal format.
+    Also includes a threshold for email notification which can be set in config."""
 
     low_balance = False
     all_balances = client.fetch_balance()
-    for ticker in all_balances['free']:
-        print(f"{ticker} {round(all_balances['free'][ticker], 2)} available on {client.name}")
-        if all_balances['free'][ticker] <= 500:
-            low_balance = True
+    threshold = threshold
+
+    base_asset = ticker.split('/')[0]
+    quote_asset = ticker.split('/')[1]
+
+    # Includes minimum threshold for exchanges with leftover balance
+
+    print(f"{base_asset} {round(all_balances['free'][base_asset], 2)} available on {client.name}")
+    print(f"{quote_asset} {round(all_balances['free'][quote_asset], 2)} available on {client.name}")
+
+    # Check if currently used balances are below set threshold for notification
+
+    if (all_balances['free'][base_asset] < threshold
+            or all_balances['free'][quote_asset] < threshold):
+        low_balance = True
+
     return low_balance
 
 
 def get_order_status(client, ticker):
+
+    """This function lists all open orders for a client in a terminal format."""
+
     all_open_orders = client.fetch_open_orders(ticker)
     open_buy_orders_total = 0
     open_sell_orders_total = 0
@@ -37,11 +55,23 @@ def get_order_status(client, ticker):
         print(f"Total of {round(open_sell_orders_total, 2)} sells open on {client.name}.")
 
 
-def download_trades(client, ticker):
+def download_trades(client, ticker, production=True):
+
+    """This function downloads all latest trades from a client to a csv file on the set path to NAS.
+    Includes a production flag, to instead export to test folder if set to False."""
+
     today = str(date.today())
     trades_with_fee = []
-    output_path = f'{path_to_NAS}{ticker.split("/")[0]}/{today}_{client.name}.csv'
-    trades = client.fetch_my_trades(symbol=ticker, limit=1000)
+
+    if production:
+        output_path = f'{path_to_NAS}{ticker.split("/")[0]}/{today}_{client.name}.csv'
+    else:
+        output_path = f'{path_to_NAS}Test/{today}_{client.name}.csv'
+
+    if client.name == 'BitMart':
+        trades = client.fetch_my_trades(symbol=ticker, limit=200)
+    else:
+        trades = client.fetch_my_trades(symbol=ticker, limit=1000)
 
     for trade in trades:
         if trade['fee'] is not None:
@@ -71,26 +101,28 @@ if __name__ == '__main__':
         try:
             print(f'Status at {datetime.now()}')
 
-            if get_balance_status(maker_client):
+            if get_balance_status(maker_client, ticker=pair, threshold=low_balance_threshold):
                 print(f'Low balance on {maker_client.name}')
                 if not email_sent:
                     send_email(subject='ALPH Bot URGENT', message=f'Low balance on {maker_client.name}')
                     email_sent = True
-            if get_balance_status(taker_client):
+            if get_balance_status(taker_client, ticker=pair, threshold=low_balance_threshold):
                 print(f'Low balance on {taker_client.name}')
                 if not email_sent:
                     send_email(subject='ALPH Bot URGENT', message=f'Low balance on {taker_client.name}')
                     email_sent = True
 
-            get_order_status(maker_client, ticker='ALPH/USDT')
-            get_order_status(taker_client, ticker='ALPH/USDT')
-            download_trades(maker_client, 'ALPH/USDT')
-            download_trades(taker_client, 'ALPH/USDT')
+            get_order_status(maker_client, ticker=pair)
+            get_order_status(taker_client, ticker=pair)
+            download_trades(maker_client, pair, False)
+            download_trades(taker_client, pair, False)
             # get_trades(bitmart_client, 'ALPH/USDT')
             print('Cycle done')
 
             time.sleep(30)
-        except ccxt.ExchangeError:
+        except ccxt.ExchangeError as e:
             print('Exchange error, retrying.')
-        except ccxt.RequestTimeout:
+            print(e)
+        except ccxt.RequestTimeout as e:
             print('Request timeout, retrying.')
+            print(e)
