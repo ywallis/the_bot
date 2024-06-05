@@ -19,7 +19,7 @@ if __name__ == '__main__':
         try:
             make_and_take(taker_client=taker_client, maker_client=maker_client, pair=pair, maker_spread=maker_spread,
                           maker_size=maker_size, taker_spread=taker_min_spread,
-                          taker_sizing=taker_sizing, taker_max_order_size=taker_max_order_size)
+                          taker_sizing=taker_sizing, taker_max_order_size=taker_max_order_size, taker_only=taker_only)
 
         except ccxt.NetworkError as e:
             print('Network error')

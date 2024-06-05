@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
-                  taker_spread, taker_sizing, taker_max_order_size):
+                  taker_spread, taker_sizing, taker_max_order_size, taker_only=False):
 
     """This function acts as a basic market making system, with the following two logics:
     1. A taker logic, acting immediately in two order books in case a profitable imbalance is spotted.
@@ -19,8 +19,11 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
     buy_order = None
     sell_order = None
     watching = True
-    buy_arbitrage = False
-    sell_arbitrage = False
+
+    # Arbitrage set to true for taker_only loops
+
+    buy_arbitrage = True
+    sell_arbitrage = True
     open_orders = maker_client.fetch_open_orders(pair)
     open_buy_count = 0
     open_sell_count = 0
@@ -156,6 +159,11 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
             except IndexError:
                 (print('End of orderbook'))
 
+        # Function loops here for taker_only
+
+        if taker_only:
+            continue
+
         # Sell side arbitrage
 
         if best_ask_maker >= best_ask_taker * maker_spread:
@@ -172,7 +180,8 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                 logger.info(f'Sell on {maker_client.name}, sell {best_ask_maker}')
 
                 if check_if_solvent(taker_client, maker_client, best_ask_maker, maker_size, pair=pair):
-                    sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=maker_size, price=best_ask_maker)
+                    sell_order = maker_client.create_limit_sell_order(symbol=pair,
+                                                                      amount=maker_size, price=best_ask_maker)
                     sell_exists = True
                     logger.info(f'Solvent, sell order created')
 
@@ -269,7 +278,8 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                 logger.info(f'Buy on {maker_client.name}, buy {best_bid_maker}')
 
                 if check_if_solvent(maker_client, taker_client, best_bid_maker, maker_size, pair=pair):
-                    buy_order = maker_client.create_limit_buy_order(symbol=pair, amount=maker_size, price=best_bid_maker)
+                    buy_order = maker_client.create_limit_buy_order(symbol=pair,
+                                                                    amount=maker_size, price=best_bid_maker)
                     buy_exists = True
                     logger.info(f'Solvent, buy order created')
 
@@ -301,7 +311,8 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                         logger.info('Was filled in the mean time, C&T')
 
                 if check_if_solvent(taker_client, maker_client, best_bid_maker, maker_size, pair=pair):
-                    buy_order = maker_client.create_limit_buy_order(symbol=pair, amount=maker_size, price=best_bid_maker)
+                    buy_order = maker_client.create_limit_buy_order(symbol=pair,
+                                                                    amount=maker_size, price=best_bid_maker)
                     print(f'Buy {best_bid_maker}')
                     buy_exists = True
                     logger.info('Order no longer at bottom of asks, cancelling.')
