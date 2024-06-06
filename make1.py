@@ -1,5 +1,5 @@
 import ccxt
-from boiler import check_and_take, check_if_solvent, place_buy_order, place_sell_order, order_book_matcher
+from boiler import check_and_take, check_if_solvent, place_buy_order, place_sell_order, order_book_matcher, order_time
 from datetime import datetime
 import time
 import logging
@@ -25,29 +25,37 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
     buy_arbitrage = True
     sell_arbitrage = True
     open_orders = maker_client.fetch_open_orders(pair)
-    open_buy_count = 0
-    open_sell_count = 0
 
     # Check for hanging orders in case of errors
 
     for order in open_orders:
-        if order['side'] == 'buy':
+
+        client_order_id = order['clientOrderId']
+
+        # Skipping hanging takers, addressed by cleaner function
+
+        if client_order_id is None:
+            continue
+
+        # Looking for edge buys
+
+        if client_order_id.startswith('eb'):
             buy_order = order
             buy_exists = True
-            open_buy_count += 1
 
-        if order['side'] == 'sell':
+        # Looking for edge sells
+
+        if client_order_id.startswith('es'):
             sell_order = order
             sell_exists = True
-            open_sell_count += 1
 
     # Kill all open orders if more than 1 per side.
 
-    if open_buy_count > 1 or open_sell_count > 1:
-        print('Too many orders for current logic, cancelling all!')
-        maker_client.cancel_all_orders(pair)
-        buy_exists = False
-        sell_exists = False
+    # if open_buy_count > 1 or open_sell_count > 1:
+    #     print('Too many orders for current logic, cancelling all!')
+    #     maker_client.cancel_all_orders(pair)
+    #     buy_exists = False
+    #     sell_exists = False
 
     while watching:
 
@@ -175,6 +183,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
             sell_arbitrage = True
 
             # If the flag for an existing sell doesn't exist yet, create a sell order at the bottom ask.
+            # Includes a custom clientOrderId to differentiate these orders from hanging taker order.
 
             if not sell_exists:
                 print(f'Make on {maker_client.name}')
@@ -183,7 +192,9 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
                 if check_if_solvent(taker_client, maker_client, best_ask_maker, maker_size, pair=pair):
                     sell_order = maker_client.create_limit_sell_order(symbol=pair,
-                                                                      amount=maker_size, price=best_ask_maker)
+                                                                      amount=maker_size,
+                                                                      price=best_ask_maker,
+                                                                      params={'clientOrderId': f'es_{order_time()}'})
                     sell_exists = True
                     logger.info(f'Solvent, sell order created')
 
@@ -214,7 +225,8 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
                 if check_if_solvent(taker_client, maker_client, best_ask_maker, maker_size, pair=pair):
                     sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=maker_size,
-                                                                      price=best_ask_maker)
+                                                                      price=best_ask_maker,
+                                                                      params={'clientOrderId': f'es_{order_time()}'})
                     print(f'Sell {best_ask_maker}')
                     sell_exists = True
                     logger.info('Order no longer at bottom of asks, cancelling.')
@@ -273,6 +285,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
             buy_arbitrage = True
 
             # If the flag for an existing buy doesn't exist yet, create a buy order at the top bid.
+            # Includes a custom clientOrderId to differentiate these orders from hanging taker order.
 
             if not buy_exists:
                 print(f'Make on {maker_client.name}')
@@ -281,7 +294,8 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
                 if check_if_solvent(maker_client, taker_client, best_bid_maker, maker_size, pair=pair):
                     buy_order = maker_client.create_limit_buy_order(symbol=pair,
-                                                                    amount=maker_size, price=best_bid_maker)
+                                                                    amount=maker_size, price=best_bid_maker,
+                                                                    params={'clientOrderId': f'eb_{order_time()}'})
                     buy_exists = True
                     logger.info(f'Solvent, buy order created')
 
@@ -314,7 +328,8 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
                 if check_if_solvent(taker_client, maker_client, best_bid_maker, maker_size, pair=pair):
                     buy_order = maker_client.create_limit_buy_order(symbol=pair,
-                                                                    amount=maker_size, price=best_bid_maker)
+                                                                    amount=maker_size, price=best_bid_maker,
+                                                                    params={'clientOrderId': f'eb_{order_time()}'})
                     print(f'Buy {best_bid_maker}')
                     buy_exists = True
                     logger.info('Order no longer at bottom of asks, cancelling.')

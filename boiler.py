@@ -1,5 +1,6 @@
 import logging
 import ccxt
+from datetime import datetime
 
 from config import gate_fee
 
@@ -16,7 +17,9 @@ def order_book_matcher(bids, asks, spread, sizing, max_order_size, min_order_siz
 
     """This function takes in two order books sides represented by lists.
     It will then go both lists, and generate a target ask, target bid, and appropriate size to
-    extract maximum value from both books. Other inputs are floats"""
+    extract maximum value from both books. Other inputs are floats.
+    extend_spread is used to target prices beyond the optimal spread.
+    This can be used to help guarantee execution for limit orders, or increase skew for cost-based market buy orders."""
 
     # REMOVE MIN ORDER DEFAULT EVENTUALLY
 
@@ -128,8 +131,8 @@ def place_buy_order(pair, client, price, quantity):
 
         quantity_with_fee = round(quantity * fee_ratio, 2)
 
-        print(f'Placing a {quantity} {pair} buy order on {client.name} for {price}.')
-        logger.info(f'Placing a {quantity} {pair} buy order on {client.name} for {price}.')
+        print(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
+        logger.info(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
 
         return client.create_limit_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price)
 
@@ -214,3 +217,7 @@ def check_and_take(client_a, client_b, order, pair, market_side):
         print(f'Market {market_side} {filled} {pair} on {client_b.name}')
 
         return True
+
+
+def order_time():
+    return datetime.now().strftime('%y%m%d_%H%M%S_%f')
