@@ -90,7 +90,8 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
                 taker_target_ask, taker_target_bid, taker_order_size = order_book_matcher(maker_bids, taker_asks,
                                                                                           taker_spread, taker_sizing,
-                                                                                          taker_max_order_size)
+                                                                                          taker_max_order_size,
+                                                                                          extend_spread=2)
 
                 if check_if_solvent(buy_client=taker_client, sell_client=maker_client,
                                     quantity=taker_order_size, price=taker_target_ask, pair=pair):
@@ -128,7 +129,8 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
                 taker_target_ask, taker_target_bid, taker_order_size = order_book_matcher(taker_bids, maker_asks,
                                                                                           taker_spread, taker_sizing,
-                                                                                          taker_max_order_size)
+                                                                                          taker_max_order_size,
+                                                                                          extend_spread=2)
 
                 if check_if_solvent(buy_client=maker_client, sell_client=taker_client,
                                     quantity=taker_order_size, price=taker_target_ask, pair=pair):

@@ -109,11 +109,10 @@ def place_sell_order(pair, client, price, quantity):
     """This function places a sell limit order using a CCXT client.
     It then outputs a confirmation of that order to the console and logs."""
 
-    # client.create_limit_sell_order(symbol=pair, amount=quantity, price=price)
-    client.create_market_order(symbol=pair, side='sell', amount=quantity, price=price)
+    print(f'Placing a {quantity} {pair} sell order on {client.name} for {price}.')
+    logger.info(f'Placing a {quantity} {pair} sell order on {client.name} for {price}.')
 
-    print(f'Placed a {quantity} {pair} sell order on {client.name} for {price}.')
-    logger.info(f'Placed a {quantity} {pair} sell order on {client.name} for {price}.')
+    return client.create_limit_order(symbol=pair, side='sell', amount=quantity, price=price)
 
 
 def place_buy_order(pair, client, price, quantity):
@@ -129,24 +128,18 @@ def place_buy_order(pair, client, price, quantity):
 
         quantity_with_fee = round(quantity * fee_ratio, 2)
 
-        # client.create_limit_buy_order(symbol=pair, amount=quantity_with_fee, price=price)
-        client.create_market_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price)
+        print(f'Placing a {quantity} {pair} buy order on {client.name} for {price}.')
+        logger.info(f'Placing a {quantity} {pair} buy order on {client.name} for {price}.')
 
-    elif client.name == 'MEXC Global':
-
-        # Logic should prevent large gaps in executed quantity in times of high volatility.
-        # May result in inventory deviations.
-
-        cost = price * quantity
-
-        client.create_market_buy_order_with_cost(symbol=pair, cost=cost)
+        return client.create_limit_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price)
 
     else:
 
-        client.create_market_order(symbol=pair, side='buy', amount=quantity, price=price)
+        print(f'Placing a {quantity} {pair} buy order on {client.name} for {price}.')
+        logger.info(f'Placing a {quantity} {pair} buy order on {client.name} for {price}.')
 
-    print(f'Placed a {quantity} {pair} buy order on {client.name} for {price}.')
-    logger.info(f'Placed a {quantity} {pair} buy order on {client.name} for {price}.')
+        return client.create_limit_order(symbol=pair, side='buy', amount=quantity, price=price)
+
 
 
 def check_if_solvent(buy_client, sell_client, price, quantity, pair):
