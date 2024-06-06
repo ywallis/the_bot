@@ -88,7 +88,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
               f'\nLowest on {lowest_bid} for {all_bids[lowest_bid]}, '
               f'highest on {highest_ask} for {all_asks[highest_ask]} ({watch_spread}%).')
 
-        # Include taker logic
+        # Start of taker logic
 
         # Start take_take with client_a as buyer, client_b as seller.
 
