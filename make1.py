@@ -1,5 +1,6 @@
 import ccxt
-from boiler import check_and_take, check_if_solvent, place_buy_order, place_sell_order, order_book_matcher, order_time
+from boiler import (check_and_take, check_if_solvent, place_buy_order, place_sell_order, order_book_matcher,
+                    order_time, maker_order_sizer, within_percentage_range)
 from datetime import datetime
 import time
 import logging
@@ -182,6 +183,12 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
             sell_arbitrage = True
 
+            # Calculate the current optimal order size TESTING: ONLY PRINTS!
+
+            optimal_sell_size = maker_order_sizer(best_ask_maker, taker_asks, "sell", maker_spread, 10, 50)
+
+            print(f'Optimal order size currently {optimal_sell_size}')
+
             # If the flag for an existing sell doesn't exist yet, create a sell order at the bottom ask.
             # Includes a custom clientOrderId to differentiate these orders from hanging taker order.
 
@@ -190,9 +197,9 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                 print(f'Sell {best_ask_maker}')
                 logger.info(f'Sell on {maker_client.name}, sell {best_ask_maker}')
 
-                if check_if_solvent(taker_client, maker_client, best_ask_maker, maker_size, pair=pair):
+                if check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
                     sell_order = maker_client.create_limit_sell_order(symbol=pair,
-                                                                      amount=maker_size,
+                                                                      amount=optimal_sell_size,
                                                                       price=best_ask_maker,
                                                                       params={'clientOrderId': f'es_{order_time()}'})
                     sell_exists = True
@@ -223,13 +230,40 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                         sell_exists = False
                         logger.info('Was filled in the mean time, C&T')
 
-                if check_if_solvent(taker_client, maker_client, best_ask_maker, maker_size, pair=pair):
-                    sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=maker_size,
+                if check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
+                    sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=optimal_sell_size,
                                                                       price=best_ask_maker,
                                                                       params={'clientOrderId': f'es_{order_time()}'})
                     print(f'Sell {best_ask_maker}')
                     sell_exists = True
-                    logger.info('Order no longer at bottom of asks, cancelling.')
+
+            # Checks if the current order's amount is within a set range from the optimal size
+
+            elif not within_percentage_range(sell_order['amount'], optimal_sell_size, 20):
+                print('Order no longer within acceptable size range, cancelling.')
+                logger.info('Order no longer within acceptable size range, cancelling.')
+
+                try:
+                    # If the order is partially filled, start the take process.
+                    maker_client.cancel_order(id=sell_order['id'], symbol=pair)
+                    check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
+
+                    sell_exists = False
+
+                except ccxt.BadRequest as error:
+                    logger.info(error)
+                    print(f'Order has been fully filled, taking {sell_order["amount"]}')
+
+                    if check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
+                        sell_exists = False
+                        logger.info('Was filled in the mean time, C&T')
+
+                if check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
+                    sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=optimal_sell_size,
+                                                                      price=best_ask_maker,
+                                                                      params={'clientOrderId': f'es_{order_time()}'})
+                    print(f'Sell {best_ask_maker}')
+                    sell_exists = True
 
             # If the flag for an existing sell order exists, check if it has been filled.
 
@@ -284,6 +318,12 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
             buy_arbitrage = True
 
+            # Calculate the current optimal order size TESTING: ONLY PRINTS!
+
+            optimal_buy_size = maker_order_sizer(best_bid_maker, taker_bids, "buy", maker_spread, 10, 50)
+
+            print(f'Optimal order size currently {optimal_buy_size}')
+
             # If the flag for an existing buy doesn't exist yet, create a buy order at the top bid.
             # Includes a custom clientOrderId to differentiate these orders from hanging taker order.
 
@@ -292,9 +332,9 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                 print(f'Buy {best_bid_maker}')
                 logger.info(f'Buy on {maker_client.name}, buy {best_bid_maker}')
 
-                if check_if_solvent(maker_client, taker_client, best_bid_maker, maker_size, pair=pair):
+                if check_if_solvent(maker_client, taker_client, best_bid_maker, optimal_buy_size, pair=pair):
                     buy_order = maker_client.create_limit_buy_order(symbol=pair,
-                                                                    amount=maker_size, price=best_bid_maker,
+                                                                    amount=optimal_buy_size, price=best_bid_maker,
                                                                     params={'clientOrderId': f'eb_{order_time()}'})
                     buy_exists = True
                     logger.info(f'Solvent, buy order created')
@@ -326,13 +366,42 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                         buy_exists = False
                         logger.info('Was filled in the mean time, C&T')
 
-                if check_if_solvent(taker_client, maker_client, best_bid_maker, maker_size, pair=pair):
+                if check_if_solvent(taker_client, maker_client, best_bid_maker, optimal_buy_size, pair=pair):
                     buy_order = maker_client.create_limit_buy_order(symbol=pair,
-                                                                    amount=maker_size, price=best_bid_maker,
+                                                                    amount=optimal_buy_size, price=best_bid_maker,
                                                                     params={'clientOrderId': f'eb_{order_time()}'})
                     print(f'Buy {best_bid_maker}')
                     buy_exists = True
-                    logger.info('Order no longer at bottom of asks, cancelling.')
+
+            # Checks if the current order's amount is within a set range from the optimal size
+
+            elif not within_percentage_range(sell_order['amount'], optimal_buy_size, 20):
+                print('Order no longer within acceptable size range, cancelling.')
+                logger.info('Order no longer within acceptable size range, cancelling.')
+
+                try:
+
+                    # If the order is partially filled, start the take process.
+
+                    maker_client.cancel_order(id=buy_order['id'], symbol=pair)
+                    check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
+
+                    buy_exists = False
+
+                except ccxt.BadRequest as error:
+                    logger.info(error)
+                    print(f'Order has been fully filled, taking {buy_order["amount"]}')
+
+                    if check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
+                        buy_exists = False
+                        logger.info('Was filled in the mean time, C&T')
+
+                if check_if_solvent(taker_client, maker_client, best_bid_maker, optimal_buy_size, pair=pair):
+                    buy_order = maker_client.create_limit_buy_order(symbol=pair,
+                                                                    amount=optimal_buy_size, price=best_bid_maker,
+                                                                    params={'clientOrderId': f'eb_{order_time()}'})
+                    print(f'Buy {best_bid_maker}')
+                    buy_exists = True
 
             # If the flag for an existing buy order exists, check if it has been filled.
 

@@ -221,3 +221,41 @@ def check_and_take(client_a, client_b, order, pair, market_side):
 
 def order_time():
     return datetime.now().strftime('%y%m%d_%H%M%S_%f')
+
+
+def maker_order_sizer(maker_level, taker_book, side, min_spread, min_maker_size, max_maker_size):
+
+    """NEEDS FLESHING OUT!
+    Goal of function is to watch how much liquidity is available on the taker client within the defined spread."""
+
+    cumulative = 0
+    if side == 'sell':
+        for level in taker_book:
+            if maker_level >= level[0] * min_spread:
+                cumulative += level[1]
+            else:
+                break
+
+    if side == 'buy':
+        for level in taker_book:
+            if level[0] >= maker_level * min_spread:
+                cumulative += level[1]
+            else:
+                break
+
+    if cumulative < min_maker_size:
+        return min_maker_size
+    elif cumulative > max_maker_size:
+        return max_maker_size
+    else:
+        return cumulative
+
+
+def within_percentage_range(x, y, percentage):
+
+    """Function checks whether x is within a definable percentage range from y."""
+
+    lower_bound = y * (1 - percentage / 100)
+    upper_bound = y * (1 + percentage / 100)
+
+    return lower_bound <= x <= upper_bound
