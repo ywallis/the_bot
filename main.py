@@ -34,6 +34,6 @@ if __name__ == '__main__':
             logger.info(e)
 
 
-# # In case of emergencies, kill all open orders on maker client.
+# In case of emergencies, kill all open orders on maker client.
 # Replace this by an entry in config for selection?
 # maker_client.cancel_all_orders(pair)

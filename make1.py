@@ -375,7 +375,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
             # Checks if the current order's amount is within a set range from the optimal size
 
-            elif not within_percentage_range(sell_order['amount'], optimal_buy_size, 20):
+            elif not within_percentage_range(buy_order['amount'], optimal_buy_size, 20):
                 print('Order no longer within acceptable size range, cancelling.')
                 logger.info('Order no longer within acceptable size range, cancelling.')
 
