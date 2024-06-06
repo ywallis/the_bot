@@ -85,8 +85,8 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
         watch_spread = round((all_asks[highest_ask] / all_bids[lowest_bid] - 1) * 100, 2)
 
         print(f'Watching at {datetime.now()}.'
-              f'\nLowest bid on {lowest_bid} for {all_bids[lowest_bid]}, '
-              f'highest ask on {highest_ask} for {all_asks[highest_ask]} ({watch_spread}%).')
+              f'\nLowest on {lowest_bid} for {all_bids[lowest_bid]}, '
+              f'highest on {highest_ask} for {all_asks[highest_ask]} ({watch_spread}%).')
 
         # Include taker logic
 
