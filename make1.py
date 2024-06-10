@@ -318,7 +318,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
             buy_arbitrage = True
 
-            # Calculate the current optimal order size TESTING: ONLY PRINTS!
+            # Calculate the current optimal order size
 
             optimal_buy_size = maker_order_sizer(best_bid_maker, taker_bids, "buy", maker_spread, 10, 50)
 
