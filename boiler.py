@@ -107,7 +107,7 @@ def order_book_matcher(bids, asks, spread, sizing, max_order_size, min_order_siz
             dynamic_arb = False
 
 
-def place_sell_order(pair, client, price, quantity):
+def place_sell_order(pair, client, price, quantity, identifier):
 
     """This function places a sell limit order using a CCXT client.
     It then outputs a confirmation of that order to the console and logs."""
@@ -115,10 +115,11 @@ def place_sell_order(pair, client, price, quantity):
     print(f'Placing a {quantity} {pair} sell order on {client.name} for {price}.')
     logger.info(f'Placing a {quantity} {pair} sell order on {client.name} for {price}.')
 
-    return client.create_limit_order(symbol=pair, side='sell', amount=quantity, price=price)
+    return client.create_limit_order(symbol=pair, side='sell', amount=quantity, price=price,
+                                     params={'clientOrderId': identifier})
 
 
-def place_buy_order(pair, client, price, quantity):
+def place_buy_order(pair, client, price, quantity, identifier):
     """This function places a buy limit order using a CCXT client.
     It then outputs a confirmation of that order to the console and logs.
     It includes a modification for exchanges using the base asset for fees,
@@ -134,15 +135,16 @@ def place_buy_order(pair, client, price, quantity):
         print(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
         logger.info(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
 
-        return client.create_limit_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price)
+        return client.create_limit_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price,
+                                     params={'clientOrderId': identifier})
 
     else:
 
         print(f'Placing a {quantity} {pair} buy order on {client.name} for {price}.')
         logger.info(f'Placing a {quantity} {pair} buy order on {client.name} for {price}.')
 
-        return client.create_limit_order(symbol=pair, side='buy', amount=quantity, price=price)
-
+        return client.create_limit_order(symbol=pair, side='buy', amount=quantity, price=price,
+                                         params={'clientOrderId': identifier})
 
 
 def check_if_solvent(buy_client, sell_client, price, quantity, pair):
@@ -213,7 +215,8 @@ def check_and_take(client_a, client_b, order, pair, market_side):
 
         # Targeting best price on taker exchange here would help keep inventory stable.
 
-        client_a.create_market_order(symbol=pair, side=market_side, amount=filled, price=order['price'])
+        client_a.create_market_order(symbol=pair, side=market_side, amount=filled, price=order['price'],
+                                     params={'clientOrderId': func_order['clientOrderId']})
         print(f'Market {market_side} {filled} {pair} on {client_b.name}')
 
         return True
