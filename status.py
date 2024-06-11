@@ -102,7 +102,7 @@ def download_trades(client, ticker, production=True):
     trades_with_fee = []
 
     if production:
-        output_path = f'{path_to_NAS}{ticker.split("/")[0]}/Trades{today}_{client.name}.csv'
+        output_path = f'{path_to_NAS}{ticker.split("/")[0]}/Trades/{today}_{client.name}.csv'
     else:
         output_path = f'{path_to_NAS}Test/Trades/{today}_{client.name}.csv'
 
@@ -155,10 +155,10 @@ if __name__ == '__main__':
 
             get_order_status(maker_client, ticker=pair)
             get_order_status(taker_client, ticker=pair)
-            download_trades(maker_client, pair, False)
-            download_trades(taker_client, pair, False)
-            download_orders(maker_client, pair, False)
-            download_orders(taker_client, pair, False)
+            download_trades(maker_client, pair)
+            download_trades(taker_client, pair)
+            download_orders(maker_client, pair)
+            download_orders(taker_client, pair)
             print('Cycle done')
 
             time.sleep(30)
