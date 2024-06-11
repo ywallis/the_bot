@@ -40,13 +40,13 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
         # Looking for edge buys
 
-        if client_order_id.startswith('eb'):
+        if client_order_id.startswith('t-eb'):
             buy_order = order
             buy_exists = True
 
         # Looking for edge sells
 
-        if client_order_id.startswith('es'):
+        if client_order_id.startswith('t-es'):
             sell_order = order
             sell_exists = True
 
@@ -105,7 +105,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                 if check_if_solvent(buy_client=taker_client, sell_client=maker_client,
                                     quantity=taker_order_size, price=taker_target_ask, pair=pair):
                     try:
-                        take_take_order_id = f'tt_{order_time()}'
+                        take_take_order_id = f't-tt_{order_time()}'
                         place_sell_order(pair, maker_client, taker_target_bid, taker_order_size, take_take_order_id)
                         place_buy_order(pair, taker_client, taker_target_ask, taker_order_size, take_take_order_id)
 
@@ -146,7 +146,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                                     quantity=taker_order_size, price=taker_target_ask, pair=pair):
                     try:
 
-                        take_take_order_id = f'tt_{order_time()}'
+                        take_take_order_id = f't-tt_{order_time()}'
                         place_sell_order(pair, taker_client, taker_target_bid, taker_order_size, take_take_order_id)
                         place_buy_order(pair, maker_client, taker_target_ask, taker_order_size, take_take_order_id)
 
@@ -203,7 +203,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                     sell_order = maker_client.create_limit_sell_order(symbol=pair,
                                                                       amount=optimal_sell_size,
                                                                       price=best_ask_maker,
-                                                                      params={'clientOrderId': f'es_{order_time()}'})
+                                                                      params={'clientOrderId': f't-es_{order_time()}'})
                     sell_exists = True
                     logger.info(f'Solvent, sell order created')
 
@@ -235,7 +235,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                 if check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
                     sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=optimal_sell_size,
                                                                       price=best_ask_maker,
-                                                                      params={'clientOrderId': f'es_{order_time()}'})
+                                                                      params={'clientOrderId': f't-es_{order_time()}'})
                     print(f'Sell {best_ask_maker}')
                     sell_exists = True
 
@@ -263,7 +263,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                 if check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
                     sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=optimal_sell_size,
                                                                       price=best_ask_maker,
-                                                                      params={'clientOrderId': f'es_{order_time()}'})
+                                                                      params={'clientOrderId': f't-es_{order_time()}'})
                     print(f'Sell {best_ask_maker}')
                     sell_exists = True
 
@@ -337,7 +337,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                 if check_if_solvent(maker_client, taker_client, best_bid_maker, optimal_buy_size, pair=pair):
                     buy_order = maker_client.create_limit_buy_order(symbol=pair,
                                                                     amount=optimal_buy_size, price=best_bid_maker,
-                                                                    params={'clientOrderId': f'eb_{order_time()}'})
+                                                                    params={'clientOrderId': f't-eb_{order_time()}'})
                     buy_exists = True
                     logger.info(f'Solvent, buy order created')
 
@@ -371,7 +371,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                 if check_if_solvent(taker_client, maker_client, best_bid_maker, optimal_buy_size, pair=pair):
                     buy_order = maker_client.create_limit_buy_order(symbol=pair,
                                                                     amount=optimal_buy_size, price=best_bid_maker,
-                                                                    params={'clientOrderId': f'eb_{order_time()}'})
+                                                                    params={'clientOrderId': f't-eb_{order_time()}'})
                     print(f'Buy {best_bid_maker}')
                     buy_exists = True
 
@@ -401,7 +401,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                 if check_if_solvent(taker_client, maker_client, best_bid_maker, optimal_buy_size, pair=pair):
                     buy_order = maker_client.create_limit_buy_order(symbol=pair,
                                                                     amount=optimal_buy_size, price=best_bid_maker,
-                                                                    params={'clientOrderId': f'eb_{order_time()}'})
+                                                                    params={'clientOrderId': f't-eb_{order_time()}'})
                     print(f'Buy {best_bid_maker}')
                     buy_exists = True
 

@@ -136,7 +136,7 @@ def place_buy_order(pair, client, price, quantity, identifier):
         logger.info(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
 
         return client.create_limit_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price,
-                                     params={'clientOrderId': identifier})
+                                         params={'clientOrderId': identifier})
 
     else:
 
@@ -223,6 +223,9 @@ def check_and_take(client_a, client_b, order, pair, market_side):
 
 
 def order_time():
+
+    """Creates a datetime-based stamp to make unique and custom order numbers."""
+
     return datetime.now().strftime('%y%m%d_%H%M%S_%f')
 
 
