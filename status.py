@@ -55,6 +55,44 @@ def get_order_status(client, ticker):
         print(f"Total of {round(open_sell_orders_total, 2)} sells open on {client.name}.")
 
 
+def download_orders(client, ticker, production=True):
+
+    """This function downloads all latest trades from a client to a csv file on the set path to NAS.
+    Includes a production flag, to instead export to test folder if set to False."""
+
+    today = str(date.today())
+    trades_with_fee = []
+
+    if production:
+        output_path = f'{path_to_NAS}{ticker.split("/")[0]}/Orders/{today}_{client.name}.csv'
+    else:
+        output_path = f'{path_to_NAS}Test/Orders/{today}_{client.name}.csv'
+
+    # Bitmart doesn't support queries for over 200 last trades.
+
+    if client.name == 'BitMart':
+        orders = client.fetch_closed_orders(symbol=ticker, limit=200)
+    else:
+        orders = client.fetch_closed_orders(symbol=ticker, limit=1000)
+
+    for order in orders:
+        if order['fee'] is not None:
+            order['fee_cost'] = order['fee']['cost']
+            order['fee_currency'] = order['fee']['currency']
+        for fee in order['fees']:
+            if float(fee['cost']) != 0:
+                order['fee_cost'] = fee['cost']
+                order['fee_currency'] = fee['currency']
+        order['exchange'] = client.name
+        trades_with_fee.append(order)
+
+    df = pd.DataFrame(trades_with_fee)
+    df.to_csv(output_path, mode='a', header=not os.path.exists(output_path))
+    clean = pd.read_csv(output_path, index_col=0)
+    clean.drop_duplicates(subset='id', inplace=True)
+    clean.to_csv(output_path, header=True)
+
+
 def download_trades(client, ticker, production=True):
 
     """This function downloads all latest trades from a client to a csv file on the set path to NAS.
@@ -64,9 +102,9 @@ def download_trades(client, ticker, production=True):
     trades_with_fee = []
 
     if production:
-        output_path = f'{path_to_NAS}{ticker.split("/")[0]}/{today}_{client.name}.csv'
+        output_path = f'{path_to_NAS}{ticker.split("/")[0]}/Trades{today}_{client.name}.csv'
     else:
-        output_path = f'{path_to_NAS}Test/{today}_{client.name}.csv'
+        output_path = f'{path_to_NAS}Test/Trades/{today}_{client.name}.csv'
 
     # Bitmart doesn't support queries for over 200 last trades.
 
@@ -113,11 +151,14 @@ if __name__ == '__main__':
                     send_email(subject='ALPH Bot URGENT', message=f'Low balance on {taker_client.name}')
                     email_sent = True
 
+            # Switch to direct exchange clients whenever possible.
+
             get_order_status(maker_client, ticker=pair)
             get_order_status(taker_client, ticker=pair)
-            download_trades(maker_client, pair)
-            download_trades(taker_client, pair)
-            # get_trades(bitmart_client, 'ALPH/USDT')
+            download_trades(maker_client, pair, False)
+            download_trades(taker_client, pair, False)
+            download_orders(maker_client, pair, False)
+            download_orders(taker_client, pair, False)
             print('Cycle done')
 
             time.sleep(30)
