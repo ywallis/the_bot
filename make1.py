@@ -147,8 +147,8 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                     try:
 
                         take_take_order_id = f't-{order_time()}_tt'
-                        place_sell_order(pair, taker_client, taker_target_bid, taker_order_size, take_take_order_id)
                         place_buy_order(pair, maker_client, taker_target_ask, taker_order_size, take_take_order_id)
+                        place_sell_order(pair, taker_client, taker_target_bid, taker_order_size, take_take_order_id)
 
                         # The continue statement puts the priority on taking whenever possible,
                         # since it is most efficient. Downside is that some orders may remain stuck
