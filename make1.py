@@ -187,7 +187,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
             # Calculate the current optimal order size TESTING: ONLY PRINTS!
 
-            optimal_sell_size = maker_order_sizer(best_ask_maker, taker_asks, "sell", maker_spread, 10, 50)
+            optimal_sell_size = maker_order_sizer(best_ask_maker, taker_asks, "sell", maker_spread, 10, maker_size)
 
             print(f'Optimal order size currently {optimal_sell_size}')
 
@@ -200,10 +200,15 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                 logger.info(f'Sell on {maker_client.name}, sell {best_ask_maker}')
 
                 if check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
+
+                    # Some exchanges only respond with an order id, hence the code complication with the ['id']
+                    # to retrieve a full object
+
                     sell_order = maker_client.create_limit_sell_order(symbol=pair,
                                                                       amount=optimal_sell_size,
                                                                       price=best_ask_maker,
                                                                       params={'clientOrderId': f't-{order_time()}_es'})
+                    sell_order = maker_client.fetch_order(id=sell_order['id'], symbol=pair)
                     sell_exists = True
                     logger.info(f'Solvent, sell order created')
 
@@ -214,6 +219,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
             # If the existing order is no longer at the bottom of the asks, try to cancel it and place a new one.
 
             elif sell_order['price'] != best_ask_maker:
+
                 print('Order no longer at bottom of asks, cancelling.')
                 logger.info('Order no longer at bottom of asks, cancelling.')
 
@@ -224,7 +230,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
                     sell_exists = False
 
-                except ccxt.BadRequest as error:
+                except (ccxt.BadRequest, ccxt.ExchangeError) as error:
                     logger.info(error)
                     print(f'Order has been fully filled, taking {sell_order["amount"]}')
 
@@ -236,6 +242,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                     sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=optimal_sell_size,
                                                                       price=best_ask_maker,
                                                                       params={'clientOrderId': f't-{order_time()}_es'})
+                    sell_order = maker_client.fetch_order(id=sell_order['id'], symbol=pair)
                     print(f'Sell {best_ask_maker}')
                     sell_exists = True
 
@@ -252,7 +259,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
                     sell_exists = False
 
-                except ccxt.BadRequest as error:
+                except (ccxt.BadRequest, ccxt.ExchangeError) as error:
                     logger.info(error)
                     print(f'Order has been fully filled, taking {sell_order["amount"]}')
 
@@ -264,6 +271,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                     sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=optimal_sell_size,
                                                                       price=best_ask_maker,
                                                                       params={'clientOrderId': f't-{order_time()}_es'})
+                    sell_order = maker_client.fetch_order(id=sell_order['id'], symbol=pair)
                     print(f'Sell {best_ask_maker}')
                     sell_exists = True
 
@@ -304,7 +312,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                         check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
                         sell_exists = False
 
-                    except ccxt.BadRequest as error:
+                    except (ccxt.BadRequest, ccxt.ExchangeError) as error:
                         logger.info(error)
                         print(f'Order has been fully filled, taking {sell_order["amount"]}')
 
@@ -322,7 +330,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
             # Calculate the current optimal order size
 
-            optimal_buy_size = maker_order_sizer(best_bid_maker, taker_bids, "buy", maker_spread, 10, 50)
+            optimal_buy_size = maker_order_sizer(best_bid_maker, taker_bids, "buy", maker_spread, 10, maker_size)
 
             print(f'Optimal order size currently {optimal_buy_size}')
 
@@ -338,6 +346,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                     buy_order = maker_client.create_limit_buy_order(symbol=pair,
                                                                     amount=optimal_buy_size, price=best_bid_maker,
                                                                     params={'clientOrderId': f't-{order_time()}_eb'})
+                    buy_order = maker_client.fetch_order(id=buy_order['id'], symbol=pair)
                     buy_exists = True
                     logger.info(f'Solvent, buy order created')
 
@@ -360,7 +369,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
                     buy_exists = False
 
-                except ccxt.BadRequest as error:
+                except (ccxt.BadRequest, ccxt.ExchangeError) as error:
                     logger.info(error)
                     print(f'Order has been fully filled, taking {buy_order["amount"]}')
 
@@ -372,6 +381,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                     buy_order = maker_client.create_limit_buy_order(symbol=pair,
                                                                     amount=optimal_buy_size, price=best_bid_maker,
                                                                     params={'clientOrderId': f't-{order_time()}_eb'})
+                    buy_order = maker_client.fetch_order(id=buy_order['id'], symbol=pair)
                     print(f'Buy {best_bid_maker}')
                     buy_exists = True
 
@@ -390,7 +400,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
                     buy_exists = False
 
-                except ccxt.BadRequest as error:
+                except (ccxt.BadRequest, ccxt.ExchangeError) as error:
                     logger.info(error)
                     print(f'Order has been fully filled, taking {buy_order["amount"]}')
 
@@ -402,6 +412,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                     buy_order = maker_client.create_limit_buy_order(symbol=pair,
                                                                     amount=optimal_buy_size, price=best_bid_maker,
                                                                     params={'clientOrderId': f't-{order_time()}_eb'})
+                    buy_order = maker_client.fetch_order(id=buy_order['id'], symbol=pair)
                     print(f'Buy {best_bid_maker}')
                     buy_exists = True
 
@@ -443,7 +454,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
 
                         buy_exists = False
 
-                    except ccxt.BadRequest as error:
+                    except (ccxt.BadRequest, ccxt.ExchangeError) as error:
                         logger.info(error)
                         print(f'Order has been fully filled, taking {buy_order["amount"]}')
 
