@@ -70,7 +70,7 @@ def download_orders(client, ticker, production=True):
     if client.name == 'BitMart':
         orders = client.fetch_closed_orders(symbol=ticker, limit=200)
     elif client.name == 'Bitget':
-        orders = client.fetch_canceled_and_closed_orders(symbol=ticker, limit=1000)
+        orders = client.fetch_canceled_and_closed_orders(symbol=ticker)
     else:
         orders = client.fetch_closed_orders(symbol=ticker, limit=1000)
 
