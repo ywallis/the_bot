@@ -36,12 +36,12 @@ if __name__ == '__main__':
             get_order_status(gate_client, ticker=pair)
             get_order_status(mexc_client, ticker=pair)
             get_order_status(bitget_client, ticker=pair)
-            download_trades(gate_client, pair, False)
-            download_trades(mexc_client, pair, False)
-            download_trades(bitget_client, pair, False)
-            download_orders(gate_client, pair, False)
-            download_orders(mexc_client, pair, False)
-            download_orders(bitget_client, pair, False)
+            download_trades(gate_client, pair)
+            download_trades(mexc_client, pair)
+            download_trades(bitget_client, pair)
+            download_orders(gate_client, pair)
+            download_orders(mexc_client, pair)
+            download_orders(bitget_client, pair)
 
             print('Cycle done')
 

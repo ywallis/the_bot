@@ -17,18 +17,24 @@ def get_balance_status(client, ticker, threshold):
     quote_asset = ticker.split('/')[1]
 
     # Includes minimum threshold for exchanges with leftover balance
+    try:
+        print(f"{base_asset} {round(all_balances['free'][base_asset], 2)} available on {client.name}")
+        print(f"{quote_asset} {round(all_balances['free'][quote_asset], 2)} available on {client.name}")
 
-    print(f"{base_asset} {round(all_balances['free'][base_asset], 2)} available on {client.name}")
-    print(f"{quote_asset} {round(all_balances['free'][quote_asset], 2)} available on {client.name}")
 
-    # Check if currently used balances are below set threshold for notification
+        # Check if currently used balances are below set threshold for notification
 
-    if (all_balances['free'][base_asset] < threshold
-            or all_balances['free'][quote_asset] < threshold):
-        low_balance = True
+        if (all_balances['free'][base_asset] < threshold
+                or all_balances['free'][quote_asset] < threshold):
+            low_balance = True
 
-    return low_balance
+        return low_balance
 
+    except KeyError:
+
+        # Error can occur if the subaccount never had an asset balance.
+
+        print('No balances! Are you sure the right pair is selected?')
 
 def get_order_status(client, ticker):
 

@@ -30,10 +30,10 @@ if __name__ == '__main__':
 
             get_order_status(maker_client, ticker=pair)
             get_order_status(taker_client, ticker=pair)
-            download_trades(maker_client, pair)
-            download_trades(taker_client, pair)
-            download_orders(maker_client, pair)
-            download_orders(taker_client, pair)
+            download_trades(maker_client, pair, False)
+            download_trades(taker_client, pair, False)
+            download_orders(maker_client, pair, False)
+            download_orders(taker_client, pair, False)
             print('Cycle done')
 
             time.sleep(30)
