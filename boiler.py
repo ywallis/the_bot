@@ -2,7 +2,7 @@ import logging
 import ccxt
 from datetime import datetime
 
-from config import gate_fee
+from config import gate_fee, bitget_fee
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +129,19 @@ def place_buy_order(pair, client, price, quantity, identifier):
 
         # Apply current fee level to keep stable inventory
         fee_ratio = 1 / (1 - gate_fee)
+
+        quantity_with_fee = round(quantity * fee_ratio, 2)
+
+        print(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
+        logger.info(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
+
+        return client.create_limit_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price,
+                                         params={'clientOrderId': identifier})
+
+    elif client.name == 'Bitget':
+
+        # Apply current fee level to keep stable inventory
+        fee_ratio = 1 / (1 - bitget_fee)
 
         quantity_with_fee = round(quantity * fee_ratio, 2)
 

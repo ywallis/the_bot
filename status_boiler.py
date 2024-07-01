@@ -36,6 +36,7 @@ def get_balance_status(client, ticker, threshold):
 
         print('No balances! Are you sure the right pair is selected?')
 
+
 def get_order_status(client, ticker):
 
     """This function lists all open orders for a client in a terminal format."""
