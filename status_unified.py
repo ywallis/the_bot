@@ -52,3 +52,6 @@ if __name__ == '__main__':
         except ccxt.RequestTimeout as e:
             print('Request timeout, retrying.')
             print(e)
+        except ccxt.NetworkError as e:
+            print('Network error, retrying.')
+            print(e)
