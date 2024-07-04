@@ -77,11 +77,17 @@ def download_orders(client, ticker, production=True):
     if client.name == 'BitMart':
         orders = client.fetch_closed_orders(symbol=ticker, limit=200)
     elif client.name == 'Bitget':
-        orders = client.fetch_canceled_and_closed_orders(symbol=ticker)
+        orders = client.fetch_canceled_and_closed_orders(symbol=ticker, limit=1)
     else:
-        orders = client.fetch_closed_orders(symbol=ticker, limit=1000)
+        orders = client.fetch_closed_orders(symbol=ticker, limit=500)
 
     for order in orders:
+
+        # Integrating empty statement in case of nonexistent values
+
+        order['fee_cost'] = None
+        order['fee_currency'] = None
+
         if order['fee'] is not None:
             order['fee_cost'] = order['fee']['cost']
             order['fee_currency'] = order['fee']['currency']
@@ -120,6 +126,12 @@ def download_trades(client, ticker, production=True):
         trades = client.fetch_my_trades(symbol=ticker, limit=1000)
 
     for trade in trades:
+
+        # Integrating empty statement in case of nonexistent values
+
+        trade['fee_cost'] = None
+        trade['fee_currency'] = None
+
         if trade['fee'] is not None:
             trade['fee_cost'] = trade['fee']['cost']
             trade['fee_currency'] = trade['fee']['currency']
