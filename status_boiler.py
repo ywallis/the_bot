@@ -65,7 +65,7 @@ def download_orders(client, ticker, production=True):
     Includes a production flag, to instead export to test folder if set to False."""
 
     today = str(date.today())
-    trades_with_fee = []
+    orders_with_fee = []
 
     if production:
         output_path = f'{path_to_NAS}{ticker.split("/")[0]}/Orders/{today}_{client.name}.csv'
@@ -77,7 +77,7 @@ def download_orders(client, ticker, production=True):
     if client.name == 'BitMart':
         orders = client.fetch_closed_orders(symbol=ticker, limit=200)
     elif client.name == 'Bitget':
-        orders = client.fetch_canceled_and_closed_orders(symbol=ticker, limit=1)
+        orders = client.fetch_canceled_and_closed_orders(symbol=ticker, limit=100)
     else:
         orders = client.fetch_closed_orders(symbol=ticker, limit=500)
 
@@ -96,9 +96,9 @@ def download_orders(client, ticker, production=True):
                 order['fee_cost'] = fee['cost']
                 order['fee_currency'] = fee['currency']
         order['exchange'] = client.name
-        trades_with_fee.append(order)
+        orders_with_fee.append(order)
 
-    df = pd.DataFrame(trades_with_fee)
+    df = pd.DataFrame(orders_with_fee)
     df.to_csv(output_path, mode='a', header=not os.path.exists(output_path))
     clean = pd.read_csv(output_path, index_col=0)
     clean.drop_duplicates(subset='id', inplace=True)
