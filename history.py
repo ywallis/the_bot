@@ -26,6 +26,11 @@ def download_trades(client, start, end):
     else:
         trades = client.fetch_my_trades(symbol=pair, limit=1000, params={'startTime': start, 'endTime': end})
 
+    # The if statement below should prevent for a dataframe with the improper amount of columns
+
+    if len(trades) == 0:
+        return
+
     for trade in trades:
 
         # Integrating empty statement in case of nonexistent values
@@ -65,6 +70,11 @@ def download_orders(client, start, end):
     else:
         orders = client.fetch_closed_orders(symbol=pair, limit=500, params={'startTime': start, 'endTime': end})
 
+    # The if statement below should prevent for a dataframe with the improper amount of columns
+
+    if len(orders) == 0:
+        return
+
     for order in orders:
 
         # Integrating empty statement in case of nonexistent values
@@ -89,6 +99,8 @@ def download_orders(client, start, end):
     clean.to_csv(output_path, header=True)
 
 
+# This all works but is filthy. Turn into bisection search and clean this up!
+
 start_date_str = input('Enter the date (DD/MM/YY) for historical downloads (7D history):')
 
 start_date = datetime.strptime(start_date_str, '%d/%m/%y')
@@ -102,12 +114,12 @@ while loop_start < start_date + timedelta(days=1):
     loop_start_input = int(loop_start_utc.timestamp() * 1000)
     loop_end_input = int(loop_end_utc.timestamp() * 1000)
 
-    print(loop_start_input)
-    print(loop_end_input)
+    print(loop_start_utc)
+    print(loop_end_utc)
     download_orders(maker_client, loop_start_input, loop_end_input)
-    # download_trades(maker_client, loop_start_input, loop_end_input)
+    download_trades(maker_client, loop_start_input, loop_end_input)
     download_orders(taker_client, loop_start_input, loop_end_input)
-    # download_trades(taker_client, loop_start_input, loop_end_input)
+    download_trades(taker_client, loop_start_input, loop_end_input)
 
     time.sleep(1)
 
