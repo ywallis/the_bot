@@ -169,8 +169,8 @@ def check_if_solvent(buy_client, sell_client, price, quantity, pair):
 
     try:
 
-        if (quantity * price * 1.02 < buy_client.fetch_balance()[quote_asset]['free']
-                and quantity * 1.02 < sell_client.fetch_balance()[base_asset]['free']):
+        if (quantity * price * 2 < buy_client.fetch_balance()[quote_asset]['free']
+                and quantity * 2 < sell_client.fetch_balance()[base_asset]['free']):
             return True
         else:
             return False
