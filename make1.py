@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
-                  taker_spread, taker_sizing, taker_max_order_size, taker_only=False):
+                  taker_spread, taker_sizing, taker_max_order_size, spread_extension, taker_only=False):
 
     """This function acts as a basic market making system, with the following two logics:
     1. A taker logic, acting immediately in two order books in case a profitable imbalance is spotted.
@@ -100,7 +100,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                 taker_target_ask, taker_target_bid, taker_order_size = order_book_matcher(maker_bids, taker_asks,
                                                                                           taker_spread, taker_sizing,
                                                                                           taker_max_order_size,
-                                                                                          extend_spread=2)
+                                                                                          extend_spread=spread_extension)
 
                 if check_if_solvent(buy_client=taker_client, sell_client=maker_client,
                                     quantity=taker_order_size, price=taker_target_ask, pair=pair):
@@ -140,7 +140,7 @@ def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                 taker_target_ask, taker_target_bid, taker_order_size = order_book_matcher(taker_bids, maker_asks,
                                                                                           taker_spread, taker_sizing,
                                                                                           taker_max_order_size,
-                                                                                          extend_spread=2)
+                                                                                          extend_spread=spread_extension)
 
                 if check_if_solvent(buy_client=maker_client, sell_client=taker_client,
                                     quantity=taker_order_size, price=taker_target_ask, pair=pair):

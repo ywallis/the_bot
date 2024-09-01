@@ -1,6 +1,6 @@
 import ccxt.pro
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from config import *
 
 # TESTING - IMPLEMENTING USING ALL TRADES INSTEAD OF MY TRADES TO AVOID DEALING WITH KEYS
@@ -15,7 +15,7 @@ class Matcher:
         self.maker_clients = maker_clients
 
     async def watch_trades(self, client):
-        since = datetime.utcnow()
+        since = datetime.now(timezone.utc)
         timestamp = int(since.timestamp() * 1000)
 
         while True:
@@ -35,7 +35,7 @@ class Matcher:
 
         for trade in trades:
             # Compare order IDs here to exclude tt's, and possibly combine any orders splitting into multiple trades
-            print(trade)
+            # print(trade)
             print(f"Received trade {trade['amount']} from {client_name}")
             tasks.append(self.match_trade(trade))
 
@@ -53,7 +53,7 @@ class Matcher:
 gate_client = ccxt.pro.gateio()
 bitget_client = ccxt.pro.bitget({'apiKey': bitget_key, 'secret': bitget_secret, 'password': 'bgtest123456'})
 mexc_client = ccxt.pro.mexc({'apiKey': mexc_key, 'secret': mexc_secret})
-watch_me = Matcher(gate_client, bitget_client, mexc_client)
+watch_me = Matcher(gate_client,mexc_client, bitget_client)
 
 
 print(watch_me.maker_clients)
