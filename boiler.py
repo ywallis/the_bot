@@ -1,16 +1,11 @@
+import asyncio
 import logging
-import ccxt
+import ccxt.async_support as ccxt
 from datetime import datetime
 
 from config import gate_fee, bitget_fee
 
 logger = logging.getLogger(__name__)
-
-
-def retrieve_books(client, side, ticker):
-    # Pointless boilerplate function?
-
-    return client.fetch_order_book(symbol=ticker)[side]
 
 
 def order_book_matcher(bids, asks, spread, sizing, max_order_size, min_order_size=0.01, extend_spread=0):
@@ -107,7 +102,7 @@ def order_book_matcher(bids, asks, spread, sizing, max_order_size, min_order_siz
             dynamic_arb = False
 
 
-def place_sell_order(pair, client, price, quantity, identifier):
+async def place_sell_order(pair, client, price, quantity, identifier):
 
     """This function places a sell limit order using a CCXT client.
     It then outputs a confirmation of that order to the console and logs."""
@@ -119,7 +114,7 @@ def place_sell_order(pair, client, price, quantity, identifier):
                                      params={'clientOrderId': identifier})
 
 
-def place_buy_order(pair, client, price, quantity, identifier):
+async def place_buy_order(pair, client, price, quantity, identifier):
     """This function places a buy limit order using a CCXT client.
     It then outputs a confirmation of that order to the console and logs.
     It includes a modification for exchanges using the base asset for fees,
@@ -160,17 +155,28 @@ def place_buy_order(pair, client, price, quantity, identifier):
                                          params={'clientOrderId': identifier})
 
 
-def check_if_solvent(buy_client, sell_client, price, quantity, pair):
+async def fetch_balances(buy_client, sell_client):
+
+    batch = asyncio.gather(buy_client.fetch_balance(), sell_client.fetch_balance())
+    buy_client_balance, sell_client_balance = await batch
+
+    return buy_client_balance, sell_client_balance
+
+
+async def check_if_solvent(buy_client, sell_client, price, quantity, pair):
     """This function checks if two exchanges have the necessary balances to place
     two arbitrage orders in their relevant assets."""
+
+    batch = asyncio.gather(buy_client.fetch_balance(), sell_client.fetch_balance())
+    buy_client_balance, sell_client_balance = await batch
 
     base_asset = pair.split('/')[0]
     quote_asset = pair.split('/')[1]
 
     try:
 
-        if (quantity * price * 2 < buy_client.fetch_balance()[quote_asset]['free']
-                and quantity * 2 < sell_client.fetch_balance()[base_asset]['free']):
+        if (quantity * price * 2 < buy_client_balance[quote_asset]['free']
+                and quantity * 2 < sell_client_balance[base_asset]['free']):
             return True
         else:
             return False
@@ -184,12 +190,12 @@ def check_if_solvent(buy_client, sell_client, price, quantity, pair):
         return False
 
 
-def check_and_take(client_a, client_b, order, pair, market_side):
+async def check_and_take(client_a, client_b, order, pair, market_side):
 
     """This function checks if a placed maker order has been filled or partially filled
     and generates an equivalent taker order on another exchange."""
 
-    func_order = client_b.fetch_order(id=order['id'], symbol=pair)
+    func_order = await client_b.fetch_order(id=order['id'], symbol=pair)
     filled = float(func_order['filled'])
     print(f'{filled} from order filled')
     # retrieve order
@@ -199,15 +205,15 @@ def check_and_take(client_a, client_b, order, pair, market_side):
 
             # Add try, to prevent issues with orders filled in the meantime
             try:
-                client_b.cancel_order(id=order['id'], symbol=pair)
+                await client_b.cancel_order(id=order['id'], symbol=pair)
 
                 # YOU MIGHT BE ABLE TO SPEED THIS UP BY ASSIGNING FILLED TO THE CANCEL ORDER
 
-                filled = float(client_b.fetch_order(id=order['id'], symbol=pair)['filled'])
+                filled = float(await client_b.fetch_order(id=order['id'], symbol=pair)['filled'])
                 print(f'{filled} from order filled')
 
             except ccxt.BadRequest:
-                filled = float(client_b.fetch_order(id=order['id'], symbol=pair)['filled'])
+                filled = float(await client_b.fetch_order(id=order['id'], symbol=pair)['filled'])
                 print(f'Order has been fully filled, taking {filled}')
 
         # market sell any filled on A
@@ -228,7 +234,7 @@ def check_and_take(client_a, client_b, order, pair, market_side):
 
         # Targeting best price on taker exchange here would help keep inventory stable.
 
-        client_a.create_market_order(symbol=pair, side=market_side, amount=filled, price=order['price'],
+        await client_a.create_market_order(symbol=pair, side=market_side, amount=filled, price=order['price'],
                                      params={'clientOrderId': func_order['clientOrderId']})
         print(f'Market {market_side} {filled} {pair} on {client_b.name}')
 
