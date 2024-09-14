@@ -26,7 +26,7 @@ bitget_key = os.getenv('bitget_key')
 
 bitget_secret = os.getenv('bitget_secret')
 
-bitget_password = os.getenv('bitget_secret')
+bitget_password = os.getenv('bitget_password')
 
 EMAIL = os.getenv('EMAIL')
 
@@ -61,7 +61,7 @@ if target == 0:  # Status
 
     gate_client = ccxt.gateio({'apiKey': gateio_key, 'secret': gateio_secret})
     mexc_client = ccxt.mexc({'apiKey': mexc_key, 'secret': mexc_secret})
-    bitget_client = ccxt.bitget({'apiKey': bitget_key, 'secret': bitget_secret, 'password': 'bgtest123456'})
+    bitget_client = ccxt.bitget({'apiKey': bitget_key, 'secret': bitget_secret, 'password': bitget_password})
     low_balance_threshold = 1500
 
 if target == 1:  # MEXC
