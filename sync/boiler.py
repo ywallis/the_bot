@@ -2,7 +2,7 @@ import logging
 import ccxt
 from datetime import datetime
 
-from config import gate_fee, bitget_fee
+from config.config import gate_fee, bitget_fee
 
 logger = logging.getLogger(__name__)
 

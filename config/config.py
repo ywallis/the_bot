@@ -40,8 +40,8 @@ if os.name == 'nt':
 else:
     path_to_NAS = '/home/yann/Data/Arb Bot Unified/'
 
-gate_fee = None
-bitget_fee = None
+gate_fee = 0
+bitget_fee = 0
 target = None
 choosing = True
 options = [0, 1, 2, 3, 4, 5]

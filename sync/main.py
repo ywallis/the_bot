@@ -3,7 +3,7 @@ import logging
 
 import ccxt
 
-from config import instance_config, pair
+from config.config import instance_config, pair
 from make1 import make_and_take
 import time
 
