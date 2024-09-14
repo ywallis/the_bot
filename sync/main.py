@@ -10,6 +10,7 @@ import sys
 
 # Adding directory to PATH
 sys.path.append(".")
+sys.path.append("..")
 
 today = str(date.today())
 now = datetime.now()
