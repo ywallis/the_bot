@@ -1,6 +1,6 @@
 import ccxt.async_support as ccxt
 import asyncio
-from make1 import make_and_take
+from make1_async import make_and_take
 from config import gateio_key_test, gateio_secret_test, mexc_key_test, mexc_secret_test
 
 gate = ccxt.gateio({'apiKey': gateio_key_test, 'secret': gateio_secret_test})
