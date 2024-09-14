@@ -6,6 +6,10 @@ import ccxt
 from config.config import instance_config, pair
 from make1 import make_and_take
 import time
+import sys
+
+# Adding directory to PATH
+sys.path.append(".")
 
 today = str(date.today())
 now = datetime.now()
