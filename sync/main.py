@@ -3,7 +3,7 @@ import logging
 
 import ccxt
 
-from config import config, pair
+from config import instance_config, pair
 from make1 import make_and_take
 import time
 
@@ -11,7 +11,7 @@ today = str(date.today())
 now = datetime.now()
 
 logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.DEBUG,
-                    filename=f'../Logs/{today}_maker_{config['maker_client'].name}.txt')
+                    filename=f'../Logs/{today}_maker_{instance_config['maker_client'].name}.txt')
 logger = logging.getLogger(__name__)
 
 making = True
@@ -20,7 +20,7 @@ if __name__ == '__main__':
 
     while making is True:
         try:
-            make_and_take(config, pair)
+            make_and_take(instance_config, pair)
 
         except ccxt.NetworkError as e:
             print('Network error')

@@ -70,7 +70,7 @@ if target == 1:  # MEXC
     mexc_client = ccxt.mexc({'apiKey': mexc_key, 'secret': mexc_secret})
 
     gate_fee = gate_client.fetch_trading_fee(symbol=pair)['taker']
-    config = {'taker_client': gate_client,
+    instance_config = {'taker_client': gate_client,
               'maker_client': mexc_client,
               'maker_spread': 1.002,
               'maker_size': 80,
@@ -79,7 +79,7 @@ if target == 1:  # MEXC
               'taker_max_order_size': 50,
               'taker_only': False,
               'spread_extension': 2,
-              }
+                       }
 
     # taker_client = gate_client
     # maker_client = mexc_client
@@ -136,7 +136,7 @@ if target == 4:  # Bitget
     gate_fee = gate_client.fetch_trading_fee(symbol=pair)['taker']
     bitget_fee = bitget_client.fetch_trading_fee(symbol=pair)['taker']
 
-    config = {'taker_client': gate_client,
+    instance_config = {'taker_client': gate_client,
               'maker_client': bitget_client,
               'maker_spread': 1.0025,
               'maker_size': 50,
@@ -145,7 +145,7 @@ if target == 4:  # Bitget
               'taker_max_order_size': 30,
               'taker_only': False,
               'spread_extension': 0,
-              }
+                       }
 
     # taker_client = gate_client
     # maker_client = bitget_client
