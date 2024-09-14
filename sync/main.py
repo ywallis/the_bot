@@ -1,6 +1,9 @@
 from datetime import date, datetime
 import logging
-from config import *
+
+import ccxt
+
+from config import config, pair
 from make1 import make_and_take
 import time
 
@@ -8,7 +11,7 @@ today = str(date.today())
 now = datetime.now()
 
 logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.DEBUG,
-                    filename=f'./Logs/{today}_maker_{maker_client.name}.txt')
+                    filename=f'../Logs/{today}_maker_{config['maker_client'].name}.txt')
 logger = logging.getLogger(__name__)
 
 making = True
@@ -17,10 +20,7 @@ if __name__ == '__main__':
 
     while making is True:
         try:
-            make_and_take(taker_client=taker_client, maker_client=maker_client, pair=pair, maker_spread=maker_spread,
-                          maker_size=maker_size, taker_spread=taker_min_spread,
-                          taker_sizing=taker_sizing, taker_max_order_size=taker_max_order_size, taker_only=taker_only,
-                          spread_extension=spread_extension)
+            make_and_take(config, pair)
 
         except ccxt.NetworkError as e:
             print('Network error')

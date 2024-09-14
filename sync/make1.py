@@ -8,13 +8,23 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
-                  taker_spread, taker_sizing, taker_max_order_size, spread_extension, taker_only=False):
+def make_and_take(config, pair):
 
     """This function acts as a basic market making system, with the following two logics:
     1. A taker logic, acting immediately in two order books in case a profitable imbalance is spotted.
     2. A maker1 logic, offering liquidity on one side, if the position can be hedged profitably on the other."""
-
+    
+    taker_client = config['taker_client']
+    maker_client = config['maker_client']
+    maker_spread = config['maker_spread']
+    maker_size = config['maker_size']
+    taker_spread = config['taker_spread']
+    taker_sizing = config['taker_sizing']
+    taker_max_order_size = config['taker_max_order_size']
+    taker_only = config['taker_only']
+    spread_extension = config['spread_extension']
+    
+    
     buy_exists = False
     sell_exists = False
     buy_order = None
