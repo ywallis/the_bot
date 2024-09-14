@@ -1,6 +1,4 @@
-import asyncio
-
-import ccxt.async_support as ccxt
+import ccxt
 from boiler import (check_and_take, check_if_solvent, place_buy_order, place_sell_order, order_book_matcher,
                     order_time, maker_order_sizer, within_percentage_range)
 from datetime import datetime
@@ -10,7 +8,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
+def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
                   taker_spread, taker_sizing, taker_max_order_size, spread_extension, taker_only=False):
 
     """This function acts as a basic market making system, with the following two logics:
@@ -27,7 +25,7 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
 
     buy_arbitrage = True
     sell_arbitrage = True
-    open_orders = await maker_client.fetch_open_orders(pair)
+    open_orders = maker_client.fetch_open_orders(pair)
 
     # Check for hanging orders in case of errors
 
@@ -65,16 +63,10 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
         # Slow watching if no open order
 
         if not buy_arbitrage and not sell_arbitrage:
-            await asyncio.sleep(1)
+            time.sleep(1)
 
-        # Trying Async batch logic
-
-        # taker_order_book = await taker_client.fetch_order_book(pair)
-        # maker_order_book = await maker_client.fetch_order_book(pair)
-
-        batch = asyncio.gather(taker_client.fetch_order_book(pair), maker_client.fetch_order_book(pair))
-        taker_order_book, maker_order_book = await batch
-
+        taker_order_book = taker_client.fetch_order_book(pair)
+        maker_order_book = maker_client.fetch_order_book(pair)
         taker_bids = taker_order_book['bids']
         taker_asks = taker_order_book['asks']
         maker_bids = maker_order_book['bids']
@@ -100,7 +92,6 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
         # Start of taker logic
 
         # Start take_take with client_a as buyer, client_b as seller.
-        # continue
 
         if best_bid_maker >= best_ask_taker * taker_spread:
 
@@ -111,12 +102,12 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
                                                                                           taker_max_order_size,
                                                                                           extend_spread=spread_extension)
 
-                if await check_if_solvent(taker_client, maker_client,
+                if check_if_solvent(buy_client=taker_client, sell_client=maker_client,
                                     quantity=taker_order_size, price=taker_target_ask, pair=pair):
                     try:
                         take_take_order_id = f't-{order_time()}_tt'
-                        await asyncio.gather(place_sell_order(pair, maker_client, taker_target_bid, taker_order_size, take_take_order_id),
-                        place_buy_order(pair, taker_client, taker_target_ask, taker_order_size, take_take_order_id))
+                        place_sell_order(pair, maker_client, taker_target_bid, taker_order_size, take_take_order_id)
+                        place_buy_order(pair, taker_client, taker_target_ask, taker_order_size, take_take_order_id)
 
                         # The continue statement puts the priority on taking whenever possible,
                         # since it is most efficient. Downside is that some orders may remain stuck
@@ -151,14 +142,13 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
                                                                                           taker_max_order_size,
                                                                                           extend_spread=spread_extension)
 
-                if await check_if_solvent(maker_client, taker_client,
+                if check_if_solvent(buy_client=maker_client, sell_client=taker_client,
                                     quantity=taker_order_size, price=taker_target_ask, pair=pair):
                     try:
 
                         take_take_order_id = f't-{order_time()}_tt'
-
-                        await asyncio.gather(place_buy_order(pair, maker_client, taker_target_ask, taker_order_size, take_take_order_id),
-                        place_sell_order(pair, taker_client, taker_target_bid, taker_order_size, take_take_order_id))
+                        place_buy_order(pair, maker_client, taker_target_ask, taker_order_size, take_take_order_id)
+                        place_sell_order(pair, taker_client, taker_target_bid, taker_order_size, take_take_order_id)
 
                         # The continue statement puts the priority on taking whenever possible,
                         # since it is most efficient. Downside is that some orders may remain stuck
@@ -209,16 +199,16 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
                 print(f'Sell {best_ask_maker}')
                 logger.info(f'Sell on {maker_client.name}, sell {best_ask_maker}')
 
-                if await check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
+                if check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
 
                     # Some exchanges only respond with an order id, hence the code complication with the ['id']
                     # to retrieve a full object
 
-                    sell_order = await maker_client.create_limit_sell_order(symbol=pair,
+                    sell_order = maker_client.create_limit_sell_order(symbol=pair,
                                                                       amount=optimal_sell_size,
                                                                       price=best_ask_maker,
                                                                       params={'clientOrderId': f't-{order_time()}_es'})
-                    sell_order = await maker_client.fetch_order(id=sell_order['id'], symbol=pair)
+                    sell_order = maker_client.fetch_order(id=sell_order['id'], symbol=pair)
                     sell_exists = True
                     logger.info(f'Solvent, sell order created')
 
@@ -235,8 +225,8 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
 
                 try:
                     # If the order is partially filled, start the take process.
-                    await maker_client.cancel_order(id=sell_order['id'], symbol=pair)
-                    await check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
+                    maker_client.cancel_order(id=sell_order['id'], symbol=pair)
+                    check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
 
                     sell_exists = False
 
@@ -244,15 +234,15 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
                     logger.info(error)
                     print(f'Order has been fully filled, taking {sell_order["amount"]}')
 
-                    if await check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
+                    if check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
                         sell_exists = False
                         logger.info('Was filled in the mean time, C&T')
 
-                if await check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
-                    sell_order = await maker_client.create_limit_sell_order(symbol=pair, amount=optimal_sell_size,
+                if check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
+                    sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=optimal_sell_size,
                                                                       price=best_ask_maker,
                                                                       params={'clientOrderId': f't-{order_time()}_es'})
-                    sell_order = await maker_client.fetch_order(id=sell_order['id'], symbol=pair)
+                    sell_order = maker_client.fetch_order(id=sell_order['id'], symbol=pair)
                     print(f'Sell {best_ask_maker}')
                     sell_exists = True
 
@@ -264,8 +254,8 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
 
                 try:
                     # If the order is partially filled, start the take process.
-                    await maker_client.cancel_order(id=sell_order['id'], symbol=pair)
-                    await check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
+                    maker_client.cancel_order(id=sell_order['id'], symbol=pair)
+                    check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
 
                     sell_exists = False
 
@@ -273,15 +263,15 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
                     logger.info(error)
                     print(f'Order has been fully filled, taking {sell_order["amount"]}')
 
-                    if await check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
+                    if check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
                         sell_exists = False
                         logger.info('Was filled in the mean time, C&T')
 
-                if await check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
-                    sell_order = await maker_client.create_limit_sell_order(symbol=pair, amount=optimal_sell_size,
+                if check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
+                    sell_order = maker_client.create_limit_sell_order(symbol=pair, amount=optimal_sell_size,
                                                                       price=best_ask_maker,
                                                                       params={'clientOrderId': f't-{order_time()}_es'})
-                    sell_order = await maker_client.fetch_order(id=sell_order['id'], symbol=pair)
+                    sell_order = maker_client.fetch_order(id=sell_order['id'], symbol=pair)
                     print(f'Sell {best_ask_maker}')
                     sell_exists = True
 
@@ -293,7 +283,7 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
 
                 # Check if some of the order has been filled. If yes, the order is cancelled and the flag removed.
 
-                if await check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
+                if check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
                     sell_exists = False
                     logger.info(f"C&T, sell doesn't exist anymore")
 
@@ -306,7 +296,7 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
 
             if sell_exists:
 
-                if await check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
+                if check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
                     sell_exists = False
                     logger.info('C&T success, sell no longer exists')
 
@@ -318,15 +308,15 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
 
                         # If the order is partially filled, start the take process.
 
-                        await maker_client.cancel_order(id=sell_order['id'], symbol=pair)
-                        await check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
+                        maker_client.cancel_order(id=sell_order['id'], symbol=pair)
+                        check_and_take(taker_client, maker_client, sell_order, pair, 'buy')
                         sell_exists = False
 
                     except (ccxt.BadRequest, ccxt.ExchangeError) as error:
                         logger.info(error)
                         print(f'Order has been fully filled, taking {sell_order["amount"]}')
 
-                        if await check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
+                        if check_and_take(taker_client, maker_client, sell_order, pair, 'buy'):
                             logger.info('Was filled in the mean time, C&T')
                             sell_exists = False
 
@@ -352,11 +342,11 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
                 print(f'Buy {best_bid_maker}')
                 logger.info(f'Buy on {maker_client.name}, buy {best_bid_maker}')
 
-                if await check_if_solvent(maker_client, taker_client, best_bid_maker, optimal_buy_size, pair=pair):
-                    buy_order = await maker_client.create_limit_buy_order(symbol=pair,
+                if check_if_solvent(maker_client, taker_client, best_bid_maker, optimal_buy_size, pair=pair):
+                    buy_order = maker_client.create_limit_buy_order(symbol=pair,
                                                                     amount=optimal_buy_size, price=best_bid_maker,
                                                                     params={'clientOrderId': f't-{order_time()}_eb'})
-                    buy_order = await maker_client.fetch_order(id=buy_order['id'], symbol=pair)
+                    buy_order = maker_client.fetch_order(id=buy_order['id'], symbol=pair)
                     buy_exists = True
                     logger.info(f'Solvent, buy order created')
 
@@ -374,8 +364,8 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
 
                     # If the order is partially filled, start the take process.
 
-                    await maker_client.cancel_order(id=buy_order['id'], symbol=pair)
-                    await check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
+                    maker_client.cancel_order(id=buy_order['id'], symbol=pair)
+                    check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
 
                     buy_exists = False
 
@@ -383,15 +373,15 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
                     logger.info(error)
                     print(f'Order has been fully filled, taking {buy_order["amount"]}')
 
-                    if await check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
+                    if check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
                         buy_exists = False
                         logger.info('Was filled in the mean time, C&T')
 
-                if await check_if_solvent(taker_client, maker_client, best_bid_maker, optimal_buy_size, pair=pair):
-                    buy_order = await maker_client.create_limit_buy_order(symbol=pair,
+                if check_if_solvent(taker_client, maker_client, best_bid_maker, optimal_buy_size, pair=pair):
+                    buy_order = maker_client.create_limit_buy_order(symbol=pair,
                                                                     amount=optimal_buy_size, price=best_bid_maker,
                                                                     params={'clientOrderId': f't-{order_time()}_eb'})
-                    buy_order = await maker_client.fetch_order(id=buy_order['id'], symbol=pair)
+                    buy_order = maker_client.fetch_order(id=buy_order['id'], symbol=pair)
                     print(f'Buy {best_bid_maker}')
                     buy_exists = True
 
@@ -405,8 +395,8 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
 
                     # If the order is partially filled, start the take process.
 
-                    await maker_client.cancel_order(id=buy_order['id'], symbol=pair)
-                    await check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
+                    maker_client.cancel_order(id=buy_order['id'], symbol=pair)
+                    check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
 
                     buy_exists = False
 
@@ -414,15 +404,15 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
                     logger.info(error)
                     print(f'Order has been fully filled, taking {buy_order["amount"]}')
 
-                    if await check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
+                    if check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
                         buy_exists = False
                         logger.info('Was filled in the mean time, C&T')
 
-                if await check_if_solvent(taker_client, maker_client, best_bid_maker, optimal_buy_size, pair=pair):
-                    buy_order = await maker_client.create_limit_buy_order(symbol=pair,
+                if check_if_solvent(taker_client, maker_client, best_bid_maker, optimal_buy_size, pair=pair):
+                    buy_order = maker_client.create_limit_buy_order(symbol=pair,
                                                                     amount=optimal_buy_size, price=best_bid_maker,
                                                                     params={'clientOrderId': f't-{order_time()}_eb'})
-                    buy_order = await maker_client.fetch_order(id=buy_order['id'], symbol=pair)
+                    buy_order = maker_client.fetch_order(id=buy_order['id'], symbol=pair)
                     print(f'Buy {best_bid_maker}')
                     buy_exists = True
 
@@ -434,7 +424,7 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
 
                 # Check if some of the order has been filled. If yes, the order is cancelled and the flag removed.
 
-                if await check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
+                if check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
                     buy_exists = False
                     logger.info(f"C&T, buy doesn't exist anymore")
 
@@ -447,7 +437,7 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
 
             if buy_exists:
 
-                if await check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
+                if check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
                     buy_exists = False
                     logger.info('C&T success, buy no longer exists')
 
@@ -459,8 +449,8 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
 
                         # If the order is partially filled, start the take process.
 
-                        await maker_client.cancel_order(id=buy_order['id'], symbol=pair)
-                        await check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
+                        maker_client.cancel_order(id=buy_order['id'], symbol=pair)
+                        check_and_take(taker_client, maker_client, buy_order, pair, 'sell')
 
                         buy_exists = False
 
@@ -468,6 +458,6 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
                         logger.info(error)
                         print(f'Order has been fully filled, taking {buy_order["amount"]}')
 
-                        if await check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
+                        if check_and_take(taker_client, maker_client, buy_order, pair, 'sell'):
                             logger.info('Was filled in the mean time, C&T')
                             buy_exists = False
