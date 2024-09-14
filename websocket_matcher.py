@@ -1,33 +1,61 @@
-import ccxt.pro
+import ccxt.pro as ccxt
 import asyncio
 from datetime import datetime, timezone
-from config import *
+from config import gateio_key_test, gateio_secret_test, mexc_key_test, mexc_secret_test
 
 # TESTING - IMPLEMENTING USING ALL TRADES INSTEAD OF MY TRADES TO AVOID DEALING WITH KEYS
 
-
+#Introduce logging
 # Will move to boiler once tested
 
-def match_sell(client, trade):
+
+async def match_sell(client, trade):
     """This function places a buy limit order using a CCXT client.
     It then outputs a confirmation of that order to the console and logs.
     It includes a modification for exchanges using the base asset for fees,
     to keep stable inventory in arbitrage setups."""
 
+
+    quantity = trade['amount']
+    price = trade['price']
+    # SET WHEN MOVING TO PROD
+    # identifier = trade['clientOrderId']
+    pair = trade['symbol']
+
     if client.name == 'Gate.io':
 
         # Apply current fee level to keep stable inventory
         fee_ratio = 1 / (1 - gate_fee)
+        # Amount and quantity are different keys! relevant because testing in public data
 
-        quantity_with_fee = round(trade['quantity'] * fee_ratio, 2)
+        quantity_with_fee = round(quantity * fee_ratio, 2)
 
-        print(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {trade['price']}.')
+        await asyncio.sleep(1)
+
+        print(f'Placed a {quantity_with_fee} {pair} buy order on {client.name} for {trade['price']}.')
+
         #logger.info(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {trade['price']}.')
 
-        # client.create_limit_order(symbol=pair, side='buy', amount=quantity_with_fee, price=trade['price'],
-        #                                  params={'clientOrderId': trade['clientOrderId']})
+        # client.create_limit_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price,
+        #                                  params={'clientOrderId': identifier})
 
 
+async def match_buy(client, trade):
+
+    quantity = trade['amount']
+    price = trade['price']
+    # SET WHEN MOVING TO PROD
+    # identifier = trade['clientOrderId']
+    pair = trade['symbol']
+
+    """This function places a sell limit order using a CCXT client.
+    It then outputs a confirmation of that order to the console and logs."""
+
+    print(f'Placing a {quantity} {pair} sell order on {client.name} for {price}.')
+    # logger.info(f'Placing a {quantity} {pair} sell order on {client.name} for {price}.')
+
+    # return client.create_limit_order(symbol=pair, side='sell', amount=quantity, price=price,
+    #                                  params={'clientOrderId': identifier})
 
 class Matcher:
     """This is a class designed to represent a websocket "watcher",
@@ -43,7 +71,7 @@ class Matcher:
 
         while True:
             try:
-                trades = await client.watch_trades('SOL/USDT', since=timestamp)
+                trades = await client.watch_trades('ALPH/USDT', since=timestamp)
                 # Printing as a first placeholder for further logic
                 print(len(trades))
                 await self.process_trades(trades, client.name)
@@ -71,27 +99,28 @@ class Matcher:
 
         if trade['side'] == 'buy':
             print(f'This is a {trade['side']}')
+            await match_buy(self.taker_client, trade)
+            # await asyncio.sleep(2)
+            print(f'Executed {trade["amount"]}')
 
         if trade['side'] == 'sell':
             print(f'This is a {trade['side']}')
+            await match_sell(self.taker_client, trade)
+            # await asyncio.sleep(2)
+            print(f'Executed {trade["amount"]}')
 
-            # match_sell(self.taker_client, trade)
 
-
-
-
-        await asyncio.sleep(2)
-        print(f'Executed {trade["amount"]}')
 
     async def run(self):
         await asyncio.gather(*[self.watch_trades(client) for client in self.maker_clients])
 
 
-gate_client = ccxt.pro.gateio()
-bitget_client = ccxt.pro.bitget({'apiKey': bitget_key, 'secret': bitget_secret, 'password': 'bgtest123456'})
-mexc_client = ccxt.pro.mexc({'apiKey': mexc_key, 'secret': mexc_secret})
-watch_me = Matcher(gate_client,mexc_client)
+# Can't import clients from config since they don't use ccxt.pro
+gate_fee = 0
+gate = ccxt.gateio({'apiKey': gateio_key_test, 'secret': gateio_secret_test})
+mexc = ccxt.mexc({'apiKey': mexc_key_test, 'secret': mexc_secret_test})
 
+watch_me = Matcher(gate,mexc)
 
 print(watch_me.maker_clients)
 asyncio.run(watch_me.run())

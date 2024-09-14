@@ -6,4 +6,4 @@ from config import gateio_key_test, gateio_secret_test, mexc_key_test, mexc_secr
 gate = ccxt.gateio({'apiKey': gateio_key_test, 'secret': gateio_secret_test})
 mexc = ccxt.mexc({'apiKey': mexc_key_test, 'secret': mexc_secret_test})
 
-asyncio.run(make_and_take(gate, mexc, 'ALPH/USDT', 1.0, 10, 1, 10, 10, 0))
+asyncio.run(make_and_take(gate, mexc, 'ALPH/USDT', 1.002, 10, 1.0035, 0.8, 10, 2))
