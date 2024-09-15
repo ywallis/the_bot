@@ -155,6 +155,8 @@ while loop_start < start_date + timedelta(days=1):
     trades_in_timeframe = fetch_trade_amount(maker_client, loop_start_input, loop_end_input)
     print(f"There are {trades_in_timeframe} trades between {loop_start_utc} and {loop_end_utc}.")
 
+    # This section effectively implements a dirty bisection style sizing of the timeframe
+
     if orders_in_timeframe > 99 or trades_in_timeframe > 99:
 
         loop_size = loop_size // 2
