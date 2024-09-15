@@ -1,3 +1,9 @@
+import sys
+
+# Adding directory to PATH
+sys.path.append(".")
+sys.path.append("..")
+
 import time
 from datetime import datetime, timedelta, date
 import pandas as pd
