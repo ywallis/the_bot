@@ -1,3 +1,9 @@
+import sys
+
+# Adding directory to PATH
+sys.path.append(".")
+sys.path.append("..")
+
 import ccxt
 import time
 from datetime import datetime
