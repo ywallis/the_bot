@@ -4,7 +4,36 @@ import pandas as pd
 import os
 import pytz
 
-from config import taker_client, maker_client, pair, path_to_NAS
+from config.config import instance_config, pair, path_to_NAS
+
+
+def fetch_order_amount(client, start, end):
+
+    """The purpose of this function is only to return the
+    amount of orders in a timeframe to support history bisection search"""
+
+    if client.name == 'BitMart':
+        orders = client.fetch_closed_orders(symbol=pair, limit=200, params={'startTime': start, 'endTime': end})
+    elif client.name == 'Bitget':
+        orders = client.fetch_canceled_and_closed_orders(symbol=pair, limit=100, params={'startTime': start, 'endTime': end})
+    else:
+        orders = client.fetch_closed_orders(symbol=pair, limit=500, params={'startTime': start, 'endTime': end})
+
+    return len(orders)
+
+def fetch_trade_amount(client, start, end):
+
+    """The purpose of this function is only to return the
+       amount of trades in a timeframe to support history bisection search"""
+
+    # Bitmart doesn't support queries for over 200 last trades.
+
+    if client.name == 'BitMart':
+        trades = client.fetch_my_trades(symbol=pair, limit=100, params={'startTime': start, 'endTime': end})
+    else:
+        trades = client.fetch_my_trades(symbol=pair, limit=100, params={'startTime': start, 'endTime': end})
+
+    return len(trades)
 
 
 def download_trades(client, start, end):
@@ -101,20 +130,37 @@ def download_orders(client, start, end):
 
 # This all works but is filthy. Turn into bisection search and clean this up!
 
+maker_client = instance_config['maker_client']
+taker_client = instance_config['taker_client']
+
+
 start_date_str = input('Enter the date (DD/MM/YY) for historical downloads (7D history):')
 
 start_date = datetime.strptime(start_date_str, '%d/%m/%y')
 start_date_utc = pytz.timezone('UTC').localize(start_date)
 loop_start = start_date
+original_loop_size = timedelta(minutes=30)
+loop_size = original_loop_size
 
 while loop_start < start_date + timedelta(days=1):
-    loop_end = loop_start + timedelta(minutes=5)
+    loop_end = loop_start + loop_size
     loop_start_utc = pytz.timezone('UTC').localize(loop_start)
     loop_end_utc = pytz.timezone('UTC').localize(loop_end)
     loop_start_input = int(loop_start_utc.timestamp() * 1000)
     loop_end_input = int(loop_end_utc.timestamp() * 1000)
 
     print(loop_start_utc)
+    orders_in_timeframe = fetch_order_amount(maker_client, loop_start_input, loop_end_input)
+    print(f"There are {orders_in_timeframe} orders between {loop_start_utc} and {loop_end_utc}.")
+    trades_in_timeframe = fetch_trade_amount(maker_client, loop_start_input, loop_end_input)
+    print(f"There are {trades_in_timeframe} trades between {loop_start_utc} and {loop_end_utc}.")
+
+    if orders_in_timeframe > 99 or trades_in_timeframe > 99:
+
+        loop_size = loop_size // 2
+        print(f'Over limit, reducing to {loop_size}')
+        continue
+
     print(loop_end_utc)
     download_orders(maker_client, loop_start_input, loop_end_input)
     download_trades(maker_client, loop_start_input, loop_end_input)
@@ -124,3 +170,8 @@ while loop_start < start_date + timedelta(days=1):
     time.sleep(1)
 
     loop_start = loop_end
+
+    # Resetting loop size to higher value.
+
+    loop_size = original_loop_size
+

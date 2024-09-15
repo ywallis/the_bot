@@ -1,7 +1,7 @@
 import ccxt
 import time
 from datetime import datetime
-from config import pair, low_balance_threshold, gate_client, mexc_client, bitget_client
+from config.config import pair, low_balance_threshold, gate_client, mexc_client, bitget_client
 from notifications import send_email
 from status_boiler import get_order_status, get_balance_status, download_orders, download_trades
 

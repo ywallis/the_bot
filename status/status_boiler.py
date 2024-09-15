@@ -1,5 +1,5 @@
 from datetime import date
-from config import path_to_NAS
+from config.config import path_to_NAS
 import pandas as pd
 import os
 
