@@ -1,7 +1,7 @@
 import ccxt.pro as ccxt
 import asyncio
 from datetime import datetime, timezone
-from config.config import gateio_key_test, gateio_secret_test, mexc_key_test, mexc_secret_test
+from config.config import gateio_key, gateio_secret, mexc_key, mexc_secret, bitget_key, bitget_secret, bitget_password
 
 # TESTING - IMPLEMENTING USING ALL TRADES INSTEAD OF MY TRADES TO AVOID DEALING WITH KEYS
 
@@ -25,14 +25,20 @@ async def match_sell(client, trade):
     if client.name == 'Gate.io':
 
         # Apply current fee level to keep stable inventory
+
         fee_ratio = 1 / (1 - gate_fee)
-        # Amount and quantity are different keys! relevant because testing in public data
 
         quantity_with_fee = round(quantity * fee_ratio, 2)
 
         await asyncio.sleep(1)
 
         print(f'Placed a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
+
+        # Testing with appending to a file
+
+        with open('matched.txt', 'a') as file:
+            file.write(f'\n{datetime.now()}\n{trade}\nPlacing a {quantity} {pair} buy order on {client.name} for {price}.')
+
 
         #logger.info(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {trade['price']}.')
 
@@ -54,6 +60,11 @@ async def match_buy(client, trade):
     print(f'Placing a {quantity} {pair} sell order on {client.name} for {price}.')
     # logger.info(f'Placing a {quantity} {pair} sell order on {client.name} for {price}.')
 
+    # Testing with appending to a file
+
+    with open('matched.txt', 'a') as file:
+        file.write(f'\n{datetime.now()}\n{trade}\nPlacing a {quantity} {pair} sell order on {client.name} for {price}.')
+
     # return client.create_limit_order(symbol=pair, side='sell', amount=quantity, price=price,
     #                                  params={'clientOrderId': identifier})
 
@@ -71,7 +82,7 @@ class Matcher:
 
         while True:
             try:
-                trades = await client.watch_trades('ALPH/USDT', since=timestamp)
+                trades = await client.watch_orders('ALPH/USDT', since=timestamp)
                 # Printing as a first placeholder for further logic
                 print(len(trades))
                 await self.process_trades(trades, client.name)
@@ -97,6 +108,8 @@ class Matcher:
 
         # CAREFUL HERE! PRODUCTION ONLY
 
+        # client_order_id = trade['clientOrderId']
+
         if trade['side'] == 'buy':
             print(f'This is a {trade['side']}')
             await match_buy(self.taker_client, trade)
@@ -117,10 +130,11 @@ class Matcher:
 
 # Can't import clients from config since they don't use ccxt.pro
 gate_fee = 0
-gate = ccxt.gateio({'apiKey': gateio_key_test, 'secret': gateio_secret_test})
-mexc = ccxt.mexc({'apiKey': mexc_key_test, 'secret': mexc_secret_test})
+gate = ccxt.gateio({'apiKey': gateio_key, 'secret': gateio_secret})
+mexc = ccxt.mexc({'apiKey': mexc_key, 'secret': mexc_secret})
+bitget = ccxt.bitget({'apiKey': bitget_key, 'secret': bitget_secret, 'password': bitget_password})
 
-watch_me = Matcher(gate,mexc)
+watch_me = Matcher(gate,mexc, bitget)
 
 print(watch_me.maker_clients)
 asyncio.run(watch_me.run())
