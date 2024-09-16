@@ -228,6 +228,7 @@ def make_and_take(config, pair):
                         logger.info(f'Solvent, sell order created')
                     except ccxt.ExchangeError as error:
                         print('Order fetch failed, trying again.')
+                        time.sleep(0.2)
                         logger.info('Order fetch failed, trying again.')
                         logger.info(error)
                         sell_order = maker_client.fetch_order(id=sell_order['id'], symbol=pair)
@@ -272,6 +273,7 @@ def make_and_take(config, pair):
                         logger.info(f'Solvent, sell order created')
                     except ccxt.ExchangeError as error:
                         print('Order fetch failed, trying again.')
+                        time.sleep(0.2)
                         logger.info('Order fetch failed, trying again.')
                         logger.info(error)
                         sell_order = maker_client.fetch_order(id=sell_order['id'], symbol=pair)
@@ -310,6 +312,7 @@ def make_and_take(config, pair):
                         logger.info(f'Solvent, sell order created')
                     except ccxt.ExchangeError as error:
                         print('Order fetch failed, trying again.')
+                        time.sleep(0.2)
                         logger.info('Order fetch failed, trying again.')
                         logger.info(error)
                         sell_order = maker_client.fetch_order(id=sell_order['id'], symbol=pair)
@@ -396,6 +399,7 @@ def make_and_take(config, pair):
                         logger.info(f'Solvent, buy order created')
                     except ccxt.ExchangeError as error:
                         print('Order fetch failed, trying again.')
+                        time.sleep(0.2)
                         logger.info('Order fetch failed, trying again.')
                         logger.info(error)
                         buy_order = maker_client.fetch_order(id=buy_order['id'], symbol=pair)
@@ -441,6 +445,7 @@ def make_and_take(config, pair):
                         logger.info(f'Solvent, buy order created')
                     except ccxt.ExchangeError as error:
                         print('Order fetch failed, trying again.')
+                        time.sleep(0.2)
                         logger.info('Order fetch failed, trying again.')
                         logger.info(error)
                         buy_order = maker_client.fetch_order(id=buy_order['id'], symbol=pair)
@@ -482,6 +487,7 @@ def make_and_take(config, pair):
                         logger.info(f'Solvent, buy order created')
                     except ccxt.ExchangeError as error:
                         print('Order fetch failed, trying again.')
+                        time.sleep(0.2)
                         logger.info('Order fetch failed, trying again.')
                         logger.info(error)
                         buy_order = maker_client.fetch_order(id=buy_order['id'], symbol=pair)

@@ -29,15 +29,16 @@ if __name__ == '__main__':
             make_and_take(instance_config, pair)
 
         except ccxt.NetworkError as e:
-            print('Network error')
-            logger.info('Network error')
+            print('Main loop level Network error')
+            logger.info('Main loop level Network error')
             logger.info(e)
 
         except ccxt.ExchangeError as e:
 
             # Has happened because of too many requests.
             time.sleep(5)
-            print('Exchange error')
+            print('Main loop level Exchange error')
+            logger.info('Main loop level Exchange error')
             logger.info(e)
 
 
