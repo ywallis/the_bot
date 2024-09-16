@@ -1,5 +1,5 @@
 import smtplib
-from config import *
+from config.config import EMAIL, PASSWORD
 
 
 def send_email(subject, message):

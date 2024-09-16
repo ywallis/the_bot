@@ -52,7 +52,6 @@ def download_trades(client, start, end):
 
     output_path = f'{path_to_NAS}{pair.split("/")[0]}/Trades/{today}_{client.name}_history.csv'
 
-    # output_path = f'{path_to_NAS}Test/Trades/{today}_{client.name}_history.csv'
 
     # Bitmart doesn't support queries for over 200 last trades.
 
@@ -96,7 +95,6 @@ def download_orders(client, start, end):
     orders_with_fee = []
 
     output_path = f'{path_to_NAS}{pair.split("/")[0]}/Orders/{today}_{client.name}_history.csv'
-    # output_path = f'{path_to_NAS}Test/Orders/{today}_{client.name}_history.csv'
 
     if client.name == 'BitMart':
         orders = client.fetch_closed_orders(symbol=pair, limit=200, params={'startTime': start, 'endTime': end})

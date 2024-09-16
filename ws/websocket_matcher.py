@@ -1,7 +1,7 @@
 import ccxt.pro as ccxt
 import asyncio
 from datetime import datetime, timezone
-from config import gateio_key_test, gateio_secret_test, mexc_key_test, mexc_secret_test
+from config.config import gateio_key_test, gateio_secret_test, mexc_key_test, mexc_secret_test
 
 # TESTING - IMPLEMENTING USING ALL TRADES INSTEAD OF MY TRADES TO AVOID DEALING WITH KEYS
 
@@ -32,7 +32,7 @@ async def match_sell(client, trade):
 
         await asyncio.sleep(1)
 
-        print(f'Placed a {quantity_with_fee} {pair} buy order on {client.name} for {trade['price']}.')
+        print(f'Placed a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
 
         #logger.info(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {trade['price']}.')
 
