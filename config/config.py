@@ -81,20 +81,6 @@ if target == 1:  # MEXC
               'spread_extension': 2,
                        }
 
-    # taker_client = gate_client
-    # maker_client = mexc_client
-    # taker_min_spread = 1.0035
-    # taker_sizing = 0.8
-    # taker_max_order_size = 50
-    # bitmart_client = None
-    # maker_client.rateLimit = 40
-    # maker_spread = 1.002
-    # maker_size = 80
-    # low_balance_threshold = 1500
-    # taker_only = False
-    # spread_extension = 2
-
-
 
 if target == 2:  # Bitmart
     gate_client = ccxt.gateio({'apiKey': gateio_key, 'secret': gateio_secret})
@@ -140,26 +126,12 @@ if target == 4:  # Bitget
               'maker_client': bitget_client,
               'maker_spread': 1.0025,
               'maker_size': 50,
-              'taker_spread': 1.003,
+              'taker_spread': 1.0035,
               'taker_sizing': 0.8,
               'taker_max_order_size': 30,
               'taker_only': False,
-              'spread_extension': 0,
+              'spread_extension': 1,
                        }
-
-    # taker_client = gate_client
-    # maker_client = bitget_client
-    # taker_min_spread = 1.003
-    # taker_sizing = 0.8
-    # taker_max_order_size = 30
-    # bitmart_client = None
-    # # maker_client.rateLimit = 40
-    # maker_spread = 1.0025
-    # maker_size = 50
-    # low_balance_threshold = 500
-    # taker_only = False
-    # bitget_fee = bitget_client.fetch_trading_fee(symbol=pair)['taker']
-    # spread_extension = 0
 
 if target == 5: # This is for testing only
 
