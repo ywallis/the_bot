@@ -3,6 +3,16 @@ from config.config import path_to_data
 import pandas as pd
 import os
 
+def fetch_all_open_orders_client_order_id(ticker, *clients):
+    """Fetches the clientOrderId for all open orders regardless of client and returns them in a list"""
+    all_orders = []
+    for client in clients:
+        orders = client.fetch_open_orders(ticker)
+        for order in orders:
+            all_orders.append((order['clientOrderId']))
+
+    return all_orders
+
 
 def get_balance_status(client, ticker, threshold):
 
