@@ -9,7 +9,7 @@ def refresh_db(db_name):
     """This function takes in the name of a DB (trades or orders) and refreshes it to include all downloaded values.
     As of SEP24, values can either be 'Trades' or 'Orders'."""
 
-    directory = f'{path_to_data}{pair.split('/')[0]}/{db_name}/'
+    directory = f'{path_to_data}{pair.split("/")[0]}/{db_name}/'
 
     dfs = []
     for filename in os.listdir(directory):
