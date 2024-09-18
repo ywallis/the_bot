@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
-from config.config import path_to_NAS, pair
+from config.config import path_to_data, pair
 
 
 def refresh_db(db_name):
@@ -9,7 +9,7 @@ def refresh_db(db_name):
     """This function takes in the name of a DB (trades or orders) and refreshes it to include all downloaded values.
     As of SEP24, values can either be 'Trades' or 'Orders'."""
 
-    directory = f'{path_to_NAS}{pair.split('/')[0]}/{db_name}'
+    directory = f'{path_to_data}{pair.split('/')[0]}/{db_name}'
 
     dfs = []
     for filename in os.listdir(directory):

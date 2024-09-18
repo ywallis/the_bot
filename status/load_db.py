@@ -1,10 +1,10 @@
 import pandas as pd
 import numpy as np
-from config.config import path_to_NAS, pair
+from config.config import path_to_data, pair
 
 # Load Trades
 
-trades = pd.read_csv(f'{path_to_NAS}/Trades/all_trades.csv', index_col=0,
+trades = pd.read_csv(f'{path_to_data}/Trades/all_trades.csv', index_col=0,
                      dtype={'info': 'object',
                             'id': 'object',
                             'timestamp': 'int64',
@@ -24,7 +24,7 @@ data_clean = trades[['side', 'exchange', 'takerOrMaker', 'amount', 'price', 'cos
 
 # Load Orders
 
-orders = pd.read_csv(f'{path_to_NAS}/Orders/all_orders.csv', index_col=0,
+orders = pd.read_csv(f'{path_to_data}/Orders/all_orders.csv', index_col=0,
                      dtype={"id": "object",
                             "clientOrderId": "object",
                             "timestamp": "int64",

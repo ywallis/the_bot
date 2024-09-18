@@ -35,10 +35,14 @@ PASSWORD = os.getenv('PASSWORD')
 pair = 'ALPH/USDT'
 
 if os.name == 'nt':
-    path_to_NAS = '//B257_NAS/Data/Arb Bot Unified/'
+    path_to_data = '//B257_NAS/Data/Arb Bot Unified/'
+
+elif os.uname()[1] == 'T490-Ubuntu':
+    print('Using Laptop Data!')
+    path_to_data = '../Data/'
 
 else:
-    path_to_NAS = '/home/yann/Data/Arb Bot Unified/'
+    path_to_data = '/home/yann/Data/Arb Bot Unified/'
 
 gate_fee = 0
 bitget_fee = 0

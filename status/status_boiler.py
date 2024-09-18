@@ -1,5 +1,5 @@
 from datetime import date
-from config.config import path_to_NAS
+from config.config import path_to_data
 import pandas as pd
 import os
 
@@ -68,9 +68,9 @@ def download_orders(client, ticker, production=True):
     orders_with_fee = []
 
     if production:
-        output_path = f'{path_to_NAS}{ticker.split("/")[0]}/Orders/{today}_{client.name}.csv'
+        output_path = f'{path_to_data}{ticker.split("/")[0]}/Orders/{today}_{client.name}.csv'
     else:
-        output_path = f'{path_to_NAS}Test/Orders/{today}_{client.name}.csv'
+        output_path = f'{path_to_data}Test/Orders/{today}_{client.name}.csv'
 
     # Bitmart doesn't support queries for over 200 last trades.
 
@@ -114,9 +114,9 @@ def download_trades(client, ticker, production=True):
     trades_with_fee = []
 
     if production:
-        output_path = f'{path_to_NAS}{ticker.split("/")[0]}/Trades/{today}_{client.name}.csv'
+        output_path = f'{path_to_data}{ticker.split("/")[0]}/Trades/{today}_{client.name}.csv'
     else:
-        output_path = f'{path_to_NAS}Test/Trades/{today}_{client.name}.csv'
+        output_path = f'{path_to_data}Test/Trades/{today}_{client.name}.csv'
 
     # Bitmart doesn't support queries for over 200 last trades.
 
