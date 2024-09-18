@@ -1,3 +1,9 @@
+import sys
+
+# Adding directory to PATH
+sys.path.append(".")
+sys.path.append("..")
+
 from config.config import gate_client, mexc_client, bitget_client, pair
 import pandas as pd
 from status_boiler import fetch_all_open_orders_client_order_id
