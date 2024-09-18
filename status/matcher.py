@@ -20,4 +20,10 @@ for client in clients:
 df = pd.DataFrame(orders)
 df.set_index('id', inplace=True)
 print(df)
-df.to_csv('matching.csv')
+
+# Export if manual needed
+
+#df.to_csv('matching.csv')
+
+# for item in df.index:
+#     print(item)
