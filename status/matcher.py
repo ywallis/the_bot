@@ -124,7 +124,7 @@ for order_no in imbalances.keys():
         # Separating order creation and data collection to introduce a stopper
 
         order_data = {'id': order_no,
-                      'amount': imbalances[order_no],
+                      'amount': abs(imbalances[order_no]),
                       'price': price,
                       'side': side, }
 
