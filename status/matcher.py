@@ -7,6 +7,7 @@ sys.path.append("..")
 from config.config import gate_client, mexc_client, bitget_client, pair
 from status_boiler import fetch_all_open_orders_client_order_id
 from load_db import find_imbalance, load_db
+from db_refresh import db_refresh
 
 ### First version, fetches all open orders and exports them to a csv with matching-relevant information.
 
@@ -47,6 +48,10 @@ while loop:
         loop = False
     else:
         print("This can't be empty")
+
+
+db_refresh('Trades')
+db_refresh('Orders')
 
 db = load_db()
 imbalances = find_imbalance(date_mod, db)

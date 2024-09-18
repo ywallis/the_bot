@@ -10,7 +10,7 @@ import os
 from config.config import path_to_data, pair
 
 
-def refresh_db(db_name):
+def db_refresh(db_name):
 
     """This function takes in the name of a DB (trades or orders) and refreshes it to include all downloaded values.
     As of SEP24, values can either be 'Trades' or 'Orders'."""
@@ -33,5 +33,5 @@ def refresh_db(db_name):
     items.to_csv(f'{directory}all_{db_name}.csv')
 
 
-refresh_db('Trades')
-refresh_db('Orders')
+db_refresh('Trades')
+db_refresh('Orders')
