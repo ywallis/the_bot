@@ -96,8 +96,10 @@ def load_db():
 
     return detailed
 
-def find_imbalance(df=load_db()):
+def find_imbalance(df=load_db(), date=None):
+
     detailed = df
+
     all_buys_by_id = detailed[detailed['side'] ==  'buy']
     all_sells_by_id = detailed[detailed['side'] ==  'sell']
 
@@ -125,9 +127,9 @@ def find_imbalance(df=load_db()):
     output = {}
 
     for index, row in need_matching.iterrows():
-        amount = round(float(row['Net Gain']), 2)
-
-        output[index] = amount
+        if index.startswith(f't-{date}'):
+            amount = round(float(row['Net Gain']), 2)
+            output[index] = amount
 
     print(output)
     return output

@@ -7,7 +7,7 @@ sys.path.append("..")
 from config.config import gate_client, mexc_client, bitget_client, pair
 import pandas as pd
 from status_boiler import fetch_all_open_orders_client_order_id
-from load_db import find_imbalance
+from load_db import find_imbalance, load_db
 
 ### First version, fetches all open orders and exports them to a csv with matching-relevant information.
 
@@ -36,7 +36,11 @@ from load_db import find_imbalance
 # for item in df.index:
 #     print(item)
 
-imbalances = find_imbalance()
+date = input('Enter the date (DD/MM/YY) you want to match orders on:')
+date_mod = "".join(date.split("/")[::-1])
+print(date_mod)
+
+imbalances = find_imbalance(date=date_mod)
 orders = fetch_all_open_orders_client_order_id(pair, gate_client, mexc_client, bitget_client)
 
 for _ in imbalances.keys():
