@@ -120,7 +120,7 @@ def find_imbalance(date, df=load_db()):
     # This isolates trade combinations which have a large (2? make user definable) imbalance,
     # and either should have an associated open order or the need for one.
 
-    need_matching = inventory_id.loc[(inventory_id['Net Gain'] < -2 ) | (inventory_id['Net Gain'] < -2 )]
+    need_matching = inventory_id.loc[(inventory_id['Net Gain'] < -2 ) | (inventory_id['Net Gain'] > 2 )]
 
     # print(need_matching)
 
