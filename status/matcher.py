@@ -56,27 +56,30 @@ db_refresh('Orders')
 db = load_db()
 imbalances = find_imbalance(date_mod, db)
 orders = fetch_all_open_orders_client_order_id(pair, gate_client, mexc_client, bitget_client)
+all_orders_to_place = []
 
-for _ in imbalances.keys():
-    print(_)
-    if _ in orders:
+for order_no in imbalances.keys():
+    side = ""
+    print(order_no)
+    if order_no in orders:
         print('This is pending')
     else:
-        if imbalances[_] < 0:
-            print(f'{imbalances[_]} imbalance, should buy!')
+        if imbalances[order_no] < 0:
+            print(f'{imbalances[order_no]} imbalance, should buy!')
+            side = "buy"
 
             # Search through the database for the price the unmatched orders were executed at.
 
             # First looks at partial fills for price. If they exist, will take the most reachable price
 
-            partial_fills = db.loc[(db['clientOrderId'] == _) & (db['side'] == 'buy')]['price'].values
+            partial_fills = db.loc[(db['clientOrderId'] == order_no) & (db['side'] == 'buy')]['price'].values
 
             if partial_fills.size > 0:
                 partial_fills = max(partial_fills)
 
             # If partial fills don't exist, looks at the price most reachable price on the unmatched order.
 
-            imbalanced_price = db.loc[(db['clientOrderId'] == _) & (db['side'] == 'sell')]['price'].values
+            imbalanced_price = db.loc[(db['clientOrderId'] == order_no) & (db['side'] == 'sell')]['price'].values
 
             imbalanced_price = min(imbalanced_price)
 
@@ -88,22 +91,24 @@ for _ in imbalances.keys():
                 price = round(imbalanced_price / spread, 3)
 
 
-            print(f'Creating a matching buy order for order {_} with a quantity of {imbalances[_]} and a price of {price}.')
+            print(f'Creating a matching buy order for order {order_no} with a quantity of {imbalances[order_no]} and a price of {price}.')
 
         else:
-            print(f'{imbalances[_]} imbalance, should sell!')
+            print(f'{imbalances[order_no]} imbalance, should sell!')
+
+            side = "sell"
 
             # Search through the database for the price the unmatched orders were executed at.
 
             # First looks at partial fills for price
 
-            partial_fills = db.loc[(db['clientOrderId'] == _) & (db['side'] == 'sell')]['price'].values
+            partial_fills = db.loc[(db['clientOrderId'] == order_no) & (db['side'] == 'sell')]['price'].values
             if partial_fills.size > 0:
                 partial_fills = min(partial_fills)
 
             # If partial fills don't exist, looks at the price on the unmatched order.
 
-            imbalanced_price = db.loc[(db['clientOrderId'] == _) & (db['side'] == 'buy')]['price'].values
+            imbalanced_price = db.loc[(db['clientOrderId'] == order_no) & (db['side'] == 'buy')]['price'].values
             imbalanced_price = max(imbalanced_price)
 
 
@@ -114,4 +119,32 @@ for _ in imbalances.keys():
             else:
                 price = round(imbalanced_price * spread, 3)
 
-            print(f'Creating a matching sell order for order {_} with a quantity of {imbalances[_]} and a price of {price}.')
+            print(f'Creating a matching sell order for order {order_no} with a quantity of {imbalances[order_no]} and a price of {price}.')
+
+        # Separating order creation and data collection to introduce a stopper
+
+        order_data = {'id': order_no,
+                      'amount': imbalances[order_no],
+                      'price': price,
+                      'side': side, }
+
+        all_orders_to_place.append(order_data)
+
+
+print(all_orders_to_place)
+
+confirming = True
+while confirming:
+    confirmation = input('Are you sure you want to place these order? y/n')
+    if confirmation == "y":
+        confirming = False
+
+
+for order in all_orders_to_place:
+    print('Placing')
+    print(gate_client.create_order(symbol=pair,
+                             type='limit',
+                             side=order['side'],
+                             amount=order['amount'],
+                             price=order['price'],
+                             params={f'clientOrderId': order['id']}))
