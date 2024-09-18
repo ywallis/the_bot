@@ -96,7 +96,7 @@ def load_db():
 
     return detailed
 
-def find_imbalance(df=load_db(), date=None):
+def find_imbalance(date, df=load_db()):
 
     detailed = df
 
@@ -122,7 +122,7 @@ def find_imbalance(df=load_db(), date=None):
 
     need_matching = inventory_id.loc[(inventory_id['Net Gain'] < -2 ) | (inventory_id['Net Gain'] < -2 )]
 
-    print(need_matching)
+    # print(need_matching)
 
     output = {}
 
@@ -131,7 +131,7 @@ def find_imbalance(df=load_db(), date=None):
             amount = round(float(row['Net Gain']), 2)
             output[index] = amount
 
-    print(output)
+    # print(output)
     return output
 
 # find_imbalance()
