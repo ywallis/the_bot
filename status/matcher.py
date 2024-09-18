@@ -40,6 +40,7 @@ spread = 1.003
 
 loop = True
 date_mod = ""
+date = ""
 while loop:
     date = input('Enter the date (DD/MM/YY) you want to match orders on:')
     date_mod = "".join(date.split("/")[::-1])
@@ -48,6 +49,10 @@ while loop:
         loop = False
     else:
         print("This can't be empty")
+
+if date == "00":
+    date_mod = ""
+    print(date_mod)
 
 
 db_refresh('Trades')
