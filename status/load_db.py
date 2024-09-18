@@ -1,12 +1,17 @@
 import pandas as pd
 import numpy as np
 from config.config import path_to_data, pair
+from datetime import date
 
 pd.options.mode.copy_on_write = True
 
 # Load Trades
 
-def load_db():
+def load_db(start=None):
+
+    # Start is here to make sure previous values don't "leak" into the new data.
+    if start is None:
+        start = str(date.today())[:-3]
 
     trades = pd.read_csv(f'{path_to_data}{pair.split("/")[0]}/Trades/all_Trades.csv', index_col=0,
                          dtype={'info': 'object',
@@ -94,7 +99,7 @@ def load_db():
     detailed = pd.merge(data_clean_prep, orders_clean, on='order', how='left')
     detailed.set_index('datetime', inplace=True)
 
-    return detailed
+    return detailed[start :]
 
 def find_imbalance(date, df=load_db()):
 
