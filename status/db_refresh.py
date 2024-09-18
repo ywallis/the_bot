@@ -1,3 +1,9 @@
+import sys
+
+# Adding directory to PATH
+sys.path.append(".")
+sys.path.append("..")
+
 import pandas as pd
 import numpy as np
 import os
