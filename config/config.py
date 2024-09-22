@@ -28,6 +28,16 @@ bitget_secret = os.getenv('bitget_secret')
 
 bitget_password = os.getenv('bitget_password')
 
+mexc_master_key = os.getenv('mexc_master_key')
+
+mexc_master_secret = os.getenv('mexc_master_secret')
+
+bitget_master_password = os.getenv('bitget_master_password')
+
+bitget_master_key = os.getenv('bitget_master_key')
+
+bitget_master_secret = os.getenv('bitget_master_secret')
+
 EMAIL = os.getenv('EMAIL')
 
 PASSWORD = os.getenv('PASSWORD')
