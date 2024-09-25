@@ -38,6 +38,14 @@ bitget_master_key = os.getenv('bitget_master_key')
 
 bitget_master_secret = os.getenv('bitget_master_secret')
 
+gateio_key_test = os.getenv('gateio_key_test')
+
+gateio_secret_test = os.getenv('gateio_secret_test')
+
+mexc_key_test = os.getenv('mexc_key_test')
+
+mexc_secret_test = os.getenv('mexc_secret_test')
+
 EMAIL = os.getenv('EMAIL')
 
 PASSWORD = os.getenv('PASSWORD')
@@ -59,6 +67,9 @@ bitget_fee = 0
 target = None
 choosing = True
 options = [0, 1, 2, 3, 4, 5]
+clients = {'gate_client': ccxt.gateio({'apiKey': gateio_key, 'secret': gateio_secret}),
+          'mexc_client': ccxt.mexc({'apiKey': mexc_key, 'secret': mexc_secret}),
+          'bitget_client': ccxt.bitget({'apiKey': bitget_key, 'secret': bitget_secret, 'password': bitget_password})}
 
 while choosing is True:
     try:
@@ -72,7 +83,7 @@ while choosing is True:
 
 # Initialize clients & Exchange dependent variables
 if target == 0:  # Status
-
+    print('TEST KEYS!!!')
     gate_client = ccxt.gateio({'apiKey': gateio_key, 'secret': gateio_secret})
     mexc_client = ccxt.mexc({'apiKey': mexc_key, 'secret': mexc_secret})
     bitget_client = ccxt.bitget({'apiKey': bitget_key, 'secret': bitget_secret, 'password': bitget_password})
@@ -153,5 +164,10 @@ if target == 5: # This is for testing only
     gateio_secret_test = os.getenv('gateio_secret_test')
     mexc_key_test = os.getenv('mexc_key_test')
     mexc_secret_test = os.getenv('mexc_secret_test')
+    gate_client = ccxt.gateio({'apiKey': gateio_key_test, 'secret': gateio_secret_test})
+    mexc_client = ccxt.mexc({'apiKey': mexc_key_test, 'secret': mexc_secret_test})
+    maker_client = mexc_client
+    taker_client = gate_client
+    low_balance_threshold = 10
     bitget_fee = None
 

@@ -22,7 +22,7 @@ mexc_client = ccxt.mexc({'apiKey': mexc_key_test, 'secret': mexc_secret_test})
 instance_config = {'taker_client': gate_client,
                    'maker_client': mexc_client,
                    'maker_spread': 1.002,
-                   'maker_size': 80,
+                   'maker_size': 10,
                    'taker_spread': 1.0035,
                    'taker_sizing': 0.8,
                    'taker_max_order_size': 50,

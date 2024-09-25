@@ -209,11 +209,13 @@ async def check_and_take(client_a, client_b, order, pair, market_side):
 
                 # YOU MIGHT BE ABLE TO SPEED THIS UP BY ASSIGNING FILLED TO THE CANCEL ORDER
 
-                filled = float(await client_b.fetch_order(id=order['id'], symbol=pair)['filled'])
+                filled_str = await client_b.fetch_order(id=order['id'], symbol=pair)['filled']
+                filled = float(filled_str)
                 print(f'{filled} from order filled')
 
             except ccxt.BadRequest:
-                filled = float(await client_b.fetch_order(id=order['id'], symbol=pair)['filled'])
+                filled_str = await client_b.fetch_order(id=order['id'], symbol=pair)['filled']
+                filled = float(filled_str)
                 print(f'Order has been fully filled, taking {filled}')
 
         # market sell any filled on A
