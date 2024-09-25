@@ -10,12 +10,21 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_size,
-                  taker_spread, taker_sizing, taker_max_order_size, spread_extension, taker_only=False):
+async def make_and_take(config, pair):
 
     """This function acts as a basic market making system, with the following two logics:
     1. A taker logic, acting immediately in two order books in case a profitable imbalance is spotted.
     2. A maker1 logic, offering liquidity on one side, if the position can be hedged profitably on the other."""
+
+    taker_client = config['taker_client']
+    maker_client = config['maker_client']
+    maker_spread = config['maker_spread']
+    maker_size = config['maker_size']
+    taker_spread = config['taker_spread']
+    taker_sizing = config['taker_sizing']
+    taker_max_order_size = config['taker_max_order_size']
+    taker_only = config['taker_only']
+    spread_extension = config['spread_extension']
 
     buy_exists = False
     sell_exists = False
@@ -65,12 +74,8 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
         # Slow watching if no open order
 
         if not buy_arbitrage and not sell_arbitrage:
-            await asyncio.sleep(1)
+            time.sleep(1)
 
-        # Trying Async batch logic
-
-        # taker_order_book = await taker_client.fetch_order_book(pair)
-        # maker_order_book = await maker_client.fetch_order_book(pair)
 
         batch = asyncio.gather(taker_client.fetch_order_book(pair), maker_client.fetch_order_book(pair))
         taker_order_book, maker_order_book = await batch
@@ -218,9 +223,20 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
                                                                       amount=optimal_sell_size,
                                                                       price=best_ask_maker,
                                                                       params={'clientOrderId': f't-{order_time()}_es'})
-                    sell_order = await maker_client.fetch_order(id=sell_order['id'], symbol=pair)
                     sell_exists = True
-                    logger.info(f'Solvent, sell order created')
+
+                    # Retrying in case of error
+
+                    try:
+                        sell_order = await maker_client.fetch_order(id=sell_order['id'], symbol=pair)
+                        logger.info(f'Solvent, sell order created')
+                    except ccxt.ExchangeError as error:
+                        print('Order fetch failed, trying again.')
+                        time.sleep(0.2)
+                        logger.info('Order fetch failed, trying again.')
+                        logger.info(error)
+                        sell_order = await maker_client.fetch_order(id=sell_order['id'], symbol=pair)
+                        logger.info(f'Solvent, sell order created')
 
                 else:
                     print('Insufficient funds!')
@@ -252,9 +268,21 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
                     sell_order = await maker_client.create_limit_sell_order(symbol=pair, amount=optimal_sell_size,
                                                                       price=best_ask_maker,
                                                                       params={'clientOrderId': f't-{order_time()}_es'})
-                    sell_order = await maker_client.fetch_order(id=sell_order['id'], symbol=pair)
-                    print(f'Sell {best_ask_maker}')
+
                     sell_exists = True
+
+                    # Retrying in case of error
+
+                    try:
+                        sell_order = await maker_client.fetch_order(id=sell_order['id'], symbol=pair)
+                        logger.info(f'Solvent, sell order created')
+                    except ccxt.ExchangeError as error:
+                        print('Order fetch failed, trying again.')
+                        time.sleep(0.2)
+                        logger.info('Order fetch failed, trying again.')
+                        logger.info(error)
+                        sell_order = await maker_client.fetch_order(id=sell_order['id'], symbol=pair)
+                        logger.info(f'Solvent, sell order created')
 
             # Checks if the current order's amount is within a set range from the optimal size
 
@@ -281,9 +309,19 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
                     sell_order = await maker_client.create_limit_sell_order(symbol=pair, amount=optimal_sell_size,
                                                                       price=best_ask_maker,
                                                                       params={'clientOrderId': f't-{order_time()}_es'})
-                    sell_order = await maker_client.fetch_order(id=sell_order['id'], symbol=pair)
-                    print(f'Sell {best_ask_maker}')
                     sell_exists = True
+                    # Retrying in case of error
+
+                    try:
+                        sell_order = await maker_client.fetch_order(id=sell_order['id'], symbol=pair)
+                        logger.info(f'Solvent, sell order created')
+                    except ccxt.ExchangeError as error:
+                        print('Order fetch failed, trying again.')
+                        time.sleep(0.2)
+                        logger.info('Order fetch failed, trying again.')
+                        logger.info(error)
+                        sell_order = await maker_client.fetch_order(id=sell_order['id'], symbol=pair)
+                        logger.info(f'Solvent, sell order created')
 
             # If the flag for an existing sell order exists, check if it has been filled.
 
@@ -356,9 +394,19 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
                     buy_order = await maker_client.create_limit_buy_order(symbol=pair,
                                                                     amount=optimal_buy_size, price=best_bid_maker,
                                                                     params={'clientOrderId': f't-{order_time()}_eb'})
-                    buy_order = await maker_client.fetch_order(id=buy_order['id'], symbol=pair)
                     buy_exists = True
-                    logger.info(f'Solvent, buy order created')
+                    # Retrying in case of error
+
+                    try:
+                        buy_order = await maker_client.fetch_order(id=buy_order['id'], symbol=pair)
+                        logger.info(f'Solvent, buy order created')
+                    except ccxt.ExchangeError as error:
+                        print('Order fetch failed, trying again.')
+                        time.sleep(0.2)
+                        logger.info('Order fetch failed, trying again.')
+                        logger.info(error)
+                        buy_order = await maker_client.fetch_order(id=buy_order['id'], symbol=pair)
+                        logger.info(f'Solvent, buy order created')
 
                 else:
                     print('Insufficient funds!')
@@ -391,9 +439,20 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
                     buy_order = await maker_client.create_limit_buy_order(symbol=pair,
                                                                     amount=optimal_buy_size, price=best_bid_maker,
                                                                     params={'clientOrderId': f't-{order_time()}_eb'})
-                    buy_order = await maker_client.fetch_order(id=buy_order['id'], symbol=pair)
-                    print(f'Buy {best_bid_maker}')
                     buy_exists = True
+
+                    # Retrying in case of error
+
+                    try:
+                        buy_order = await maker_client.fetch_order(id=buy_order['id'], symbol=pair)
+                        logger.info(f'Solvent, buy order created')
+                    except ccxt.ExchangeError as error:
+                        print('Order fetch failed, trying again.')
+                        time.sleep(0.2)
+                        logger.info('Order fetch failed, trying again.')
+                        logger.info(error)
+                        buy_order = await maker_client.fetch_order(id=buy_order['id'], symbol=pair)
+                        logger.info(f'Solvent, buy order created')
 
             # Checks if the current order's amount is within a set range from the optimal size
 
@@ -422,9 +481,19 @@ async def make_and_take(taker_client, maker_client, pair, maker_spread, maker_si
                     buy_order = await maker_client.create_limit_buy_order(symbol=pair,
                                                                     amount=optimal_buy_size, price=best_bid_maker,
                                                                     params={'clientOrderId': f't-{order_time()}_eb'})
-                    buy_order = await maker_client.fetch_order(id=buy_order['id'], symbol=pair)
-                    print(f'Buy {best_bid_maker}')
                     buy_exists = True
+                    # Retrying in case of error
+
+                    try:
+                        buy_order = maker_client.fetch_order(id=buy_order['id'], symbol=pair)
+                        logger.info(f'Solvent, buy order created')
+                    except ccxt.ExchangeError as error:
+                        print('Order fetch failed, trying again.')
+                        time.sleep(0.2)
+                        logger.info('Order fetch failed, trying again.')
+                        logger.info(error)
+                        buy_order = maker_client.fetch_order(id=buy_order['id'], symbol=pair)
+                        logger.info(f'Solvent, buy order created')
 
             # If the flag for an existing buy order exists, check if it has been filled.
 
