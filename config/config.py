@@ -1,4 +1,5 @@
 import ccxt
+import ccxt.async_support as ccxt_async
 import os
 from dotenv import load_dotenv
 
@@ -73,9 +74,13 @@ bitget_fee = 0
 target = None
 choosing = True
 options = [0, 1, 2, 3, 4, 5]
-clients = {'gate_client': ccxt.gateio({'apiKey': gateio_key, 'secret': gateio_secret}),
-          'mexc_client': ccxt.mexc({'apiKey': mexc_key, 'secret': mexc_secret}),
-          'bitget_client': ccxt.bitget({'apiKey': bitget_key, 'secret': bitget_secret, 'password': bitget_password})}
+clients_sync = {'gate_client': ccxt.gateio({'apiKey': gateio_key, 'secret': gateio_secret}),
+                'mexc_client': ccxt.mexc({'apiKey': mexc_key, 'secret': mexc_secret}),
+                'bitget_client': ccxt.bitget({'apiKey': bitget_key, 'secret': bitget_secret, 'password': bitget_password})}
+
+clients_async = {'gate_client': ccxt_async.gateio({'apiKey': gateio_key, 'secret': gateio_secret}),
+                'mexc_client': ccxt_async.mexc({'apiKey': mexc_key, 'secret': mexc_secret}),
+                'bitget_client': ccxt_async.bitget({'apiKey': bitget_key, 'secret': bitget_secret, 'password': bitget_password})}
 
 while choosing is True:
     try:
@@ -174,6 +179,7 @@ if target == 5: # This is for testing only
     bitget_client = ccxt.bitget({'apiKey': bitget_key_test, 'secret': bitget_secret_test, 'password': bitget_password_test})
     maker_client = mexc_client
     taker_client = gate_client
+    clients = [gate_client, mexc_client, bitget_client]
     low_balance_threshold = 10
     bitget_fee = None
 
