@@ -107,6 +107,7 @@ async def make_and_take(config, pair):
         # Start take_take with client_a as buyer, client_b as seller.
         # continue
 
+
         if best_bid_maker >= best_ask_taker * taker_spread:
 
             try:
@@ -239,10 +240,8 @@ async def make_and_take(config, pair):
                             sell_order = await maker_client.fetch_order(id=sell_order['id'], symbol=pair)
                             logger.info(f'Solvent, sell order created')
                         except ccxt.ExchangeError as error:
-                            logger.info('Order fetch failed again, closing connectors.')
+                            logger.info('Order fetch failed again.')
                             logger.info(error)
-                            await maker_client.close()
-                            await taker_client.close()
 
                 else:
                     print('Insufficient funds!')
@@ -295,10 +294,8 @@ async def make_and_take(config, pair):
                             sell_order = await maker_client.fetch_order(id=sell_order['id'], symbol=pair)
                             logger.info(f'Solvent, sell order created')
                         except ccxt.ExchangeError as error:
-                            logger.info('Order fetch failed again, closing connectors.')
+                            logger.info('Order fetch failed again.')
                             logger.info(error)
-                            await maker_client.close()
-                            await taker_client.close()
 
             # Checks if the current order's amount is within a set range from the optimal size
 
@@ -345,10 +342,8 @@ async def make_and_take(config, pair):
                             sell_order = await maker_client.fetch_order(id=sell_order['id'], symbol=pair)
                             logger.info(f'Solvent, sell order created')
                         except ccxt.ExchangeError as error:
-                            logger.info('Order fetch failed again, closing connectors.')
+                            logger.info('Order fetch failed again.')
                             logger.info(error)
-                            await maker_client.close()
-                            await taker_client.close()
 
             # If the flag for an existing sell order exists, check if it has been filled.
 
@@ -436,10 +431,8 @@ async def make_and_take(config, pair):
                             buy_order = await maker_client.fetch_order(id=buy_order['id'], symbol=pair)
                             logger.info(f'Solvent, buy order created')
                         except ccxt.ExchangeError as error:
-                            logger.info('Order fetch failed again, closing connectors.')
+                            logger.info('Order fetch failed again.')
                             logger.info(error)
-                            await maker_client.close()
-                            await taker_client.close()
 
                 else:
                     print('Insufficient funds!')
@@ -493,10 +486,8 @@ async def make_and_take(config, pair):
                             buy_order = await maker_client.fetch_order(id=buy_order['id'], symbol=pair)
                             logger.info(f'Solvent, buy order created')
                         except ccxt.ExchangeError as error:
-                            logger.info('Order fetch failed again, closing connectors.')
+                            logger.info('Order fetch failed again.')
                             logger.info(error)
-                            await maker_client.close()
-                            await taker_client.close()
 
             # Checks if the current order's amount is within a set range from the optimal size
 
@@ -544,10 +535,8 @@ async def make_and_take(config, pair):
                             buy_order = maker_client.fetch_order(id=buy_order['id'], symbol=pair)
                             logger.info(f'Solvent, buy order created')
                         except ccxt.ExchangeError as error:
-                            logger.info('Order fetch failed again, closing connectors.')
+                            logger.info('Order fetch failed again.')
                             logger.info(error)
-                            await maker_client.close()
-                            await taker_client.close()
 
             # If the flag for an existing buy order exists, check if it has been filled.
 

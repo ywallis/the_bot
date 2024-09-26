@@ -39,13 +39,13 @@ logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.DEBUG,
                     filename=f'../Logs/{today}_maker_{instance_config['maker_client'].name}.txt')
 logger = logging.getLogger(__name__)
 
-making = True
 
-if __name__ == '__main__':
+async def main_loop():
+    making = True
 
     while making is True:
         try:
-            asyncio.run(make_and_take(instance_config, pair))
+            await make_and_take(instance_config, pair)
 
         except ccxt.NetworkError as e:
             print('Main loop level Network error')
@@ -64,4 +64,29 @@ if __name__ == '__main__':
             print('Main loop level Runtime error')
             logger.info('Main loop level Runtime error')
             logger.info(e)
-            continue
+
+if __name__ == '__main__':
+
+    asyncio.run(main_loop())
+
+    # while making is True:
+    #     try:
+    #         asyncio.run(make_and_take(instance_config, pair), debug=True)
+    #
+    #     except ccxt.NetworkError as e:
+    #         print('Main loop level Network error')
+    #         logger.info('Main loop level Network error')
+    #         logger.info(e)
+    #
+    #     except ccxt.ExchangeError as e:
+    #
+    #         # Has happened because of too many requests.
+    #         time.sleep(5)
+    #         print('Main loop level Exchange error')
+    #         logger.info('Main loop level Exchange error')
+    #         logger.info(e)
+    #
+    #     except RuntimeError as e:
+    #         print('Main loop level Runtime error')
+    #         logger.info('Main loop level Runtime error')
+    #         logger.info(e)
