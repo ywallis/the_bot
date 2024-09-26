@@ -4,7 +4,7 @@ import sys
 sys.path.append(".")
 sys.path.append("..")
 
-from config.config import gate_client, mexc_client, bitget_client, pair
+from config.config import gate_client, mexc_client, bitget_client, pair, clients
 from status_boiler import fetch_all_open_orders_client_order_id
 from load_db import find_imbalance, load_db
 from db_refresh import db_refresh

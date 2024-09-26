@@ -25,7 +25,7 @@ instance_config = {'taker_client': gate_client,
                    'maker_size': 10,
                    'taker_spread': 1.0035,
                    'taker_sizing': 0.8,
-                   'taker_max_order_size': 50,
+                   'taker_max_order_size': 10,
                    'taker_only': False,
                    'spread_extension': 2,
                    }
@@ -58,4 +58,9 @@ if __name__ == '__main__':
             time.sleep(5)
             print('Main loop level Exchange error')
             logger.info('Main loop level Exchange error')
+            logger.info(e)
+
+        except RuntimeError as e:
+            print('Main loop level Runtime error')
+            logger.info('Main loop level Runtime error')
             logger.info(e)
