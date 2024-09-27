@@ -2,6 +2,7 @@ from config.env_var import *
 
 ALPH = {'pair': 'ALPH/USDT',
         'production': True,
+        'low_balance_threshold': 1500,
         'taker_exchange': {'id': 'gate',
                            'key': gateio_key,
                            'secret': gateio_secret,
@@ -23,20 +24,18 @@ ALPH = {'pair': 'ALPH/USDT',
                              'key': bitget_key,
                              'secret': bitget_secret,
                              'password': bitget_password,
-                             'settings':
-                                 {'maker_spread': 1.0025,
-                                  'maker_size': 50,
-                                  'taker_spread': 1.0035,
-                                  'taker_sizing': 0.8,
-                                  'taker_max_order_size': 30,
-                                  'taker_only': False,
-                                  'spread_extension': 1}
+                             'settings': {'maker_spread': 1.0025,
+                                          'maker_size': 50,
+                                          'taker_spread': 1.0035,
+                                          'taker_sizing': 0.8,
+                                          'taker_max_order_size': 30,
+                                          'taker_only': False,
+                                          'spread_extension': 1, }
                              }]}
-
-from config.env_var import *
 
 ALPH_test = {'pair': 'ALPH/USDT',
              'production': False,
+             'low_balance_threshold': 10,
              'taker_exchange': {'id': 'gate',
                                 'key': gateio_key_test,
                                 'secret': gateio_secret_test,
@@ -58,12 +57,13 @@ ALPH_test = {'pair': 'ALPH/USDT',
                                   'key': bitget_key_test,
                                   'secret': bitget_secret_test,
                                   'password': bitget_password_test,
-                                  'settings':
-                                      {'maker_spread': 1.0025,
-                                       'maker_size': 10,
-                                       'taker_spread': 1.0035,
-                                       'taker_sizing': 0.8,
-                                       'taker_max_order_size': 10,
-                                       'taker_only': False,
-                                       'spread_extension': 1}
+                                  'settings': {'maker_spread': 1.0025,
+                                               'maker_size': 10,
+                                               'taker_spread': 1.0035,
+                                               'taker_sizing': 0.8,
+                                               'taker_max_order_size': 10,
+                                               'taker_only': False,
+                                               'spread_extension': 1}
                                   }]}
+
+deployed_strategies = {'ALPH': ALPH, 'ALPH_test': ALPH_test}

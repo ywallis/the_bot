@@ -10,7 +10,8 @@ import pandas as pd
 import os
 import pytz
 
-from config.config import instance_config, pair, path_to_data
+from config.config import pair, path_to_data
+from status_clients import all_clients
 
 
 def fetch_order_amount(client, start, end):

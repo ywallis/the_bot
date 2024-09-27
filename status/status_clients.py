@@ -1,8 +1,10 @@
 import ccxt
-from config.strategies import *
+from config.strategy_picker import strategy_picker
 
-strategy = ALPH_test
 
+strategy = strategy_picker()
+low_balance_threshold = strategy['low_balance_threshold']
+pair = strategy['pair']
 all_clients = []
 
 taker_client = getattr(ccxt, strategy['taker_exchange']['id'])({'apiKey': strategy['taker_exchange']['key'],

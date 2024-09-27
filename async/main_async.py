@@ -10,11 +10,11 @@ import logging
 import ccxt.async_support as ccxt
 import asyncio
 from make1_async import make_and_take
-from config.strategies import *
+from config.strategy_picker import strategy_picker
 import time
 
 ##### THIS SECTION WILL BE REPLACED BY A PARSER
-strategy = ALPH_test
+strategy = strategy_picker()
 
 # Using getattr to use id from strategy to generate client
 
