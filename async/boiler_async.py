@@ -3,10 +3,11 @@ import logging
 import ccxt.async_support as ccxt
 from datetime import datetime
 
-from config.config import gate_fee, bitget_fee
-
 logger = logging.getLogger(__name__)
 
+# GROSS! FIX
+gate_fee = 0.001
+bitget_fee = 0.001
 
 def order_book_matcher(bids, asks, spread, sizing, max_order_size, min_order_size=0.01, extend_spread=0):
 

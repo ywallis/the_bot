@@ -10,14 +10,14 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-async def make_and_take(config, pair):
+async def make_and_take(taker_client, maker_client, config, pair):
 
     """This function acts as a basic market making system, with the following two logics:
     1. A taker logic, acting immediately in two order books in case a profitable imbalance is spotted.
     2. A maker1 logic, offering liquidity on one side, if the position can be hedged profitably on the other."""
 
-    taker_client = config['taker_client']
-    maker_client = config['maker_client']
+    taker_client = taker_client
+    maker_client = maker_client
     maker_spread = config['maker_spread']
     maker_size = config['maker_size']
     taker_spread = config['taker_spread']
