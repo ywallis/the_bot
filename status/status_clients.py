@@ -1,5 +1,5 @@
 import ccxt
-from config.strategy_picker import strategy_picker
+from config.option_picker import strategy_picker, status_client_picker
 
 
 strategy = strategy_picker()
@@ -24,3 +24,4 @@ for exchange in strategy['maker_exchanges']:
                                                 'secret': exchange['secret']})
     all_clients.append(auth_client)
 
+all_clients = status_client_picker(all_clients)
