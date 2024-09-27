@@ -16,8 +16,10 @@ import time
 ##### THIS SECTION WILL BE REPLACED BY A PARSER
 strategy = ALPH_test
 
-taker_client = ccxt.gateio({'apiKey': strategy['taker_exchange']['key'],
-                            'secret': strategy['taker_exchange']['secret']})
+# Using getattr to use id from strategy to generate client
+
+taker_client = getattr(ccxt, strategy['taker_exchange']['id'])({'apiKey': strategy['taker_exchange']['key'],
+                                                                'secret': strategy['taker_exchange']['secret']})
 
 maker_client = ccxt.mexc({'apiKey': strategy['maker_exchanges'][0]['key'],
                           'secret': strategy['maker_exchanges'][0]['secret']})
@@ -61,5 +63,5 @@ async def main_loop():
             logger.info(e)
 
 if __name__ == '__main__':
-
+    print(f'Running strategy {strategy['pair']}, production is {str(strategy['production'])}')
     asyncio.run(main_loop())
