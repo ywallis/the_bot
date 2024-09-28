@@ -2,7 +2,9 @@ import logging
 import ccxt
 from datetime import datetime
 
-from config.config import gate_fee, bitget_fee
+# GROSS! FIX
+gate_fee = 0.001
+bitget_fee = 0.001
 
 logger = logging.getLogger(__name__)
 

@@ -1,7 +1,8 @@
-import pandas as pd
-import numpy as np
-from config.config import path_to_data, pair
 from datetime import date
+
+import pandas as pd
+
+from config.config import path_to_data, pair
 
 pd.options.mode.copy_on_write = True
 

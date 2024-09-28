@@ -5,7 +5,6 @@ sys.path.append(".")
 sys.path.append("..")
 
 import pandas as pd
-import numpy as np
 import os
 from config.config import path_to_data, pair
 
