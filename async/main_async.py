@@ -10,19 +10,16 @@ import logging
 import ccxt.async_support as ccxt
 import asyncio
 from make1_async import make_and_take
-from config.option_picker import strategy_picker
+from config.option_picker import strategy_picker, maker_client_picker
+from arb_client_maker import arb_client_maker
 import time
 
 ##### THIS SECTION WILL BE REPLACED BY A PARSER
 strategy = strategy_picker()
-
+maker_client_id, maker_client_index = maker_client_picker(strategy)
 # Using getattr to use id from strategy to generate client
 
-taker_client = getattr(ccxt, strategy['taker_exchange']['id'])({'apiKey': strategy['taker_exchange']['key'],
-                                                                'secret': strategy['taker_exchange']['secret']})
-
-maker_client = ccxt.mexc({'apiKey': strategy['maker_exchanges'][0]['key'],
-                          'secret': strategy['maker_exchanges'][0]['secret']})
+taker_client, maker_client = arb_client_maker(strategy, maker_client_id, maker_client_index)
 
 instance_config = strategy['maker_exchanges'][0]['settings']
 
