@@ -17,6 +17,7 @@ import time
 ##### THIS SECTION WILL BE REPLACED BY A PARSER
 strategy = strategy_picker()
 maker_client_id, maker_client_index = maker_client_picker(strategy)
+
 # Using getattr to use id from strategy to generate client
 
 taker_client, maker_client = arb_client_maker(strategy, maker_client_id, maker_client_index)
@@ -24,7 +25,6 @@ taker_client, maker_client = arb_client_maker(strategy, maker_client_id, maker_c
 instance_config = strategy['maker_exchanges'][0]['settings']
 
 pair = strategy['pair']
-######
 
 today = str(date.today())
 now = datetime.now()
