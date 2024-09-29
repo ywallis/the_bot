@@ -1,8 +1,8 @@
 import ccxt.pro as ccxt
 import asyncio
 
-from config import gateio_key_test, gateio_secret_test, mexc_key_test, mexc_secret_test
-from make1 import make_and_take
+# from config import gateio_key_test, gateio_secret_test, mexc_key_test, mexc_secret_test
+# from make1 import make_and_take
 
 class Watcher:
     def __init__(self, taker_client, maker_client):

@@ -1,7 +1,7 @@
 import ccxt.pro as ccxt
 import asyncio
 from datetime import datetime, timezone
-from config.config import gateio_key, gateio_secret, mexc_key, mexc_secret, bitget_key, bitget_secret, bitget_password
+# from config.config import gateio_key, gateio_secret, mexc_key, mexc_secret, bitget_key, bitget_secret, bitget_password
 
 # TESTING - IMPLEMENTING USING ALL TRADES INSTEAD OF MY TRADES TO AVOID DEALING WITH KEYS
 

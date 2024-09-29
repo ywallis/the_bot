@@ -1,7 +1,8 @@
-import pandas as pd
-import numpy as np
-from config.config import path_to_data, pair
 from datetime import date
+
+import pandas as pd
+
+from config.config import path_to_data, pair
 
 pd.options.mode.copy_on_write = True
 
@@ -101,7 +102,7 @@ def load_db(start=None):
 
     return detailed[start :]
 
-def find_imbalance(date, df=load_db()):
+def find_imbalance(single_date=None, df=load_db()):
 
     detailed = df
 
@@ -132,11 +133,9 @@ def find_imbalance(date, df=load_db()):
     output = {}
 
     for index, row in need_matching.iterrows():
-        if index.startswith(f't-{date}'):
+        if index.startswith(f't-{single_date}'):
             amount = round(float(row['Net Gain']), 2)
             output[index] = amount
 
     # print(output)
     return output
-
-# find_imbalance()

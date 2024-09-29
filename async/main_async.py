@@ -10,42 +10,36 @@ import logging
 import ccxt.async_support as ccxt
 import asyncio
 from make1_async import make_and_take
-from config.config import pair, gateio_key_test, gateio_secret_test, mexc_key_test, mexc_secret_test
-
+from config.option_picker import strategy_picker, maker_client_picker
+from arb_client_maker import arb_client_maker
 import time
 
-# Move to config after testing
+##### THIS SECTION WILL BE REPLACED BY A PARSER
+strategy = strategy_picker()
+maker_client_id, maker_client_index = maker_client_picker(strategy)
 
-gate_client = ccxt.gateio({'apiKey': gateio_key_test, 'secret': gateio_secret_test})
-mexc_client = ccxt.mexc({'apiKey': mexc_key_test, 'secret': mexc_secret_test})
+# Using getattr to use id from strategy to generate client
 
-instance_config = {'taker_client': gate_client,
-                   'maker_client': mexc_client,
-                   'maker_spread': 1.002,
-                   'maker_size': 10,
-                   'taker_spread': 1.0035,
-                   'taker_sizing': 0.8,
-                   'taker_max_order_size': 10,
-                   'taker_only': False,
-                   'spread_extension': 2,
-                   }
+taker_client, maker_client = arb_client_maker(strategy, maker_client_id, maker_client_index)
 
-######
+instance_config = strategy['maker_exchanges'][0]['settings']
+
+pair = strategy['pair']
 
 today = str(date.today())
 now = datetime.now()
 
 logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.DEBUG,
-                    filename=f'../Logs/{today}_maker_{instance_config['maker_client'].name}.txt')
+                    filename=f'../Logs/{today}_maker_{maker_client.name}.txt')
 logger = logging.getLogger(__name__)
 
-making = True
 
-if __name__ == '__main__':
+async def main_loop():
+    making = True
 
     while making is True:
         try:
-            asyncio.run(make_and_take(instance_config, pair))
+            await make_and_take(taker_client, maker_client, instance_config, pair)
 
         except ccxt.NetworkError as e:
             print('Main loop level Network error')
@@ -64,3 +58,7 @@ if __name__ == '__main__':
             print('Main loop level Runtime error')
             logger.info('Main loop level Runtime error')
             logger.info(e)
+
+if __name__ == '__main__':
+    print(f'Running strategy {strategy['pair']}, production is {str(strategy['production'])}')
+    asyncio.run(main_loop())

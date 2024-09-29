@@ -1,4 +1,4 @@
-from config.config import gate_client, mexc_client, bitget_client
+# from config.config import gate_client, mexc_client, bitget_client
 
 
 def initiate_mexc_sub_account_transfer(client, destination_account, currency, amount):
@@ -62,4 +62,4 @@ def initiate_exchange_transfer(sender_client, receiver_client, currency, network
     # MEXC ONLY: loop and wait for transfer to have arrived, then transfer to subaccount
     pass
 
-initiate_exchange_transfer(mexc_client, bitget_client, 'USDT', 'BEP20', 1)
+# initiate_exchange_transfer(mexc_client, bitget_client, 'USDT', 'BEP20', 1)

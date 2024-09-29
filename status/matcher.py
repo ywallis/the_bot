@@ -4,9 +4,9 @@ import sys
 sys.path.append(".")
 sys.path.append("..")
 
-from config.config import gate_client, mexc_client, bitget_client, pair, clients
+from status_clients import all_clients, pair, taker_client
 from status_boiler import fetch_all_open_orders_client_order_id
-from load_db import find_imbalance, load_db
+from db_actions import find_imbalance, load_db
 from db_refresh import db_refresh
 
 ### First version, fetches all open orders and exports them to a csv with matching-relevant information.
@@ -60,7 +60,7 @@ db_refresh('Orders')
 
 db = load_db()
 imbalances = find_imbalance(date_mod, db)
-orders = fetch_all_open_orders_client_order_id(pair, gate_client, mexc_client, bitget_client)
+orders = fetch_all_open_orders_client_order_id(pair, *all_clients)
 all_orders_to_place = []
 
 for order_no in imbalances.keys():
@@ -145,11 +145,13 @@ while confirming:
         confirming = False
 
 
-for order in all_orders_to_place:
-    print('Placing')
-    print(gate_client.create_order(symbol=pair,
-                             type='limit',
-                             side=order['side'],
-                             amount=order['amount'],
-                             price=order['price'],
-                             params={f'clientOrderId': order['id']}))
+        for order in all_orders_to_place:
+            print('Placing')
+            print(taker_client.create_order(symbol=pair,
+                                     type='limit',
+                                     side=order['side'],
+                                     amount=order['amount'],
+                                     price=order['price'],
+                                     params={f'clientOrderId': order['id']}))
+    if confirmation == 'n':
+        confirming = False
