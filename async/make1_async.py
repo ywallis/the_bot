@@ -303,12 +303,13 @@ async def make_and_take(taker_client, maker_client, config, pair):
                 print('Order no longer within acceptable size range, cancelling.')
                 logger.info('Order no longer within acceptable size range, cancelling.')
 
+                sell_exists = False
+
                 try:
                     # If the order is partially filled, start the take process.
                     await maker_client.cancel_order(id=returned_sell_order['id'], symbol=pair)
                     await check_and_take(taker_client, maker_client, returned_sell_order, pair, 'buy')
 
-                    sell_exists = False
 
                 except (ccxt.BadRequest, ccxt.ExchangeError) as error:
                     logger.info(error)
@@ -498,6 +499,8 @@ async def make_and_take(taker_client, maker_client, config, pair):
                 print('Order no longer within acceptable size range, cancelling.')
                 logger.info('Order no longer within acceptable size range, cancelling.')
 
+                buy_exists = False
+
                 try:
 
                     # If the order is partially filled, start the take process.
@@ -505,7 +508,6 @@ async def make_and_take(taker_client, maker_client, config, pair):
                     await maker_client.cancel_order(id=returned_buy_order['id'], symbol=pair)
                     await check_and_take(taker_client, maker_client, returned_buy_order, pair, 'sell')
 
-                    buy_exists = False
 
                 except (ccxt.BadRequest, ccxt.ExchangeError) as error:
                     logger.info(error)
