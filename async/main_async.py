@@ -22,7 +22,7 @@ maker_client_id, maker_client_index = maker_client_picker(strategy)
 
 taker_client, maker_client = arb_client_maker(strategy, maker_client_id, maker_client_index)
 
-instance_config = strategy['maker_exchanges'][0]['settings']
+instance_config = strategy['maker_exchanges'][maker_client_index]['settings']
 
 pair = strategy['pair']
 
