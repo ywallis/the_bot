@@ -21,11 +21,13 @@ def fetch_order_amount(client, start, end):
     amount of orders in a timeframe to support history bisection search"""
 
     if client.name == 'BitMart':
-        orders = client.fetch_closed_orders(symbol=pair, limit=200, params={'startTime': start, 'endTime': end})
+        orders = client.fetch_closed_orders(symbol=pair, limit=100, params={'startTime': start, 'endTime': end})
     elif client.name == 'Bitget':
         orders = client.fetch_canceled_and_closed_orders(symbol=pair, limit=100, params={'startTime': start, 'endTime': end})
-    else:
+    elif client.name == 'MEXC Global':
         orders = client.fetch_closed_orders(symbol=pair, limit=100, params={'startTime': start, 'endTime': end})
+    else:
+        orders = client.fetch_closed_orders(symbol=pair, limit=100, since=start, params={'until': end})
 
     return len(orders)
 
@@ -38,8 +40,12 @@ def fetch_trade_amount(client, start, end):
 
     if client.name == 'BitMart':
         trades = client.fetch_my_trades(symbol=pair, limit=100, params={'startTime': start, 'endTime': end})
-    else:
+
+    elif client.name == 'MEXC Global':
         trades = client.fetch_my_trades(symbol=pair, limit=100, params={'startTime': start, 'endTime': end})
+
+    else:
+        trades = client.fetch_my_trades(symbol=pair, limit=100, since=start, params={'until': end})
 
     return len(trades)
 
@@ -59,8 +65,12 @@ def download_trades(client, start, end):
 
     if client.name == 'BitMart':
         trades = client.fetch_my_trades(symbol=pair, limit=200, params={'startTime': start, 'endTime': end})
+
+    elif client.name == 'MEXC Global':
+        trades = client.fetch_my_trades(symbol=pair, limit=100, params={'startTime': start, 'endTime': end})
+
     else:
-        trades = client.fetch_my_trades(symbol=pair, limit=1000, params={'startTime': start, 'endTime': end})
+        trades = client.fetch_my_trades(symbol=pair, limit=100, since=start, params={'until': end})
 
     # The if statement below should prevent for a dataframe with the improper amount of columns
 
@@ -102,8 +112,10 @@ def download_orders(client, start, end):
         orders = client.fetch_closed_orders(symbol=pair, limit=200, params={'startTime': start, 'endTime': end})
     elif client.name == 'Bitget':
         orders = client.fetch_canceled_and_closed_orders(symbol=pair, limit=100, params={'startTime': start, 'endTime': end})
+    elif client.name == 'MEXC Global':
+        orders = client.fetch_closed_orders(symbol=pair, limit=100, params={'startTime': start, 'endTime': end})
     else:
-        orders = client.fetch_closed_orders(symbol=pair, limit=500, params={'startTime': start, 'endTime': end})
+        orders = client.fetch_closed_orders(symbol=pair, limit=100, since=start, params={'until': end})
 
     # The if statement below should prevent for a dataframe with the improper amount of columns
 
