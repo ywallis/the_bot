@@ -2,7 +2,60 @@ import psycopg
 
 from status.status_clients import taker_client, pair, all_clients
 
+def prepare_items_for_pg(items):
+    """This function prepares CCXT order/trade items for an export to a PG database"""
+
+    prepared_items = []
+
+    for item in items:
+
+        # Renaming order to order_id because of conflict in SQL
+        if 'order' in item:
+            item['order_id'] = item.pop('order')
+
+        # Integrating empty statement in case of nonexistent values
+
+        item['fee_cost'] = None
+        item['fee_currency'] = None
+        item['usdt_value'] = None
+        item['asset_net_q'] = None
+
+        if item['fee'] is not None:
+            item['fee_cost'] = item['fee']['cost']
+            item['fee_currency'] = item['fee']['currency']
+        for fee in item['fees']:
+            if float(fee['cost']) != 0:
+                item['fee_cost'] = fee['cost']
+                item['fee_currency'] = fee['currency']
+        item['exchange'] = client.name
+
+        # Generate usdt_value column
+
+        if item    ['fee_currency'] != 'USDT':
+            item['usdt_value'] = item['cost']
+        elif item['side'] == 'buy':
+            item['usdt_value'] = item['cost'] + item['fee_cost']
+        else:
+            item['usdt_value'] = item['cost'] - item['fee_cost']
+
+        # Generate asset_net_q columns
+
+        if item['fee_currency'] != 'USDT':
+            if item['fee_cost'] is not None:
+                item['asset_net_q'] = item['amount'] - item['fee_cost']
+            else:
+                item['asset_net_q'] = None
+        else:
+            item['asset_net_q'] = item['amount']
+
+        # Flatten dicts and lists in order to export them to columns.
+        flattened_item = dict_to_text(item)
+        prepared_items.append(flattened_item)
+
+    return prepared_items
+
 def dict_to_text(d):
+
     def convert(value):
         if isinstance(value, dict) or isinstance(value, list):
             return str(value)  # Convert sub-dict to string
@@ -13,80 +66,41 @@ def dict_to_text(d):
     return d
 
 
-def download_orders(client, ticker, production=True):
+def retrieve_and_prepare_orders(client, ticker, start=None, end=None):
 
     """This function downloads all latest trades from a client to a csv file on the set path to NAS.
     Includes a production flag, to instead export to test folder if set to False."""
 
-
-    # Bitmart doesn't support queries for over 200 last trades.
-
-    if client.name == 'BitMart':
-        orders = client.fetch_closed_orders(symbol=ticker, limit=200)
-    elif client.name == 'Bitget':
-        orders = client.fetch_canceled_and_closed_orders(symbol=ticker, limit=100)
+    if client.name == 'Bitget':
+        orders = client.fetch_canceled_and_closed_orders(symbol=ticker, limit=100, since=start, params={'until': end})
     else:
-        orders = client.fetch_closed_orders(symbol=ticker, limit=500)
+        orders = client.fetch_closed_orders(symbol=ticker, limit=500, since=start, params={'until': end})
 
-def download_trades_to_sql(client, pair, start=None, end=None):
+    return  prepare_items_for_pg(orders)
 
 
-    """This function downloads all latest trades from a client to a Postgres server."""
+def retrieve_and_prepare_trades(client, pair, start=None, end=None):
+
+    """This function downloads trades from a CCXT client and prepares them to export to a Postgres server."""
 
     trades_with_fee = []
 
     trades = client.fetch_my_trades(symbol=pair, limit=100, since=start, params={'until': end})
 
-    for trade in trades:
+    return prepare_items_for_pg(trades)
 
-        # Renaming order to order_id because of conflict in SQL
+def export_to_sql(data, credentials, table):
 
-        trade['order_id'] = trade.pop('order')
+    """Takes in a list of orders or trades in CCXT format, and a dict of PG credentials, and outputs the data to the attached DB."""
 
-        # Integrating empty statement in case of nonexistent values
+    dbname = credentials['dbname']
+    user = credentials['user']
+    password = credentials['password']
 
-        trade['fee_cost'] = None
-        trade['fee_currency'] = None
-        trade['usdt_value'] = None
-        trade['asset_net_q'] = None
-
-        if trade['fee'] is not None:
-            trade['fee_cost'] = trade['fee']['cost']
-            trade['fee_currency'] = trade['fee']['currency']
-        for fee in trade['fees']:
-            if float(fee['cost']) != 0:
-                trade['fee_cost'] = fee['cost']
-                trade['fee_currency'] = fee['currency']
-        trade['exchange'] = client.name
-
-        # Generate usdt_value column
-
-        if trade    ['fee_currency'] != 'USDT':
-            trade['usdt_value'] = trade['cost']
-        elif trade['side'] == 'buy':
-            trade['usdt_value'] = trade['cost'] + trade['fee_cost']
-        else:
-            trade['usdt_value'] = trade['cost'] - trade['fee_cost']
-
-        # Generate asset_net_q columns
-
-        if trade['fee_currency'] != 'USDT':
-            trade['asset_net_q'] = trade['amount'] - trade['fee_cost']
-        else:
-            trade['asset_net_q'] = trade['amount']
-
-        # Flatten dicts and lists in order to export them to columns.
-        flattened_trade = dict_to_text(trade)
-        trades_with_fee.append(flattened_trade)
-
-    print(trades_with_fee[0]['datetime'])
-    print(trades_with_fee[-1]['datetime'])
-
-    with psycopg.connect("dbname=arb_bot user=postgres password=password host=localhost port=5432") as conn:
+    with psycopg.connect(f"dbname={dbname} user={user} password={password} host=localhost port=5432") as conn:
         with conn.cursor() as cur:
             # Define your table structure
-            table = 'trades'
-            columns = trades_with_fee[0].keys()  # Get the column names from the dictionary
+            columns = data[0].keys()  # Get the column names from the dictionary
             columns_str = ', '.join(columns)  # Comma-separated column names
             placeholders = ', '.join(['%s'] * len(columns))  # Generate placeholders for each column
 
@@ -94,7 +108,7 @@ def download_trades_to_sql(client, pair, start=None, end=None):
             insert_query = f"INSERT INTO {table} ({columns_str}) VALUES ({placeholders}) ON CONFLICT (datetime, id) DO NOTHING"
 
             # Convert dictionaries to tuple format for psycopg3
-            values = [tuple(d.values()) for d in trades_with_fee]
+            values = [tuple(d.values()) for d in data]
 
             # Execute the insert for all rows
             cur.executemany(insert_query, values)
@@ -102,6 +116,16 @@ def download_trades_to_sql(client, pair, start=None, end=None):
         print("Data inserted successfully!")
 
 
+pg_credentials = {'dbname': 'arb_bot',
+                  'user': 'postgres',
+                  'password': 'password'}
+
 for client in all_clients:
-    download_trades_to_sql(client, pair, start=1727654400000, end=1727697600000)
+    trades = retrieve_and_prepare_trades(client, pair)
+    export_to_sql(trades, pg_credentials, 'trades')
+    orders = retrieve_and_prepare_orders(client, pair)
+    export_to_sql(orders, pg_credentials, 'orders')
+
+
+
 
