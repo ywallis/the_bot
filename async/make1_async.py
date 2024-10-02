@@ -122,10 +122,8 @@ async def make_and_take(taker_client, maker_client, config, pair):
                     try:
                         take_take_order_id = f't-{order_time()}_tt'
 
-                        tt_buy = place_buy_order(pair, taker_client, taker_target_ask, taker_order_size, take_take_order_id)
-                        tt_sell = place_sell_order(pair, maker_client, taker_target_bid, taker_order_size, take_take_order_id)
-
-                        order_batch = asyncio.gather(tt_buy, tt_sell)
+                        order_batch = asyncio.gather(place_buy_order(pair, taker_client, taker_target_ask, taker_order_size, take_take_order_id),
+                                                     place_sell_order(pair, maker_client, taker_target_bid, taker_order_size, take_take_order_id))
                         await order_batch
 
                         logger.info('kjngkdg')
@@ -168,10 +166,8 @@ async def make_and_take(taker_client, maker_client, config, pair):
 
                         take_take_order_id = f't-{order_time()}_tt'
 
-                        tt_buy = place_buy_order(pair, maker_client, taker_target_ask, taker_order_size, take_take_order_id)
-                        tt_sell = place_sell_order(pair, taker_client, taker_target_bid, taker_order_size, take_take_order_id)
-
-                        order_batch = asyncio.gather(tt_buy, tt_sell)
+                        order_batch = asyncio.gather(place_buy_order(pair, maker_client, taker_target_ask, taker_order_size, take_take_order_id),
+                                                     place_sell_order(pair, taker_client, taker_target_bid, taker_order_size, take_take_order_id))
                         await order_batch
                         logger.info('kjngkdg')
 
