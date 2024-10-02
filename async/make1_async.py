@@ -121,9 +121,11 @@ async def make_and_take(taker_client, maker_client, config, pair):
                                     quantity=taker_order_size, price=taker_target_ask, pair=pair):
                     try:
                         take_take_order_id = f't-{order_time()}_tt'
-                        await asyncio.gather(place_sell_order(pair, maker_client, taker_target_bid, taker_order_size, take_take_order_id),
+                        order_batch = asyncio.gather(place_sell_order(pair, maker_client, taker_target_bid, taker_order_size, take_take_order_id),
                         place_buy_order(pair, taker_client, taker_target_ask, taker_order_size, take_take_order_id))
+                        await order_batch
 
+                        logger.info('kjngkdg')
                         # The continue statement puts the priority on taking whenever possible,
                         # since it is most efficient. Downside is that some orders may remain stuck
                         # if the account is no longer solvent.
@@ -163,8 +165,11 @@ async def make_and_take(taker_client, maker_client, config, pair):
 
                         take_take_order_id = f't-{order_time()}_tt'
 
-                        await asyncio.gather(place_buy_order(pair, maker_client, taker_target_ask, taker_order_size, take_take_order_id),
+                        order_batch = asyncio.gather(place_buy_order(pair, maker_client, taker_target_ask, taker_order_size, take_take_order_id),
                         place_sell_order(pair, taker_client, taker_target_bid, taker_order_size, take_take_order_id))
+                        await order_batch
+                        logger.info('kjngkdg')
+
 
                         # The continue statement puts the priority on taking whenever possible,
                         # since it is most efficient. Downside is that some orders may remain stuck
