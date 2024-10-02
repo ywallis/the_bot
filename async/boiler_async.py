@@ -110,9 +110,9 @@ async def place_sell_order(pair, client, price, quantity, identifier):
 
     print(f'Placing a {quantity} {pair} sell order on {client.name} for {price}.')
     logger.info(f'Placing a {quantity} {pair} sell order on {client.name} for {price}.')
-
-    return client.create_limit_order(symbol=pair, side='sell', amount=quantity, price=price,
+    order = await client.create_limit_order(symbol=pair, side='sell', amount=quantity, price=price,
                                      params={'clientOrderId': identifier})
+    return order
 
 
 async def place_buy_order(pair, client, price, quantity, identifier):
@@ -131,8 +131,9 @@ async def place_buy_order(pair, client, price, quantity, identifier):
         print(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
         logger.info(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
 
-        return client.create_limit_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price,
+        order = await client.create_limit_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price,
                                          params={'clientOrderId': identifier})
+        return order
 
     elif client.name == 'Bitget':
 
@@ -144,8 +145,9 @@ async def place_buy_order(pair, client, price, quantity, identifier):
         print(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
         logger.info(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
 
-        return client.create_limit_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price,
+        order = await client.create_limit_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price,
                                          params={'clientOrderId': identifier})
+        return order
 
     else:
 
