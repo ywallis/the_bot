@@ -126,7 +126,6 @@ async def make_and_take(taker_client, maker_client, config, pair):
                                                      place_sell_order(pair, maker_client, taker_target_bid, taker_order_size, take_take_order_id))
                         await order_batch
 
-                        logger.info('kjngkdg')
                         # The continue statement puts the priority on taking whenever possible,
                         # since it is most efficient. Downside is that some orders may remain stuck
                         # if the account is no longer solvent.
@@ -169,7 +168,6 @@ async def make_and_take(taker_client, maker_client, config, pair):
                         order_batch = asyncio.gather(place_buy_order(pair, maker_client, taker_target_ask, taker_order_size, take_take_order_id),
                                                      place_sell_order(pair, taker_client, taker_target_bid, taker_order_size, take_take_order_id))
                         await order_batch
-                        logger.info('kjngkdg')
 
 
                         # The continue statement puts the priority on taking whenever possible,
@@ -535,7 +533,7 @@ async def make_and_take(taker_client, maker_client, config, pair):
                     # Retrying in case of error
 
                     try:
-                        returned_buy_order = maker_client.fetch_order(id=buy_order['id'], symbol=pair)
+                        returned_buy_order = await maker_client.fetch_order(id=buy_order['id'], symbol=pair)
                         logger.info(f'Solvent, buy order created')
                     except ccxt.ExchangeError as error:
                         print('Order fetch failed, trying again.')
@@ -543,7 +541,7 @@ async def make_and_take(taker_client, maker_client, config, pair):
                         logger.info('Order fetch failed, trying again.')
                         logger.info(error)
                         try:
-                            returned_buy_order = maker_client.fetch_order(id=buy_order['id'], symbol=pair)
+                            returned_buy_order = await maker_client.fetch_order(id=buy_order['id'], symbol=pair)
                             logger.info(f'Solvent, buy order created')
                         except ccxt.ExchangeError as error:
                             logger.info('Order fetch failed again.')
