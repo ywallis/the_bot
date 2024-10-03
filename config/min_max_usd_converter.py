@@ -6,3 +6,5 @@ def min_max_usd_converter(price, instance_settings):
     print(f'Last USD quote is {price}.')
     print(f'Max maker size is {instance_settings['maker_size']}.')
     print(f'Max taker size is {instance_settings['taker_max_order_size']}.')
+
+    return instance_settings
