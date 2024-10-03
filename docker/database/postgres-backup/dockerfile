@@ -5,7 +5,7 @@ RUN apk add --no-cache busybox-suid
 
 # Backup set to run daily at 3am
 
-RUN echo "* * * * * /backup.sh >> /var/log/cron.log 2>&1" > /etc/crontabs/root
+RUN echo "0 3 * * * /backup.sh >> /var/log/cron.log 2>&1" > /etc/crontabs/root
 
 COPY backup.sh /backup.sh
 RUN chmod +x /backup.sh
