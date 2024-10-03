@@ -6,5 +6,4 @@ BACKUP_DIR="/backups"
 #DB_USER="postgres"
 #PGPASSWORD=$POSTGRES_PASSWORD
 
-#pg_dumpall -h $DB_HOST -p 5432 -U $DB_USER -f $BACKUP_DIR/backup_$TIMESTAMP.sql
-touch $BACKUP_DIR/backup_$TIMESTAMP.sql
+pg_dumpall -h $DB_HOST -p 5432 -U $DB_USER -f $BACKUP_DIR/backup_$TIMESTAMP.sql
