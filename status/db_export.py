@@ -1,3 +1,9 @@
+import sys
+
+# Adding directory to PATH
+sys.path.append(".")
+sys.path.append("..")
+
 import psycopg
 
 from status.status_clients import taker_client, pair, all_clients
