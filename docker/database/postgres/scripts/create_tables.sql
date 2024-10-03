@@ -1,0 +1,60 @@
+CREATE TABLE trades (
+  info TEXT,
+  id TEXT,
+  timestamp BIGINT,
+  datetime TIMESTAMPTZ,
+  symbol TEXT,
+  order_id TEXT,
+  type TEXT,
+  side TEXT,
+  takerOrMaker TEXT,
+  price NUMERIC,
+  amount NUMERIC,
+  cost NUMERIC,
+  fee TEXT,
+  fees TEXT,
+  fee_cost NUMERIC,
+  fee_currency TEXT,
+  usdt_value NUMERIC,
+  asset_net_q NUMERIC,
+  exchange TEXT
+);
+
+CREATE UNIQUE INDEX time_hash_idx ON public.trades (datetime, id);
+
+CREATE TABLE orders (
+  id TEXT,
+  clientOrderId TEXT,
+  timestamp BIGINT,
+  datetime TIMESTAMPTZ,
+  lastTradeTimestamp NUMERIC,
+  status TEXT,
+  symbol TEXT,
+  type TEXT,
+  timeInForce TEXT,
+  postOnly TEXT,
+  reduceOnly TEXT,
+  side TEXT,
+  price NUMERIC,
+  stopPrice NUMERIC,
+  triggerPrice NUMERIC,
+  average NUMERIC,
+  amount NUMERIC,
+  cost NUMERIC,
+  filled NUMERIC,
+  remaining NUMERIC,
+  fee TEXT,
+  fees TEXT,
+  trades TEXT,
+  info TEXT,
+  lastUpdateTimestamp NUMERIC,
+  takeProfitPrice NUMERIC,
+  stopLossPrice NUMERIC,
+  fee_cost NUMERIC,
+  fee_currency TEXT,
+  usdt_value NUMERIC,
+  asset_net_q NUMERIC,
+  exchange TEXT
+);
+
+CREATE UNIQUE INDEX orders_time_idx ON public.orders (datetime, id);

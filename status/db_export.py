@@ -99,7 +99,8 @@ def export_to_sql(data, credentials, table):
 
     with psycopg.connect(f"dbname={dbname} user={user} password={password} host=localhost port=5432") as conn:
         with conn.cursor() as cur:
-            # Define your table structure
+
+            # Insert data
             columns = data[0].keys()  # Get the column names from the dictionary
             columns_str = ', '.join(columns)  # Comma-separated column names
             placeholders = ', '.join(['%s'] * len(columns))  # Generate placeholders for each column
