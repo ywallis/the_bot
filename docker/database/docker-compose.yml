@@ -14,7 +14,7 @@ services:
     build: ./postgres-backup
     container_name: cron-backup-container
     volumes:
-      - /home/yann/Code/postgres:/backups
+      - ${HOST_VOLUME_PATH}:/backups
     depends_on:
       - postgres
     restart: unless-stopped
