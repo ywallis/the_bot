@@ -65,10 +65,10 @@ async def main_loop():
             logger.info('Main loop level Exchange error')
             logger.info(e)
 
-        # except TypeError as e:
-        #     print('Main loop level type error, probably coroutine')
-        #     logger.info('Main loop level type error, probably coroutine')
-        #     logger.info(e)
+        except TypeError as e:
+            print('Main loop level type error, probably coroutine')
+            logger.info('Main loop level type error, probably coroutine')
+            logger.info(e)
         except RuntimeError as e:
             print('Main loop level Runtime error')
             logger.info('Main loop level Runtime error')
