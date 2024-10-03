@@ -154,8 +154,10 @@ async def place_buy_order(pair, client, price, quantity, identifier):
         print(f'Placing a {quantity} {pair} buy order on {client.name} for {price}.')
         logger.info(f'Placing a {quantity} {pair} buy order on {client.name} for {price}.')
 
-        return client.create_limit_order(symbol=pair, side='buy', amount=quantity, price=price,
+        order = await client.create_limit_order(symbol=pair, side='buy', amount=quantity, price=price,
                                          params={'clientOrderId': identifier})
+
+        return order
 
 
 async def fetch_balances(buy_client, sell_client):

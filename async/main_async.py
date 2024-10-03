@@ -46,7 +46,6 @@ async def main_loop():
     # Convert min/max settings from USD to base asset
     ticker_info = await taker_client.fetch_ticker(pair)
     current_usd_value = ticker_info['last']
-
     instance_config_usd = min_max_usd_converter(current_usd_value, instance_config)
 
     while making is True:
