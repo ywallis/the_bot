@@ -20,12 +20,9 @@ def fetch_order_amount(client, start, end):
     """The purpose of this function is only to return the
     amount of orders in a timeframe to support history bisection search"""
 
-    if client.name == 'BitMart':
-        orders = client.fetch_closed_orders(symbol=pair, limit=100, params={'startTime': start, 'endTime': end})
-    elif client.name == 'Bitget':
-        orders = client.fetch_canceled_and_closed_orders(symbol=pair, limit=100, params={'startTime': start, 'endTime': end})
-    elif client.name == 'MEXC Global':
-        orders = client.fetch_closed_orders(symbol=pair, limit=100, params={'startTime': start, 'endTime': end})
+    if client.name == 'Bitget':
+        orders = client.fetch_canceled_and_closed_orders(symbol=pair, limit=100,
+                                                         params={'startTime': start, 'endTime': end})
     else:
         orders = client.fetch_closed_orders(symbol=pair, limit=100, since=start, params={'until': end})
 
@@ -39,9 +36,6 @@ def fetch_trade_amount(client, start, end):
     # Bitmart doesn't support queries for over 200 last trades.
 
     if client.name == 'BitMart':
-        trades = client.fetch_my_trades(symbol=pair, limit=100, params={'startTime': start, 'endTime': end})
-
-    elif client.name == 'MEXC Global':
         trades = client.fetch_my_trades(symbol=pair, limit=100, params={'startTime': start, 'endTime': end})
 
     else:
@@ -65,9 +59,6 @@ def download_trades(client, start, end):
 
     if client.name == 'BitMart':
         trades = client.fetch_my_trades(symbol=pair, limit=200, params={'startTime': start, 'endTime': end})
-
-    elif client.name == 'MEXC Global':
-        trades = client.fetch_my_trades(symbol=pair, limit=100, params={'startTime': start, 'endTime': end})
 
     else:
         trades = client.fetch_my_trades(symbol=pair, limit=100, since=start, params={'until': end})
@@ -108,12 +99,8 @@ def download_orders(client, start, end):
 
     output_path = f'{path_to_data}{pair.split("/")[0]}/Orders/{today}_{client.name}_history.csv'
 
-    if client.name == 'BitMart':
-        orders = client.fetch_closed_orders(symbol=pair, limit=200, params={'startTime': start, 'endTime': end})
-    elif client.name == 'Bitget':
+    if client.name == 'Bitget':
         orders = client.fetch_canceled_and_closed_orders(symbol=pair, limit=100, params={'startTime': start, 'endTime': end})
-    elif client.name == 'MEXC Global':
-        orders = client.fetch_closed_orders(symbol=pair, limit=100, params={'startTime': start, 'endTime': end})
     else:
         orders = client.fetch_closed_orders(symbol=pair, limit=100, since=start, params={'until': end})
 
