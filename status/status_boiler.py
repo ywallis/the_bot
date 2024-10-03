@@ -21,10 +21,20 @@ def get_balance_status(client, ticker, threshold):
 
     low_balance = False
     all_balances = client.fetch_balance()
-    threshold = threshold
 
     base_asset = ticker.split('/')[0]
     quote_asset = ticker.split('/')[1]
+
+    base_asset_price = client.fetch_ticker(f'{base_asset}/USDT')['last']
+    base_asset_threshold = threshold / base_asset_price
+
+    # Quote asset expected to be USDT in a large majority of case. Could include a list of stablecoins.
+
+    if quote_asset != 'USDT':
+        quote_asset_price = client.fetch_ticker(f'{quote_asset}/USDT')['last']
+        quote_asset_threshold = threshold / quote_asset_price
+    else:
+        quote_asset_threshold = threshold
 
     # Includes minimum threshold for exchanges with leftover balance
     try:
@@ -34,8 +44,8 @@ def get_balance_status(client, ticker, threshold):
 
         # Check if currently used balances are below set threshold for notification
 
-        if (all_balances['free'][base_asset] < threshold
-                or all_balances['free'][quote_asset] < threshold):
+        if (all_balances['free'][base_asset] < base_asset_threshold
+                or all_balances['free'][quote_asset] < quote_asset_threshold):
             low_balance = True
 
         return low_balance
