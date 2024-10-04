@@ -2,9 +2,10 @@
 FROM postgres:16.4
 
 # Set environment variables for the database (optional, customize as needed)
-ENV POSTGRES_USER=postgres
-ENV POSTGRES_PASSWORD=password
-ENV POSTGRES_DB=arb_bot
+# ENV POSTGRES_USER=postgres
+# ENV POSTGRES_PASSWORD=password
+# Added to external .env
+# ENV POSTGRES_DB=arb_bot
 
 # Copy initialization scripts into the container
 COPY scripts/*.sql /docker-entrypoint-initdb.d/

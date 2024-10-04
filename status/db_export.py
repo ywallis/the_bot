@@ -5,8 +5,10 @@ sys.path.append(".")
 sys.path.append("..")
 
 import psycopg
+from dotenv import dotenv_values
+pg_config = dotenv_values('../docker/database/.env')
 
-from status.status_clients import taker_client, pair, all_clients
+from status.status_clients import pair, all_clients
 
 def prepare_items_for_pg(items):
     """This function prepares CCXT order/trade items for an export to a PG database"""
@@ -99,9 +101,9 @@ def export_to_sql(data, credentials, table):
 
     """Takes in a list of orders or trades in CCXT format, and a dict of PG credentials, and outputs the data to the attached DB."""
 
-    dbname = credentials['dbname']
-    user = credentials['user']
-    password = credentials['password']
+    dbname = credentials['POSTGRES_DB']
+    user = credentials['POSTGRES_USER']
+    password = credentials['POSTGRES_PASSWORD']
 
     with psycopg.connect(f"dbname={dbname} user={user} password={password} host=localhost port=5432") as conn:
         with conn.cursor() as cur:
@@ -122,16 +124,11 @@ def export_to_sql(data, credentials, table):
 
         print("Data inserted successfully!")
 
-
-pg_credentials = {'dbname': 'arb_bot',
-                  'user': 'postgres',
-                  'password': 'password'}
-
 for client in all_clients:
     trades = retrieve_and_prepare_trades(client, pair)
-    export_to_sql(trades, pg_credentials, 'trades')
+    export_to_sql(trades, pg_config, 'trades')
     orders = retrieve_and_prepare_orders(client, pair)
-    export_to_sql(orders, pg_credentials, 'orders')
+    export_to_sql(orders, pg_config, 'orders')
 
 
 
