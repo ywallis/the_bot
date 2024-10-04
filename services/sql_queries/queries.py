@@ -4,7 +4,7 @@ SELECT
     SUM(CASE WHEN trades.side = 'sell' THEN trades.asset_net_q ELSE 0 END) AS total_sell_amount,
     SUM(CASE WHEN trades.side = 'buy' THEN trades.asset_net_q ELSE 0 END) AS total_buy_amount,
     SUM(CASE WHEN trades.side = 'sell' THEN trades.asset_net_q ELSE 0 END) - 
-    SUM(CASE WHEN trades.side = 'buy' THEN trades.asset_net_q ELSE 0 END) AS sell_minus_buy
+    SUM(CASE WHEN trades.side = 'buy' THEN trades.amount ELSE 0 END) AS sell_minus_buy
 FROM 
     trades
 LEFT JOIN 
@@ -12,7 +12,14 @@ LEFT JOIN
 WHERE
 		trades.datetime >= '2024-09-01 00:00:00'
 GROUP BY 
-    orders.clientorderid;
+    orders.clientorderid
+HAVING 
+    SUM(CASE WHEN trades.side = 'sell' THEN trades.asset_net_q ELSE 0 END) - 
+    SUM(CASE WHEN trades.side = 'buy' THEN trades.asset_net_q ELSE 0 END) > 2
+    OR 
+    SUM(CASE WHEN trades.side = 'sell' THEN trades.asset_net_q ELSE 0 END) - 
+    SUM(CASE WHEN trades.side = 'buy' THEN trades.asset_net_q ELSE 0 END) < -2;
+
 
 """
 
