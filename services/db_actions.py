@@ -39,7 +39,7 @@ def load_db(start=None):
                                 "clientOrderId": "object",
                                 "timestamp": "int64",
                                 "lastTradeTimestamp": "float64",
-                                "status": "object",
+                                "services": "object",
                                 "symbol": "object",
                                 "type": "object",
                                 "timeInForce": "object",

@@ -1,16 +1,7 @@
-import sys
-
-# Adding directory to PATH
-sys.path.append(".")
-sys.path.append("..")
-
 import psycopg
-from dotenv import dotenv_values
-pg_config = dotenv_values('../docker/database/.env')
 
-from status.status_clients import pair, all_clients
 
-def prepare_items_for_pg(items):
+def prepare_items_for_pg(client, items):
     """This function prepares CCXT order/trade items for an export to a PG database"""
 
     prepared_items = []
@@ -82,9 +73,9 @@ def retrieve_and_prepare_orders(client, ticker, start=None, end=None):
     if client.name == 'Bitget':
         orders = client.fetch_canceled_and_closed_orders(symbol=ticker, limit=100, since=start, params={'until': end})
     else:
-        orders = client.fetch_closed_orders(symbol=ticker, limit=500, since=start, params={'until': end})
+        orders = client.fetch_closed_orders(symbol=ticker, limit=100, since=start, params={'until': end})
 
-    return  prepare_items_for_pg(orders)
+    return  prepare_items_for_pg(client, orders)
 
 
 def retrieve_and_prepare_trades(client, pair, start=None, end=None):
@@ -95,7 +86,7 @@ def retrieve_and_prepare_trades(client, pair, start=None, end=None):
 
     trades = client.fetch_my_trades(symbol=pair, limit=100, since=start, params={'until': end})
 
-    return prepare_items_for_pg(trades)
+    return prepare_items_for_pg(client, trades)
 
 def export_to_sql(data, credentials, table):
 
@@ -123,13 +114,3 @@ def export_to_sql(data, credentials, table):
             cur.executemany(insert_query, values)
 
         print("Data inserted successfully!")
-
-for client in all_clients:
-    trades = retrieve_and_prepare_trades(client, pair)
-    export_to_sql(trades, pg_config, 'trades')
-    orders = retrieve_and_prepare_orders(client, pair)
-    export_to_sql(orders, pg_config, 'orders')
-
-
-
-

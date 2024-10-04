@@ -27,7 +27,7 @@ else:
 #
 # while choosing is True:
 #     try:
-#         target = int(input('Enter 1 for MEXC, 2 for BitMart, 3 for Coinex, 4 for Bitget. 0 for unified status'))
+#         target = int(input('Enter 1 for MEXC, 2 for BitMart, 3 for Coinex, 4 for Bitget. 0 for unified services'))
 #         if target in options:
 #             choosing = False
 #         else:

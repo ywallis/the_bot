@@ -197,7 +197,7 @@ def check_and_take(client_a, client_b, order, pair, market_side):
     # retrieve order
     if filled != 0.0:
 
-        if func_order['status'] == 'open':
+        if func_order['services'] == 'open':
 
             # Add try, to prevent issues with orders filled in the meantime
             try:
