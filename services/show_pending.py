@@ -14,7 +14,7 @@ with psycopg.connect(
     with conn.cursor() as cur:
         # Execute a SQL query
         cur.execute(
-            daily_inventory
+            orphans
         )
 
         # Fetch all the data
@@ -31,6 +31,8 @@ with psycopg.connect(
         # Add col names to df
         df.columns = col_names
 
-        print(df.tail(10))
+        print(df)
+
+        # print(df['delta'].sum())
 
 # Connection is automatically closed when the 'with' block exits
