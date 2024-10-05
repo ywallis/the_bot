@@ -1,4 +1,4 @@
-orphans = """
+unmatched = """
 SELECT 
     orders.clientorderid,
     SUM(CASE WHEN trades.side = 'sell' THEN trades.asset_net_q ELSE 0 END) AS total_sell_amount,
@@ -38,4 +38,16 @@ GROUP BY
     DATE(datetime)
 ORDER BY
     date;
+"""
+
+orphans = """
+SELECT 
+    trades.*,
+    orders.clientorderid
+FROM 
+    trades
+LEFT JOIN 
+    orders ON trades.order_id = orders.id
+WHERE
+		orders.clientorderid is Null;
 """

@@ -1,8 +1,16 @@
 import psycopg
+import os
+from dotenv import dotenv_values
+config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '/docker/database/', '.env'))
+pg_config = dotenv_values(f'..{config_path}')
 
-
-def prepare_items_for_pg(client, items):
+def prepare_items_for_pg(client, imported_items):
     """This function prepares CCXT order/trade items for an export to a PG database"""
+
+    if type(imported_items) != list:
+        items = [imported_items]
+    else:
+        items = imported_items
 
     prepared_items = []
 
@@ -30,7 +38,7 @@ def prepare_items_for_pg(client, items):
 
         # Generate usdt_value column
 
-        if item    ['fee_currency'] != 'USDT':
+        if item['fee_currency'] != 'USDT':
             item['usdt_value'] = item['cost']
         elif item['side'] == 'buy':
             item['usdt_value'] = item['cost'] + item['fee_cost']

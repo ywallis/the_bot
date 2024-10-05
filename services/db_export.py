@@ -2,13 +2,16 @@ import sys
 from datetime import datetime
 import time
 import ccxt
+import os
 
 # Adding directory to PATH
 sys.path.append(".")
 sys.path.append("..")
 
 from dotenv import dotenv_values
-pg_config = dotenv_values('../docker/database/.env')
+
+config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '/docker/database/', '.env'))
+pg_config = dotenv_values(f'..{config_path}')
 
 from services.status_clients import pair, all_clients
 from services.accounting_boiler import retrieve_and_prepare_trades, retrieve_and_prepare_orders, export_to_sql
