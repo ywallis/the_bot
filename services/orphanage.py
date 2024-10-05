@@ -1,5 +1,7 @@
 import os
 import sys
+import ccxt
+from datetime import datetime
 
 # Adding directory to PATH
 sys.path.append(".")
@@ -22,6 +24,8 @@ for client in all_clients:
 
 data = send_sql_query(pg_config, orphans, raw=False)
 
+time = datetime.now()
+
 try:
     for index, row in data.iterrows():
 
@@ -29,10 +33,16 @@ try:
             if row['exchange'] == client.name:
                 print(f'Identified order matching client {client.name}')
                 print(row['order_id'])
-                order = client.fetch_order(symbol=pair, id=row['order_id'])
-                print(order)
-                prepared_order = prepare_items_for_pg(client, order)
-                export_to_sql(prepared_order, pg_config, 'orders')
+                try:
+                    order = client.fetch_order(symbol=pair, id=row['order_id'])
+                    print(order)
+                    prepared_order = prepare_items_for_pg(client, order)
+                    export_to_sql(prepared_order, pg_config, 'orders')
+                except ccxt.ExchangeError:
+                    print('Could not fetch order, logging')
+                    with open(f'../Logs/Orphans {time}', 'a') as file:
+                        file.write(f'\n {row}')
+
 
                 # Break to stop looking if client found
                 break
