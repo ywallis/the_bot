@@ -1,8 +1,11 @@
 import os
+import sys
 
-from pycares.errno import value
+# Adding directory to PATH
+sys.path.append(".")
+sys.path.append("..")
 
-from services.status_clients import taker_client, pair, all_clients
+from services.status_clients import pair, all_clients
 from services.sql_connector import send_sql_query
 from services.sql_queries import *
 from services.accounting_boiler import prepare_items_for_pg, export_to_sql
@@ -34,7 +37,6 @@ try:
                 # Break to stop looking if client found
                 break
 
-            print('Could not be matched today.')
 
     print('All done!')
 except AttributeError:
