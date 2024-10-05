@@ -51,10 +51,14 @@ orders = fetch_all_open_orders_client_order_id(pair, *all_clients)
 
 imbalance_dict = {}
 
+print(imbalances)
+
 for index, row in imbalances.iterrows():
-    if index.startswith(f't-{date_mod}'):
-        amount = round(float(row['sell_minus_buy']), 2)
-        imbalance_dict[index] = amount
+    print(index)
+    if index is not None:
+        if index.startswith(f't-{date_mod}'):
+            amount = round(float(row['sell_minus_buy']), 2)
+            imbalance_dict[index] = amount
 
 all_orders_to_place = []
 
