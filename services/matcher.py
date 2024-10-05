@@ -180,7 +180,7 @@ WHERE
 
         order_data = {'id': order_no,
                       'amount': abs(imbalance_dict[order_no]),
-                      'price': price,
+                      'price': round(float(price), 3),
                       'side': side, }
 
         all_orders_to_place.append(order_data)
