@@ -54,7 +54,6 @@ imbalance_dict = {}
 print(imbalances)
 
 for index, row in imbalances.iterrows():
-    print(index)
     if index is not None:
         if index.startswith(f't-{date_mod}'):
             amount = round(float(row['sell_minus_buy']), 2)
