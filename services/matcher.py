@@ -114,11 +114,9 @@ WHERE
             imbalanced_price = min(imbalanced_price)
 
             if partial_fills is not None:
-                if partial_fills.size > 0:
-                    price = partial_fills
-                    print('There are partial fills, will use their price.')
-                else:
-                    price = round(float(imbalanced_price) / spread, 3)
+                price = partial_fills
+                print('There are partial fills, will use their price.')
+
 
             else:
                 price = round(float(imbalanced_price) / spread, 3)
@@ -169,11 +167,8 @@ WHERE
             imbalanced_price = min(imbalanced_price)
 
             if partial_fills is not None:
-                if partial_fills.size > 0:
-                    price = partial_fills
-                    print('There are partial fills, will use their price.')
-                else:
-                    price = round(float(imbalanced_price) / spread, 3)
+                price = partial_fills
+                print('There are partial fills, will use their price.')
 
             else:
                 price = round(float(imbalanced_price) / spread, 3)
