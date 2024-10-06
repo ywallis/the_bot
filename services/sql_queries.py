@@ -37,7 +37,8 @@ FROM
 GROUP BY
     DATE(datetime)
 ORDER BY
-    date;
+    date desc
+LIMIT 10;
 """
 
 orphans = """
@@ -67,5 +68,6 @@ FROM
 GROUP BY
     DATE(datetime)
 ORDER BY
-    date;
+    date desc;
+LIMIT 10
 """
