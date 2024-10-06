@@ -4,7 +4,7 @@ SELECT
     SUM(CASE WHEN trades.side = 'sell' THEN trades.asset_net_q ELSE 0 END) AS total_sell_amount,
     SUM(CASE WHEN trades.side = 'buy' THEN trades.asset_net_q ELSE 0 END) AS total_buy_amount,
     SUM(CASE WHEN trades.side = 'sell' THEN trades.asset_net_q ELSE 0 END) - 
-    SUM(CASE WHEN trades.side = 'buy' THEN trades.amount ELSE 0 END) AS sell_minus_buy
+    SUM(CASE WHEN trades.side = 'buy' THEN trades.asset_net_q ELSE 0 END) AS sell_minus_buy
 FROM 
     trades
 LEFT JOIN 
@@ -29,8 +29,8 @@ SELECT
     COUNT(*) AS item_count,
     SUM(CASE WHEN trades.side = 'sell' THEN trades.asset_net_q ELSE 0 END) AS q_sells,
     SUM(CASE WHEN trades.side = 'buy' THEN trades.asset_net_q ELSE 0 END) AS q_buys,
-    SUM(CASE WHEN trades.side = 'sell' THEN trades.asset_net_q ELSE 0 END) -
-    SUM(CASE WHEN trades.side = 'buy' THEN trades.asset_net_q ELSE 0 END) AS delta
+    SUM(CASE WHEN trades.side = 'buy' THEN trades.asset_net_q ELSE 0 END) -
+    SUM(CASE WHEN trades.side = 'sell' THEN trades.asset_net_q ELSE 0 END) AS delta
     
 FROM
     trades

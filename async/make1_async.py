@@ -20,6 +20,7 @@ async def make_and_take(taker_client, maker_client, config, pair):
     maker_client = maker_client
     maker_spread = config['maker_spread']
     maker_size = config['maker_size']
+    maker_min_size = config['min_maker_size']
     taker_spread = config['taker_spread']
     taker_sizing = config['taker_sizing']
     taker_max_order_size = config['taker_max_order_size']
@@ -207,7 +208,7 @@ async def make_and_take(taker_client, maker_client, config, pair):
 
             # Calculate the current optimal order size TESTING: ONLY PRINTS!
 
-            optimal_sell_size = maker_order_sizer(best_ask_maker, taker_asks, "sell", maker_spread, 10, maker_size)
+            optimal_sell_size = maker_order_sizer(best_ask_maker, taker_asks, "sell", maker_spread, maker_min_size, maker_size)
 
             print(f'Optimal order size currently {optimal_sell_size}')
 
@@ -405,7 +406,7 @@ async def make_and_take(taker_client, maker_client, config, pair):
 
             # Calculate the current optimal order size
 
-            optimal_buy_size = maker_order_sizer(best_bid_maker, taker_bids, "buy", maker_spread, 10, maker_size)
+            optimal_buy_size = maker_order_sizer(best_bid_maker, taker_bids, "buy", maker_spread, maker_min_size, maker_size)
 
             print(f'Optimal order size currently {optimal_buy_size}')
 

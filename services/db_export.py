@@ -26,10 +26,12 @@ while looping:
 
             print(f'Now exporting {client.name} trades.')
             trades = retrieve_and_prepare_trades(client, pair)
-            export_to_sql(trades, pg_config, 'trades')
+            if len(trades) != 0:
+                export_to_sql(trades, pg_config, 'trades')
             print(f'Now exporting {client.name} orders.')
             orders = retrieve_and_prepare_orders(client, pair)
-            export_to_sql(orders, pg_config, 'orders')
+            if len(orders) != 0:
+                export_to_sql(orders, pg_config, 'orders')
 
 
     except ccxt.ExchangeError as e:
