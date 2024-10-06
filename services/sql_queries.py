@@ -68,6 +68,6 @@ FROM
 GROUP BY
     DATE(datetime)
 ORDER BY
-    date desc;
-LIMIT 10
+    date desc
+LIMIT 10;
 """
