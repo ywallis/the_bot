@@ -51,3 +51,21 @@ LEFT JOIN
 WHERE
 		orders.clientorderid is Null;
 """
+
+
+daily_usdt = """
+SELECT
+    DATE(datetime) AS date,
+    COUNT(*) AS item_count,
+    SUM(CASE WHEN trades.side = 'sell' THEN trades.usdt_value ELSE 0 END) AS q_sells,
+    SUM(CASE WHEN trades.side = 'buy' THEN trades.usdt_value ELSE 0 END) AS q_buys,
+    SUM(CASE WHEN trades.side = 'sell' THEN trades.usdt_value ELSE 0 END) -
+    SUM(CASE WHEN trades.side = 'buy' THEN trades.usdt_value ELSE 0 END) AS delta
+    
+FROM
+    trades
+GROUP BY
+    DATE(datetime)
+ORDER BY
+    date;
+"""

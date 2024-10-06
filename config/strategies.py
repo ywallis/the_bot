@@ -66,7 +66,7 @@ ALPH_test = {'pair': 'ALPH/USDT',
                                                'spread_extension': 1}
                                   }]}
 
-currency_scout = {'pair': 'GTAI/USDT',
+currency_scout = {'pair': 'ROOT/USDT',
                   'production': False,
                   'low_balance_threshold': 0,
                   'taker_exchange': {'id': 'gate',
