@@ -66,7 +66,7 @@ ALPH_test = {'pair': 'ALPH/USDT',
                                                'spread_extension': 1}
                                   }]}
 
-currency_scout = {'pair': 'ROOT/USDT',
+currency_scout = {'pair': 'GTAI/USDT',
                   'production': False,
                   'low_balance_threshold': 0,
                   'taker_exchange': {'id': 'gate',
@@ -77,7 +77,7 @@ currency_scout = {'pair': 'ROOT/USDT',
                   'maker_exchanges': [{'id': 'mexc',
                                        'key': mexc_key_test,
                                        'secret': mexc_secret_test,
-                                       'settings': {'maker_spread': 1.002,
+                                       'settings': {'maker_spread': 1.0025,
                                                     'maker_size': 10,
                                                     'taker_spread': 1.0035,
                                                     'taker_sizing': 0.8,

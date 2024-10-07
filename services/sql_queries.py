@@ -1,5 +1,5 @@
 unmatched = """
-SELECT 
+SELECT DISTINCT
     orders.clientorderid,
     SUM(CASE WHEN trades.side = 'sell' THEN trades.asset_net_q ELSE 0 END) AS total_sell_amount,
     SUM(CASE WHEN trades.side = 'buy' THEN trades.asset_net_q ELSE 0 END) AS total_buy_amount,
@@ -18,9 +18,9 @@ HAVING
     SUM(CASE WHEN trades.side = 'buy' THEN trades.asset_net_q ELSE 0 END) > 2
     OR 
     SUM(CASE WHEN trades.side = 'sell' THEN trades.asset_net_q ELSE 0 END) - 
-    SUM(CASE WHEN trades.side = 'buy' THEN trades.asset_net_q ELSE 0 END) < -2;
-
-
+    SUM(CASE WHEN trades.side = 'buy' THEN trades.asset_net_q ELSE 0 END) < -2
+ORDER BY
+		orders.clientorderid;
 """
 
 daily_inventory = """
@@ -42,7 +42,7 @@ LIMIT 10;
 """
 
 orphans = """
-SELECT 
+SELECT DISTINCT
     trades.*,
     orders.clientorderid
 FROM 
