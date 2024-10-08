@@ -20,7 +20,7 @@ CREATE TABLE trades (
   exchange TEXT
 );
 
-CREATE UNIQUE INDEX time_hash_idx ON public.trades (datetime, id);
+CREATE UNIQUE INDEX exchange_trade_id_idx ON public.trades (exchange, id);
 
 CREATE TABLE orders (
   id TEXT,
@@ -57,4 +57,4 @@ CREATE TABLE orders (
   exchange TEXT
 );
 
-CREATE UNIQUE INDEX orders_time_idx ON public.orders (datetime, id);
+CREATE UNIQUE INDEX exchange_order_id_idx ON public.orders (exchange, id);

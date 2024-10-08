@@ -113,7 +113,7 @@ def export_to_sql(data, credentials, table):
             placeholders = ', '.join(['%s'] * len(columns))  # Generate placeholders for each column
 
             # Insert query
-            insert_query = f"INSERT INTO {table} ({columns_str}) VALUES ({placeholders}) ON CONFLICT (datetime, id) DO NOTHING"
+            insert_query = f"INSERT INTO {table} ({columns_str}) VALUES ({placeholders}) ON CONFLICT (exchange, id) DO NOTHING"
 
             # Convert dictionaries to tuple format for psycopg3
             values = [tuple(d.values()) for d in data]
