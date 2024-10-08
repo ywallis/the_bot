@@ -121,7 +121,7 @@ WHERE
             else:
                 price = round(float(imbalanced_price) / spread, 3)
 
-            print(f'Creating a matching buy order for order {order_no} with a quantity of {imbalance_dict[order_no]} and a price of {price}.')
+            print(f'Creating a matching buy order for order {order_no} with a quantity of {abs(imbalance_dict[order_no])} and a price of {price}.')
 
         else:
             print(f'{imbalance_dict[order_no]} imbalance, should sell!')
@@ -174,7 +174,7 @@ WHERE
                 price = round(float(imbalanced_price) / spread, 3)
 
             print(
-                f'Creating a matching sell order for order {order_no} with a quantity of {imbalance_dict[order_no]} and a price of {price}.')
+                f'Creating a matching sell order for order {order_no} with a quantity of {abs(imbalance_dict[order_no])} and a price of {price}.')
 
         # Separating order creation and data collection to introduce a stopper
 
@@ -184,8 +184,6 @@ WHERE
                       'side': side, }
 
         all_orders_to_place.append(order_data)
-
-print(all_orders_to_place)
 
 confirming = True
 while confirming:
