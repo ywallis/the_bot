@@ -63,10 +63,10 @@ def prepare_items_for_pg(client, imported_items):
 
 def dict_to_text(d):
 
-    def convert(value):
-        if isinstance(value, dict) or isinstance(value, list):
-            return str(value)  # Convert sub-dict to string
-        return value
+    def convert(i_value):
+        if isinstance(i_value, dict) or isinstance(i_value, list):
+            return str(i_value)  # Convert sub-dict to string
+        return i_value
 
     for key, value in d.items():
         d[key] = convert(value)
@@ -75,22 +75,19 @@ def dict_to_text(d):
 
 def retrieve_and_prepare_orders(client, ticker, start=None, end=None):
 
-    """This function downloads all latest trades from a client to a csv file on the set path to NAS.
-    Includes a production flag, to instead export to test folder if set to False."""
+    """This function downloads all latest orders from a client."""
 
     if client.name == 'Bitget':
         orders = client.fetch_canceled_and_closed_orders(symbol=ticker, limit=100, since=start, params={'until': end})
     else:
         orders = client.fetch_closed_orders(symbol=ticker, limit=100, since=start, params={'until': end})
 
-    return  prepare_items_for_pg(client, orders)
+    return prepare_items_for_pg(client, orders)
 
 
 def retrieve_and_prepare_trades(client, pair, start=None, end=None):
 
     """This function downloads trades from a CCXT client and prepares them to export to a Postgres server."""
-
-    trades_with_fee = []
 
     trades = client.fetch_my_trades(symbol=pair, limit=100, since=start, params={'until': end})
 
@@ -121,4 +118,4 @@ def export_to_sql(data, credentials, table):
             # Execute the insert for all rows
             cur.executemany(insert_query, values)
 
-        print("Data inserted successfully!")
+        print(f"Data inserted successfully in {table} table!")
