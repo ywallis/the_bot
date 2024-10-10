@@ -15,10 +15,10 @@ GROUP BY
     orders.clientorderid
 HAVING 
     SUM(CASE WHEN trades.side = 'sell' THEN trades.asset_net_q ELSE 0 END) - 
-    SUM(CASE WHEN trades.side = 'buy' THEN trades.asset_net_q ELSE 0 END) > 2
+    SUM(CASE WHEN trades.side = 'buy' THEN trades.asset_net_q ELSE 0 END) > 3
     OR 
     SUM(CASE WHEN trades.side = 'sell' THEN trades.asset_net_q ELSE 0 END) - 
-    SUM(CASE WHEN trades.side = 'buy' THEN trades.asset_net_q ELSE 0 END) < -2
+    SUM(CASE WHEN trades.side = 'buy' THEN trades.asset_net_q ELSE 0 END) < -3
 ORDER BY
 		orders.clientorderid;
 """
