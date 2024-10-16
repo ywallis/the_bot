@@ -29,8 +29,8 @@ if __name__ == '__main__':
 
             for client in all_clients:
                 get_order_status(client, ticker=pair)
-                download_trades(client, pair)
-                download_orders(client, pair)
+                # download_trades(client, pair)
+                # download_orders(client, pair)
 
             print('Cycle done')
 
