@@ -40,9 +40,11 @@ if date == "00":
 imbalances = send_sql_query(pg_config, unmatched)
 
 # Drops the index from the returned pandas df
-
-imbalances.set_index('clientorderid', inplace=True)
-
+try:
+    imbalances.set_index('clientorderid', inplace=True)
+except AttributeError:
+    print('Nothing returned from database, there are likely no imbalances.')
+    raise AttributeError('Nothing returned from database, there are likely no imbalances.')
 # Fetches all open orders on all active clients
 
 orders = fetch_all_open_orders_client_order_id(pair, *all_clients)
@@ -55,8 +57,8 @@ print(imbalances)
 
 for index, row in imbalances.iterrows():
     if index is not None:
-        if index.startswith(f't-{date_mod}'):
-            amount = round(float(row['sell_minus_buy']), 2)
+        if index.startswith(f't-{date_mod}') and row['symbol'] == pair:
+            amount = round(float(row['delta']), 2)
             imbalance_dict[index] = amount
 
 all_orders_to_place = []
@@ -109,19 +111,25 @@ WHERE
             		orders.clientorderid = '{order_no}' AND trades.side = 'sell';
 
                         """
-            imbalanced_price = send_sql_query(pg_config, query)['price'].values
+            try:
+                imbalanced_price = send_sql_query(pg_config, query)['price'].values
 
-            imbalanced_price = min(imbalanced_price)
+                imbalanced_price = min(imbalanced_price)
 
-            if partial_fills is not None:
-                price = partial_fills
-                print('There are partial fills, will use their price.')
+                if partial_fills is not None:
+                    price = partial_fills
+                    print('There are partial fills, will use their price.')
 
 
-            else:
-                price = round(float(imbalanced_price) / spread, 3)
+                else:
+                    price = round(float(imbalanced_price) / spread, 3)
 
-            print(f'Creating a matching buy order for order {order_no} with a quantity of {abs(imbalance_dict[order_no])} and a price of {price}.')
+                print(f'Creating a matching buy order for order {order_no} with a quantity of {abs(imbalance_dict[order_no])} and a price of {price}.')
+
+            except TypeError as e:
+                print(e)
+                print('Order likely missing, should recollect data.')
+                raise
 
         else:
             print(f'{imbalance_dict[order_no]} imbalance, should sell!')
@@ -162,19 +170,25 @@ WHERE
             		orders.clientorderid = '{order_no}' AND trades.side = 'buy';
 
                         """
-            imbalanced_price = send_sql_query(pg_config, query)['price'].values
+            try:
+                imbalanced_price = send_sql_query(pg_config, query)['price'].values
 
-            imbalanced_price = min(imbalanced_price)
+                imbalanced_price = min(imbalanced_price)
 
-            if partial_fills is not None:
-                price = partial_fills
-                print('There are partial fills, will use their price.')
+                if partial_fills is not None:
+                    price = partial_fills
+                    print('There are partial fills, will use their price.')
 
-            else:
-                price = round(float(imbalanced_price) / spread, 3)
+                else:
+                    price = round(float(imbalanced_price) / spread, 3)
 
-            print(
-                f'Creating a matching sell order for order {order_no} with a quantity of {abs(imbalance_dict[order_no])} and a price of {price}.')
+                print(
+                    f'Creating a matching sell order for order {order_no} with a quantity of {abs(imbalance_dict[order_no])} and a price of {price}.')
+
+            except TypeError as e:
+                print(e)
+                print('Order likely missing, should recollect data.')
+                raise
 
         # Separating order creation and data collection to introduce a stopper
 
