@@ -1,6 +1,7 @@
 from config.env_var import *
 
 ALPH = {'pair': 'ALPH/USDT',
+        'name': 'ALPH',
         'production': True,
         'low_balance_threshold': 1500,
         'taker_exchange': {'id': 'gate',
@@ -34,6 +35,7 @@ ALPH = {'pair': 'ALPH/USDT',
                              }]}
 
 ALPH_test = {'pair': 'ALPH/USDT',
+             'name': 'ALPH_test',
              'production': False,
              'low_balance_threshold': 10,
              'taker_exchange': {'id': 'gate',
@@ -67,73 +69,75 @@ ALPH_test = {'pair': 'ALPH/USDT',
                                   }]}
 
 AGI = {'pair': 'AGI/USDT',
-                  'production': False,
-                  'low_balance_threshold': 0,
-                  'taker_exchange': {'id': 'gate',
-                                     'key': gateio_key_test,
-                                     'secret': gateio_secret_test,
-                                     },
+       'name': 'AGI',
+       'production': False,
+       'low_balance_threshold': 0,
+       'taker_exchange': {'id': 'gate',
+                          'key': gateio_key_test,
+                          'secret': gateio_secret_test,
+                          },
 
-                  'maker_exchanges': [
-                      {'id': 'mexc',
-                       'key': mexc_key_test,
-                       'secret': mexc_secret_test,
-                       'settings': {'maker_spread': 1.0025,
-                                    'maker_size': 10,
-                                    'taker_spread': 1.0035,
-                                    'taker_sizing': 0.8,
-                                    'taker_max_order_size': 10,
-                                    'taker_only': False,
-                                    'spread_extension': 2,
-                                    }
-                       },
-                      # {'id': 'bitget',
-                      #  'key': bitget_key_test,
-                      #  'secret': bitget_secret_test,
-                      #  'password': bitget_password_test,
-                      #  'settings': {'maker_spread': 1.0025,
-                      #               'maker_size': 10,
-                      #               'taker_spread': 1.0035,
-                      #               'taker_sizing': 0.8,
-                      #               'taker_max_order_size': 10,
-                      #               'taker_only': False,
-                      #               'spread_extension': 1}
-                      #  }
-                  ]}
+       'maker_exchanges': [
+           {'id': 'mexc',
+            'key': mexc_key_test,
+            'secret': mexc_secret_test,
+            'settings': {'maker_spread': 1.0025,
+                         'maker_size': 10,
+                         'taker_spread': 1.0035,
+                         'taker_sizing': 0.8,
+                         'taker_max_order_size': 10,
+                         'taker_only': False,
+                         'spread_extension': 2,
+                         }
+            },
+           # {'id': 'bitget',
+           #  'key': bitget_key_test,
+           #  'secret': bitget_secret_test,
+           #  'password': bitget_password_test,
+           #  'settings': {'maker_spread': 1.0025,
+           #               'maker_size': 10,
+           #               'taker_spread': 1.0035,
+           #               'taker_sizing': 0.8,
+           #               'taker_max_order_size': 10,
+           #               'taker_only': False,
+           #               'spread_extension': 1}
+           #  }
+       ]}
 
 HBAR = {'pair': 'HBAR/USDT',
-                  'production': False,
-                  'low_balance_threshold': 0,
-                  'taker_exchange': {'id': 'gate',
-                                     'key': gateio_key_test,
-                                     'secret': gateio_secret_test,
-                                     },
+        'name': 'HBAR',
+        'production': False,
+        'low_balance_threshold': 0,
+        'taker_exchange': {'id': 'gate',
+                           'key': gateio_key_test,
+                           'secret': gateio_secret_test,
+                           },
 
-                  'maker_exchanges': [
-                      {'id': 'mexc',
-                       'key': mexc_key_test,
-                       'secret': mexc_secret_test,
-                       'settings': {'maker_spread': 1.0025,
-                                    'maker_size': 10,
-                                    'taker_spread': 1.0035,
-                                    'taker_sizing': 0.8,
-                                    'taker_max_order_size': 10,
-                                    'taker_only': False,
-                                    'spread_extension': 2,
-                                    }
-                       },
-                      # {'id': 'bitget',
-                      #  'key': bitget_key_test,
-                      #  'secret': bitget_secret_test,
-                      #  'password': bitget_password_test,
-                      #  'settings': {'maker_spread': 1.0025,
-                      #               'maker_size': 10,
-                      #               'taker_spread': 1.0035,
-                      #               'taker_sizing': 0.8,
-                      #               'taker_max_order_size': 10,
-                      #               'taker_only': False,
-                      #               'spread_extension': 1}
-                      #  }
-                  ]}
+        'maker_exchanges': [
+            {'id': 'mexc',
+             'key': mexc_key_test,
+             'secret': mexc_secret_test,
+             'settings': {'maker_spread': 1.0025,
+                          'maker_size': 10,
+                          'taker_spread': 1.0035,
+                          'taker_sizing': 0.8,
+                          'taker_max_order_size': 10,
+                          'taker_only': False,
+                          'spread_extension': 2,
+                          }
+             },
+            # {'id': 'bitget',
+            #  'key': bitget_key_test,
+            #  'secret': bitget_secret_test,
+            #  'password': bitget_password_test,
+            #  'settings': {'maker_spread': 1.0025,
+            #               'maker_size': 10,
+            #               'taker_spread': 1.0035,
+            #               'taker_sizing': 0.8,
+            #               'taker_max_order_size': 10,
+            #               'taker_only': False,
+            #               'spread_extension': 1}
+            #  }
+        ]}
 
 deployed_strategies = {'ALPH': ALPH, 'ALPH_test': ALPH_test, 'AGI': AGI, 'HBAR': HBAR}
