@@ -12,6 +12,9 @@ elif os.uname()[1] == 'T490-Ubuntu':
 else:
     path_to_data = '/home/yann/Data/Arb Bot Unified/'
 
+base_asset_fee_exchanges = ['Gate.io', 'Bitget']
+
+
 # gate_fee = 0
 # bitget_fee = 0
 # target = None
