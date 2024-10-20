@@ -18,7 +18,7 @@ from status_boiler import get_order_status, get_balance_status, fetch_all_open_o
 from status_clients import all_clients, low_balance_threshold, pair
 from accounting_boiler import unaddressed_imbalances
 from sql_connector import send_sql_query
-from sql_queries import unmatched
+from sql_queries import imbalances
 
 
 email_sent = False
@@ -41,7 +41,7 @@ if __name__ == '__main__':
 
             # Adding imbalance monitoring
 
-            imbalances = send_sql_query(pg_config, unmatched)
+            imbalances = send_sql_query(pg_config, imbalances)
             all_open_orders = fetch_all_open_orders_client_order_id(pair, *all_clients)
 
             unaddressed_imbalances(pair, imbalances, all_open_orders)

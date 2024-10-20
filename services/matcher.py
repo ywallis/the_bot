@@ -37,7 +37,7 @@ if date == "00":
 
 # Fetches all imbalances from database
 
-imbalances = send_sql_query(pg_config, unmatched)
+imbalances = send_sql_query(pg_config, imbalances)
 
 # Drops the index from the returned pandas df
 try:
