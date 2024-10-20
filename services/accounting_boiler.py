@@ -155,7 +155,7 @@ def unaddressed_imbalances(pair, imbalances, orders):
 
         if order_no not in orders:
 
-            if imbalance_dict[order_no] > 0:
+            if imbalance_dict[order_no] < 0:
                 side = 'buy'
 
             else:
