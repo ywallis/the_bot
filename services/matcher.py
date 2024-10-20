@@ -72,7 +72,7 @@ for order_no in imbalance_dict.keys():
         print('This is pending')
 
     else:
-        if imbalance_dict[order_no] > 0:
+        if imbalance_dict[order_no] < 0:
             print(f'{imbalance_dict[order_no]} imbalance, should buy!')
             side = "buy"
 
