@@ -1,4 +1,4 @@
-imbalances = """
+fetch_imbalances = """
 WITH trade_data AS (
     SELECT 
         trades.symbol,

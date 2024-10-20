@@ -18,7 +18,7 @@ from status_boiler import get_order_status, get_balance_status, fetch_all_open_o
 from status_clients import all_clients, low_balance_threshold, pair
 from accounting_boiler import unaddressed_imbalances
 from sql_connector import send_sql_query
-from sql_queries import imbalances
+from sql_queries import fetch_imbalances
 
 
 email_sent = False
@@ -29,6 +29,9 @@ if __name__ == '__main__':
     while bot_activated:
         try:
             print(f'Status at {datetime.now()}')
+            for client in all_clients:
+                get_order_status(client, ticker=pair, details=True)
+
             for client in all_clients:
                 if get_balance_status(client, ticker=pair, threshold=low_balance_threshold):
                     print(f'Low balance on {client.name}')
@@ -41,7 +44,7 @@ if __name__ == '__main__':
 
             # Adding imbalance monitoring
 
-            imbalances = send_sql_query(pg_config, imbalances)
+            imbalances = send_sql_query(pg_config, fetch_imbalances)
             all_open_orders = fetch_all_open_orders_client_order_id(pair, *all_clients)
 
             unaddressed_imbalances(pair, imbalances, all_open_orders)
