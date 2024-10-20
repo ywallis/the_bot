@@ -1,6 +1,7 @@
 import psycopg
 import os
 from dotenv import dotenv_values
+
 config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '/docker/database/', '.env'))
 pg_config = dotenv_values(f'..{config_path}')
 
@@ -119,3 +120,71 @@ def export_to_sql(data, credentials, table):
             cur.executemany(insert_query, values)
 
         print(f"Data inserted successfully in {table} table!")
+
+
+def unaddressed_imbalances(pair, imbalances, orders):
+    """This function tries to notify of imbalances in an arbitrage setup, similar to the matcher, but designed as a background service.
+    Imbalances are meant to be fed as a pandas DF. Orders are CCXT objects."""
+
+    ticker = pair.split('/')[0]
+
+    # Drops the index from the returned pandas df
+    try:
+        imbalances.set_index('clientorderid', inplace=True)
+    except AttributeError:
+        print('Nothing returned from database, there are likely no imbalances.')
+        raise AttributeError('Nothing returned from database, there are likely no imbalances.')
+    # Fetches all open orders on all active clients
+
+    # Initialize and create a dict of all imbalances (oid and amount)
+
+    imbalance_dict = {}
+
+    for index, row in imbalances.iterrows():
+        if index is not None:
+            if row['symbol'] == pair:
+                amount = round(float(row['delta']), 2)
+                imbalance_dict[index] = amount
+
+    all_unaddressed_imbalances = []
+
+    # Core loop, iterates over all imbalances and checks for a pending order. If none exists, they will be counted.
+
+    for order_no in imbalance_dict.keys():
+        side = ""
+
+        if order_no not in orders:
+
+            if imbalance_dict[order_no] > 0:
+                side = 'buy'
+
+            else:
+                side = 'sell'
+
+            order_data = {'id': order_no,
+                          'amount': abs(imbalance_dict[order_no]),
+                          'side': side, }
+
+            all_unaddressed_imbalances.append(order_data)
+
+    buy_counter = 0
+    buy_total = 0
+    sell_counter = 0
+    sell_total = 0
+
+    for imbalance in all_unaddressed_imbalances:
+        if imbalance['side'] == 'buy':
+            buy_counter += 1
+            buy_total += imbalance['amount']
+        else:
+            sell_counter += 1
+            sell_total += imbalance['amount']
+
+    if buy_counter != 0:
+        print(f'There are {buy_counter} unaddressed buy-side imbalances for a total of {buy_total} {ticker}.')
+
+    if sell_counter != 0:
+        print(f'There are {sell_counter} unaddressed sell-side imbalances for a total of {sell_total} {ticker}.')
+
+    if buy_counter == 0 and sell_counter == 0:
+        print(f'There are no unaddressed imbalances.')

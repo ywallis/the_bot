@@ -57,7 +57,7 @@ def get_balance_status(client, ticker, threshold):
         print('No balances! Are you sure the right pair is selected?')
 
 
-def get_order_status(client, ticker):
+def get_order_status(client, ticker, details=True):
 
     """This function lists all open orders for a client in a terminal format."""
 
@@ -70,9 +70,9 @@ def get_order_status(client, ticker):
             open_buy_orders_total += order['remaining']
         elif order['side'] == 'sell':
             open_sell_orders_total += order['remaining']
-
-        print(f"Open {order['side']} order on {client.name} at {order['price']}, "
-              f"{round(order['remaining'], 2)} of {round(order['amount'], 2)} remaining.")
+        if details:
+            print(f"Open {order['side']} order on {client.name} at {order['price']}, "
+                  f"{round(order['remaining'], 2)} of {round(order['amount'], 2)} remaining.")
     if open_buy_orders_total != 0:
         print(f"Total of {round(open_buy_orders_total, 2)} buys open on {client.name}.")
     if open_sell_orders_total != 0:
