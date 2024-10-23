@@ -1,7 +1,9 @@
 import asyncio
 import logging
+import time
 import ccxt.async_support as ccxt
 from datetime import datetime
+
 
 logger = logging.getLogger(__name__)
 
@@ -291,3 +293,53 @@ def within_percentage_range(x, y, percentage):
     upper_bound = y * (1 + percentage / 100)
 
     return lower_bound <= x <= upper_bound
+
+
+async def create_order_abstraction(taker_client, maker_client, price, size, pair, side):
+
+    # Adding side check to ensure proper solvency check
+
+    if side == 'buy':
+        buy_client = maker_client
+        sell_client = taker_client
+    else:
+        buy_client = taker_client
+        sell_client = maker_client
+
+    if await check_if_solvent(buy_client, sell_client, price, size, pair=pair):
+
+        # Some exchanges only respond with an order id, hence the code complication with the ['id']
+        # to retrieve a full object
+
+        sell_order = await maker_client.create_limit_order(symbol=pair,
+                                                           side=side,
+                                                           amount=size,
+                                                           price=price,
+                                                           params={'clientOrderId': f't-{order_time()}_es'})
+        sell_exists = True
+
+        # Retrying in case of error
+
+        try:
+            returned_sell_order = await maker_client.fetch_order(id=sell_order['id'], symbol=pair)
+            logger.info(f'Solvent, sell order created')
+        except ccxt.ExchangeError as error:
+            print('Order fetch failed, trying again.')
+            time.sleep(0.2)
+            logger.info('Order fetch failed, trying again.')
+            logger.info(error)
+            try:
+                returned_sell_order = await maker_client.fetch_order(id=sell_order['id'], symbol=pair)
+                logger.info(f'Solvent, {side} order created')
+            except ccxt.ExchangeError as error:
+                logger.info('Order fetch failed again.')
+                logger.info(error)
+                time.sleep(0.2)
+                returned_sell_order = await maker_client.fetch_order(id=sell_order['id'], symbol=pair)
+
+        return returned_sell_order
+
+
+    else:
+        print('Insufficient funds!')
+        logger.info(f'Insufficient funds!')
