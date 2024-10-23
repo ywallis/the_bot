@@ -1,26 +1,22 @@
-import ccxt.pro as ccxt
 import asyncio
+import ccxt.pro
+import copy
+from config.env_var import mexc_key, mexc_secret, bitget_key, bitget_secret, bitget_password, gateio_secret, gateio_key
+
 from datetime import datetime, timezone
-# from config.config import gateio_key, gateio_secret, mexc_key, mexc_secret, bitget_key, bitget_secret, bitget_password
-
-# TESTING - IMPLEMENTING USING ALL TRADES INSTEAD OF MY TRADES TO AVOID DEALING WITH KEYS
-
-#Introduce logging
-# Will move to boiler once tested
 
 
-async def match_sell(client, trade):
+async def match_sell(client, order):
     """This function places a buy limit order using a CCXT client.
     It then outputs a confirmation of that order to the console and logs.
     It includes a modification for exchanges using the base asset for fees,
     to keep stable inventory in arbitrage setups."""
 
 
-    quantity = trade['amount']
-    price = trade['price']
-    # SET WHEN MOVING TO PROD
-    # identifier = trade['clientOrderId']
-    pair = trade['symbol']
+    quantity = order['amount']
+    price = order['price']
+    identifier = order['clientOrderId']
+    pair = order['symbol']
 
     if client.name == 'Gate.io':
 
@@ -35,9 +31,10 @@ async def match_sell(client, trade):
         print(f'Placed a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
 
         # Testing with appending to a file
-
-        with open('matched.txt', 'a') as file:
-            file.write(f'\n{datetime.now()}\n{trade}\nPlacing a {quantity} {pair} buy order on {client.name} for {price}.')
+        if order['filled'] != 0:
+            with open('matched.txt', 'a') as file:
+                # file.write(f'\n{datetime.now()}\n{trade}\nPlacing a {quantity} {pair} buy order on {client.name} for {price}.')
+                file.write(f'\n{str(order)}')
 
 
         #logger.info(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {trade['price']}.')
@@ -46,13 +43,12 @@ async def match_sell(client, trade):
         #                                  params={'clientOrderId': identifier})
 
 
-async def match_buy(client, trade):
+async def match_buy(client, order):
 
-    quantity = trade['amount']
-    price = trade['price']
-    # SET WHEN MOVING TO PROD
-    # identifier = trade['clientOrderId']
-    pair = trade['symbol']
+    quantity = order['amount']
+    price = order['price']
+    identifier = order['clientOrderId']
+    pair = order['symbol']
 
     """This function places a sell limit order using a CCXT client.
     It then outputs a confirmation of that order to the console and logs."""
@@ -61,89 +57,75 @@ async def match_buy(client, trade):
     # logger.info(f'Placing a {quantity} {pair} sell order on {client.name} for {price}.')
 
     # Testing with appending to a file
-
-    with open('matched.txt', 'a') as file:
-        file.write(f'\n{datetime.now()}\n{trade}\nPlacing a {quantity} {pair} sell order on {client.name} for {price}.')
+    if order['filled'] != 0:
+        with open('matched.txt', 'a') as file:
+            # file.write(f'\n{datetime.now()}\n{trade}\nPlacing a {quantity} {pair} sell order on {client.name} for {price}.')
+            file.write(f'\n{str(order)}')
 
     # return client.create_limit_order(symbol=pair, side='sell', amount=quantity, price=price,
     #                                  params={'clientOrderId': identifier})
 
-class Matcher:
-    """This is a class designed to represent a websocket "watcher",
-    which will monitor trades executed on the maker clients and mirror them on the taker client. """
-    def __init__(self, taker_client, *maker_clients):
 
-        self.taker_client = taker_client
-        self.maker_clients = maker_clients
+async def process_order_update(taker_client, order):
+    """This function processes an order update, and prepares it for matching.
+    To do so, it will check that the order has been closed, that part of it, or it's entirety has been filled.
+    Finally, it checks the side of relevant orders and calls the appropriate matcher."""
 
-    async def watch_trades(self, client):
-        since = datetime.now(timezone.utc)
-        timestamp = int(since.timestamp() * 1000)
-
-        while True:
-            try:
-                trades = await client.watch_orders('ALPH/USDT', since=timestamp)
-                # Printing as a first placeholder for further logic
-                print(len(trades))
-                await self.process_trades(trades, client.name)
-            except Exception as e:
-                print(str(e))
-                break
-
-        await client.close()
-
-    async def process_trades(self, trades, client_name):
-        tasks = []
-
-        for trade in trades:
-            # Compare order IDs here to exclude tt's, and possibly combine any orders splitting into multiple trades
-            print(trade)
-            print(f"Received trade {trade['amount']} from {client_name}")
-            tasks.append(self.match_trade(trade))
-
-        await asyncio.gather(*tasks)
-
-    async def match_trade(self, trade):
-        print(f'Sending {trade["amount"]}')
-
-        # CAREFUL HERE! PRODUCTION ONLY
-
-        # client_order_id = trade['clientOrderId']
-
-        if trade['side'] == 'buy':
-            print(f'This is a {trade['side']}')
-            await match_buy(self.taker_client, trade)
-            # await asyncio.sleep(2)
-            print(f'Executed {trade["amount"]}')
-
-        if trade['side'] == 'sell':
-            print(f'This is a {trade['side']}')
-            await match_sell(self.taker_client, trade)
-            # await asyncio.sleep(2)
-            print(f'Executed {trade["amount"]}')
+    print('Processing!')
 
 
+    # Remove file writes after testing
 
-    async def run(self):
-        await asyncio.gather(*[self.watch_trades(client) for client in self.maker_clients])
+    if order['status'] != 'open':
+        if order['filled'] != 0:
+            if order['side'] == 'buy':
+                with open('buys.txt', 'a') as file:
+                    await asyncio.sleep(1)
+                    file.write(f'\n{str(order)}')
+                    asyncio.create_task(match_buy(taker_client, order))
+            else:
+                with open('sells.txt', 'a') as file:
+                    await asyncio.sleep(1)
+                    file.write(f'\n{str(order)}')
+                    asyncio.create_task(match_sell(taker_client, order))
+
+    print(f'Processed trade {order['id']}')
 
 
-# Can't import clients from config since they don't use ccxt.pro
-gate_fee = 0
-gate = ccxt.gateio({'apiKey': gateio_key, 'secret': gateio_secret})
-mexc = ccxt.mexc({'apiKey': mexc_key, 'secret': mexc_secret})
-bitget = ccxt.bitget({'apiKey': bitget_key, 'secret': bitget_secret, 'password': bitget_password})
+async def loop(maker_client, taker_client, symbol):
+    since = datetime.now(timezone.utc)
+    timestamp = int(since.timestamp() * 1000)
+    while True:
+        orders = await maker_client.watch_orders(symbol, since=timestamp)
+        print('--------------------------------------------------------------')
+        print('Received', len(orders), 'after', maker_client.iso8601 (timestamp))
+        print(orders)
 
-watch_me = Matcher(gate,mexc, bitget)
+        for order in orders:
+            with open('all_orders.txt', 'a') as file:
+                file.write(f'\n{str(order)}')
 
-print(watch_me.maker_clients)
-asyncio.run(watch_me.run())
+            order_copy = copy.deepcopy(order)
+            asyncio.create_task(process_order_update(taker_client, order_copy))
 
-# since = datetime.now()
-# timestamp = int(since.timestamp() * 1000)
-# print(since)
-# print(timestamp)
-#
-# print(bitget_client.iso8601(timestamp))
-# print(gate_client.iso8601(timestamp))
-# print(mexc_client.iso8601(timestamp))
+        print('waiting for next update...')
+
+
+async def main():
+    bitget = ccxt.pro.bitget({'apiKey': bitget_key, 'secret': bitget_secret, 'password': bitget_password})
+    # mexc = ccxt.pro.mexc({'apiKey': mexc_key, 'secret': mexc_secret})
+    taker_client = ccxt.pro.gateio({'apiKey': gateio_key, 'secret': gateio_secret})
+    try:
+        await loop(bitget, taker_client, 'ALPH/USDT')
+    except ccxt.NetworkError as e:
+        print('Network error, ghetto logging.')
+        with open('disconnect.txt', 'a') as file:
+            file.write(f'\n{e}')
+    await bitget.close()
+
+
+gate_fee = 0.001
+
+
+if __name__ == '__main__':
+    asyncio.run(main())
