@@ -2,7 +2,8 @@ import asyncio
 
 import ccxt.async_support as ccxt
 from boiler_async import (check_and_take, check_if_solvent, place_buy_order, place_sell_order, order_book_matcher,
-                          order_time, maker_order_sizer, within_percentage_range, create_and_return_order_abstraction, cancel_order_abstraction)
+                          order_time, maker_order_sizer, within_percentage_range, create_and_return_order_abstraction,
+                          cancel_order_abstraction)
 from datetime import datetime
 import time
 import logging
@@ -11,7 +12,6 @@ logger = logging.getLogger(__name__)
 
 
 async def make_and_take(taker_client, maker_client, config, pair):
-
     """This function acts as a basic market making system, with the following two logics:
     1. A taker logic, acting immediately in two order books in case a profitable imbalance is spotted.
     2. A maker1 logic, offering liquidity on one side, if the position can be hedged profitably on the other."""
@@ -77,7 +77,6 @@ async def make_and_take(taker_client, maker_client, config, pair):
         if not buy_arbitrage and not sell_arbitrage:
             time.sleep(1)
 
-
         batch = asyncio.gather(taker_client.fetch_order_book(pair), maker_client.fetch_order_book(pair))
         taker_order_book, maker_order_book = await batch
 
@@ -106,8 +105,6 @@ async def make_and_take(taker_client, maker_client, config, pair):
         # Start of taker logic
 
         # Start take_take with client_a as buyer, client_b as seller.
-        # continue
-
 
         if best_bid_maker >= best_ask_taker * taker_spread:
 
@@ -119,12 +116,14 @@ async def make_and_take(taker_client, maker_client, config, pair):
                                                                                           extend_spread=spread_extension)
 
                 if await check_if_solvent(taker_client, maker_client,
-                                    quantity=taker_order_size, price=taker_target_ask, pair=pair):
+                                          quantity=taker_order_size, price=taker_target_ask, pair=pair):
                     try:
                         take_take_order_id = f't-{order_time()}_tt'
 
-                        order_batch = asyncio.gather(place_buy_order(pair, taker_client, taker_target_ask, taker_order_size, take_take_order_id),
-                                                     place_sell_order(pair, maker_client, taker_target_bid, taker_order_size, take_take_order_id))
+                        order_batch = asyncio.gather(
+                            place_buy_order(pair, taker_client, taker_target_ask, taker_order_size, take_take_order_id),
+                            place_sell_order(pair, maker_client, taker_target_bid, taker_order_size,
+                                             take_take_order_id))
                         await order_batch
 
                         # The continue statement puts the priority on taking whenever possible,
@@ -161,15 +160,16 @@ async def make_and_take(taker_client, maker_client, config, pair):
                                                                                           extend_spread=spread_extension)
 
                 if await check_if_solvent(maker_client, taker_client,
-                                    quantity=taker_order_size, price=taker_target_ask, pair=pair):
+                                          quantity=taker_order_size, price=taker_target_ask, pair=pair):
                     try:
 
                         take_take_order_id = f't-{order_time()}_tt'
 
-                        order_batch = asyncio.gather(place_buy_order(pair, maker_client, taker_target_ask, taker_order_size, take_take_order_id),
-                                                     place_sell_order(pair, taker_client, taker_target_bid, taker_order_size, take_take_order_id))
+                        order_batch = asyncio.gather(
+                            place_buy_order(pair, maker_client, taker_target_ask, taker_order_size, take_take_order_id),
+                            place_sell_order(pair, taker_client, taker_target_bid, taker_order_size,
+                                             take_take_order_id))
                         await order_batch
-
 
                         # The continue statement puts the priority on taking whenever possible,
                         # since it is most efficient. Downside is that some orders may remain stuck
@@ -208,7 +208,8 @@ async def make_and_take(taker_client, maker_client, config, pair):
 
             # Calculate the current optimal order size
 
-            optimal_sell_size = maker_order_sizer(best_ask_maker, taker_asks, "sell", maker_spread, maker_min_size, maker_size)
+            optimal_sell_size = maker_order_sizer(best_ask_maker, taker_asks, "sell", maker_spread, maker_min_size,
+                                                  maker_size)
 
             print(f'Optimal order size currently {optimal_sell_size}')
 
@@ -221,7 +222,8 @@ async def make_and_take(taker_client, maker_client, config, pair):
                 logger.info(f'Selling on {maker_client.name}, selling {best_ask_maker}')
 
                 if await check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
-                    returned_sell_order = await create_and_return_order_abstraction(maker_client, best_ask_maker, optimal_sell_size, pair, 'sell')
+                    returned_sell_order = await create_and_return_order_abstraction(maker_client, best_ask_maker,
+                                                                                    optimal_sell_size, pair, 'sell')
                     sell_exists = True
 
                 else:
@@ -235,13 +237,13 @@ async def make_and_take(taker_client, maker_client, config, pair):
                 print('Order no longer at bottom of asks, cancelling.')
                 logger.info('Order no longer at bottom of asks, cancelling.')
 
-
                 await cancel_order_abstraction(maker_client, returned_sell_order, pair)
                 await check_and_take(taker_client, maker_client, returned_sell_order, pair)
                 sell_exists = False
 
                 if await check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
-                    returned_sell_order = await create_and_return_order_abstraction(maker_client, best_ask_maker, optimal_sell_size, pair, 'sell')
+                    returned_sell_order = await create_and_return_order_abstraction(maker_client, best_ask_maker,
+                                                                                    optimal_sell_size, pair, 'sell')
                     sell_exists = True
 
                 else:
@@ -261,7 +263,8 @@ async def make_and_take(taker_client, maker_client, config, pair):
                 sell_exists = False
 
                 if await check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
-                    returned_sell_order = await create_and_return_order_abstraction(maker_client, best_ask_maker, optimal_sell_size, pair, 'sell')
+                    returned_sell_order = await create_and_return_order_abstraction(maker_client, best_ask_maker,
+                                                                                    optimal_sell_size, pair, 'sell')
                     sell_exists = True
 
                 else:
@@ -288,7 +291,6 @@ async def make_and_take(taker_client, maker_client, config, pair):
             logger.info('Sell arb now false')
 
             if sell_exists:
-
                 print('No more arb, cancelling sells.')
                 logger.info('No more arb, cancelling sells.')
 
@@ -306,7 +308,8 @@ async def make_and_take(taker_client, maker_client, config, pair):
 
             # Calculate the current optimal order size
 
-            optimal_buy_size = maker_order_sizer(best_bid_maker, taker_bids, "buy", maker_spread, maker_min_size, maker_size)
+            optimal_buy_size = maker_order_sizer(best_bid_maker, taker_bids, "buy", maker_spread, maker_min_size,
+                                                 maker_size)
 
             print(f'Optimal order size currently {optimal_buy_size}')
 
@@ -319,7 +322,8 @@ async def make_and_take(taker_client, maker_client, config, pair):
                 logger.info(f'Buying on {maker_client.name}, buying {best_bid_maker}')
 
                 if await check_if_solvent(maker_client, taker_client, best_bid_maker, optimal_buy_size, pair=pair):
-                    returned_buy_order = await create_and_return_order_abstraction( maker_client, best_bid_maker, optimal_buy_size, pair, 'buy')
+                    returned_buy_order = await create_and_return_order_abstraction(maker_client, best_bid_maker,
+                                                                                   optimal_buy_size, pair, 'buy')
                     buy_exists = True
 
                 else:
@@ -338,7 +342,8 @@ async def make_and_take(taker_client, maker_client, config, pair):
                 buy_exists = False
 
                 if await check_if_solvent(maker_client, taker_client, best_bid_maker, optimal_buy_size, pair=pair):
-                    returned_buy_order = await create_and_return_order_abstraction(maker_client, best_bid_maker, optimal_buy_size, pair, 'buy')
+                    returned_buy_order = await create_and_return_order_abstraction(maker_client, best_bid_maker,
+                                                                                   optimal_buy_size, pair, 'buy')
                     buy_exists = True
 
                 else:
@@ -356,7 +361,8 @@ async def make_and_take(taker_client, maker_client, config, pair):
                 buy_exists = False
 
                 if await check_if_solvent(maker_client, taker_client, best_bid_maker, optimal_buy_size, pair=pair):
-                    returned_buy_order = await create_and_return_order_abstraction(maker_client, best_bid_maker, optimal_buy_size, pair, 'buy')
+                    returned_buy_order = await create_and_return_order_abstraction(maker_client, best_bid_maker,
+                                                                                   optimal_buy_size, pair, 'buy')
                     buy_exists = True
 
                 else:
@@ -383,7 +389,6 @@ async def make_and_take(taker_client, maker_client, config, pair):
             logger.info('Buy arb now false')
 
             if buy_exists:
-
                 print('No more arb, cancelling buys.')
                 logger.info('No more arb, cancelling buys.')
 
