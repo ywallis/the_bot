@@ -1,6 +1,5 @@
 import asyncio
 
-import ccxt.async_support as ccxt
 from boiler_async import (check_and_take, check_if_solvent, place_buy_order, place_sell_order, order_book_matcher,
                           order_time, maker_order_sizer, within_percentage_range, create_and_return_order_abstraction,
                           cancel_order_abstraction)
