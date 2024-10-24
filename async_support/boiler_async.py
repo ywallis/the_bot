@@ -197,12 +197,22 @@ async def check_if_solvent(buy_client, sell_client, price, quantity, pair):
         return False
 
 
-async def check_and_take(client_a, client_b, order, pair, market_side):
+async def check_and_take(client_a, client_b, order, pair):
 
     """This function checks if a placed maker order has been filled or partially filled
     and generates an equivalent taker order on another exchange."""
 
     func_order = await client_b.fetch_order(id=order['id'], symbol=pair)
+
+    # Since the function essentially acts as a matcher, it will always take the opposite side of the input order.
+
+    if func_order['side'] == 'buy':
+
+        market_side = 'sell'
+
+    else:
+        market_side = 'buy'
+
     filled = float(func_order['filled'])
     print(f'{filled} from order filled')
     # retrieve order
@@ -213,8 +223,6 @@ async def check_and_take(client_a, client_b, order, pair, market_side):
             # Add try, to prevent issues with orders filled in the meantime
             try:
                 await client_b.cancel_order(id=func_order['id'], symbol=pair)
-
-                # YOU MIGHT BE ABLE TO SPEED THIS UP BY ASSIGNING FILLED TO THE CANCEL ORDER
 
                 filled_str = await client_b.fetch_order(id=func_order['id'], symbol=pair)
                 filled = float(filled_str['filled'])
@@ -295,22 +303,26 @@ def within_percentage_range(x, y, percentage):
     return lower_bound <= x <= upper_bound
 
 
-async def create_order_abstraction(taker_client, maker_client, price, size, pair, side):
+async def create_and_return_order_abstraction(maker_client, price, size, pair, side):
 
     # Some exchanges only respond with an order id, hence the code complication with the ['id']
     # to retrieve a full object
 
-    sell_order = await maker_client.create_limit_order(symbol=pair,
+    if side == 'sell':
+        identifier = 'es'
+    else:
+        identifier = 'eb'
+
+    order = await maker_client.create_limit_order(symbol=pair,
                                                        side=side,
                                                        amount=size,
                                                        price=price,
-                                                       params={'clientOrderId': f't-{order_time()}_es'})
-    sell_exists = True
+                                                       params={'clientOrderId': f't-{order_time()}_{identifier}'})
 
     # Retrying in case of error
 
     try:
-        returned_sell_order = await maker_client.fetch_order(id=sell_order['id'], symbol=pair)
+        returned_order = await maker_client.fetch_order(id=order['id'], symbol=pair)
         logger.info(f'Solvent, sell order created')
     except ccxt.ExchangeError as error:
         print('Order fetch failed, trying again.')
@@ -318,12 +330,27 @@ async def create_order_abstraction(taker_client, maker_client, price, size, pair
         logger.info('Order fetch failed, trying again.')
         logger.info(error)
         try:
-            returned_sell_order = await maker_client.fetch_order(id=sell_order['id'], symbol=pair)
+            returned_order = await maker_client.fetch_order(id=order['id'], symbol=pair)
             logger.info(f'Solvent, {side} order created')
         except ccxt.ExchangeError as error:
             logger.info('Order fetch failed again.')
             logger.info(error)
             time.sleep(0.2)
-            returned_sell_order = await maker_client.fetch_order(id=sell_order['id'], symbol=pair)
+            returned_order = await maker_client.fetch_order(id=order['id'], symbol=pair)
 
-    return returned_sell_order
+    return returned_order
+
+
+async def cancel_order_abstraction(maker_client, order, pair):
+
+    logger.info('Trying to cancel order.')
+    try:
+        await maker_client.cancel_order(id=order['id'], symbol=pair)
+    except ccxt.BadRequest as e:
+        logger.info(e)
+        logger.info('Order was likely fully filled.')
+    except ccxt.ExchangeError as e:
+        logger.info(e)
+        logger.info('Order likely not found, retrying')
+        time.sleep(0.2)
+        await maker_client.cancel_order(id=order['id'], symbol=pair)

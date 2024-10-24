@@ -47,7 +47,10 @@ if __name__ == '__main__':
             imbalances = send_sql_query(pg_config, fetch_imbalances)
             all_open_orders = fetch_all_open_orders_client_order_id(pair, *all_clients)
 
-            unaddressed_imbalances(pair, imbalances, all_open_orders)
+            try:
+                unaddressed_imbalances(pair, imbalances, all_open_orders)
+            except AttributeError as e:
+                pass
 
             print('Cycle done')
 

@@ -2,7 +2,7 @@ import asyncio
 
 import ccxt.async_support as ccxt
 from boiler_async import (check_and_take, check_if_solvent, place_buy_order, place_sell_order, order_book_matcher,
-                    order_time, maker_order_sizer, within_percentage_range, create_order_abstraction)
+                          order_time, maker_order_sizer, within_percentage_range, create_and_return_order_abstraction, cancel_order_abstraction)
 from datetime import datetime
 import time
 import logging
@@ -217,11 +217,11 @@ async def make_and_take(taker_client, maker_client, config, pair):
 
             if not sell_exists:
                 print(f'Make on {maker_client.name}')
-                print(f'Sell {best_ask_maker}')
-                logger.info(f'Sell on {maker_client.name}, sell {best_ask_maker}')
+                print(f'Selling {best_ask_maker}')
+                logger.info(f'Selling on {maker_client.name}, selling {best_ask_maker}')
 
                 if await check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
-                    returned_sell_order = await create_order_abstraction(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair, 'sell')
+                    returned_sell_order = await create_and_return_order_abstraction(maker_client, best_ask_maker, optimal_sell_size, pair, 'sell')
                     sell_exists = True
 
                 else:
@@ -235,28 +235,13 @@ async def make_and_take(taker_client, maker_client, config, pair):
                 print('Order no longer at bottom of asks, cancelling.')
                 logger.info('Order no longer at bottom of asks, cancelling.')
 
-                try:
-                    # If the order is partially filled, start the take process.
-                    await maker_client.cancel_order(id=returned_sell_order['id'], symbol=pair)
-                    await check_and_take(taker_client, maker_client, returned_sell_order, pair, 'buy')
 
-                    sell_exists = False
-
-                except (ccxt.BadRequest, ccxt.ExchangeError) as error:
-                    logger.info(error)
-                    print(f'Order has been fully filled, taking {returned_sell_order["amount"]}')
-
-                    if await check_and_take(taker_client, maker_client, returned_sell_order, pair, 'buy'):
-                        sell_exists = False
-                        logger.info('Was filled in the mean time, C&T')
-                    else:
-                        time.sleep(0.2)
-                        await maker_client.cancel_order(id=returned_sell_order['id'], symbol=pair)
-                        logger.info('Double tap cancel')
-                        sell_exists = False
+                await cancel_order_abstraction(maker_client, returned_sell_order, pair)
+                await check_and_take(taker_client, maker_client, returned_sell_order, pair)
+                sell_exists = False
 
                 if await check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
-                    returned_sell_order = await create_order_abstraction(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair, 'sell')
+                    returned_sell_order = await create_and_return_order_abstraction(maker_client, best_ask_maker, optimal_sell_size, pair, 'sell')
                     sell_exists = True
 
                 else:
@@ -271,35 +256,17 @@ async def make_and_take(taker_client, maker_client, config, pair):
                 print('Order no longer within acceptable size range, cancelling.')
                 logger.info('Order no longer within acceptable size range, cancelling.')
 
+                await cancel_order_abstraction(maker_client, returned_sell_order, pair)
+                await check_and_take(taker_client, maker_client, returned_sell_order, pair)
                 sell_exists = False
 
-                try:
-                    # If the order is partially filled, start the take process.
-                    await maker_client.cancel_order(id=returned_sell_order['id'], symbol=pair)
-                    await check_and_take(taker_client, maker_client, returned_sell_order, pair, 'buy')
-
-
-                except (ccxt.BadRequest, ccxt.ExchangeError) as error:
-                    logger.info(error)
-                    print(f'Order has been fully filled, taking {returned_sell_order["amount"]}')
-
-                    if await check_and_take(taker_client, maker_client, returned_sell_order, pair, 'buy'):
-                        sell_exists = False
-                        logger.info('Was filled in the mean time, C&T')
-                    else:
-                        time.sleep(0.2)
-                        await maker_client.cancel_order(id=returned_sell_order['id'], symbol=pair)
-                        logger.info('Double tap cancel')
-
                 if await check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
-                    returned_sell_order = await create_order_abstraction(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair, 'sell')
+                    returned_sell_order = await create_and_return_order_abstraction(maker_client, best_ask_maker, optimal_sell_size, pair, 'sell')
                     sell_exists = True
 
                 else:
                     print('Insufficient funds!')
                     logger.info(f'Insufficient funds!')
-
-
 
             # If the flag for an existing sell order exists, check if it has been filled.
 
@@ -309,7 +276,7 @@ async def make_and_take(taker_client, maker_client, config, pair):
 
                 # Check if some of the order has been filled. If yes, the order is cancelled and the flag removed.
 
-                if await check_and_take(taker_client, maker_client, returned_sell_order, pair, 'buy'):
+                if await check_and_take(taker_client, maker_client, returned_sell_order, pair):
                     sell_exists = False
                     logger.info(f"C&T, sell doesn't exist anymore")
 
@@ -318,33 +285,16 @@ async def make_and_take(taker_client, maker_client, config, pair):
             # The arbitrage condition is no longer there, cancel open orders after checking them.
 
             sell_arbitrage = False
-            logger.info('Arb now false')
+            logger.info('Sell arb now false')
 
             if sell_exists:
 
-                if await check_and_take(taker_client, maker_client, returned_sell_order, pair, 'buy'):
-                    sell_exists = False
-                    logger.info('C&T success, sell no longer exists')
+                print('No more arb, cancelling sells.')
+                logger.info('No more arb, cancelling sells.')
 
-                else:
-                    print('No more arb, cancelling sells.')
-                    logger.info('No more arb, cancelling sells.')
-
-                    try:
-
-                        # If the order is partially filled, start the take process.
-
-                        await maker_client.cancel_order(id=returned_sell_order['id'], symbol=pair)
-                        await check_and_take(taker_client, maker_client, returned_sell_order, pair, 'buy')
-                        sell_exists = False
-
-                    except (ccxt.BadRequest, ccxt.ExchangeError) as error:
-                        logger.info(error)
-                        print(f'Order has been fully filled, taking {returned_sell_order["amount"]}')
-
-                        if await check_and_take(taker_client, maker_client, returned_sell_order, pair, 'buy'):
-                            logger.info('Was filled in the mean time, C&T')
-                            sell_exists = False
+                await cancel_order_abstraction(maker_client, returned_sell_order, pair)
+                await check_and_take(taker_client, maker_client, returned_sell_order, pair)
+                sell_exists = False
 
         # Buy side arbitrage
 
@@ -364,12 +314,13 @@ async def make_and_take(taker_client, maker_client, config, pair):
             # Includes a custom clientOrderId to differentiate these orders from hanging taker order.
 
             if not buy_exists:
-                print(f'Make on {maker_client.name}')
-                print(f'Buy {best_bid_maker}')
-                logger.info(f'Buy on {maker_client.name}, buy {best_bid_maker}')
+                print(f'Making on {maker_client.name}')
+                print(f'Buying {best_bid_maker}')
+                logger.info(f'Buying on {maker_client.name}, buying {best_bid_maker}')
 
                 if await check_if_solvent(maker_client, taker_client, best_bid_maker, optimal_buy_size, pair=pair):
-                    returned_buy_order = await create_order_abstraction(taker_client, maker_client, best_bid_maker, optimal_buy_size, pair, 'buy')
+                    returned_buy_order = await create_and_return_order_abstraction( maker_client, best_bid_maker, optimal_buy_size, pair, 'buy')
+                    buy_exists = True
 
                 else:
                     print('Insufficient funds!')
@@ -382,30 +333,13 @@ async def make_and_take(taker_client, maker_client, config, pair):
                 print('Order no longer at top of bids, cancelling.')
                 logger.info('Order no longer at top of bids, cancelling.')
 
-                try:
-
-                    # If the order is partially filled, start the take process.
-
-                    await maker_client.cancel_order(id=returned_buy_order['id'], symbol=pair)
-                    await check_and_take(taker_client, maker_client, returned_buy_order, pair, 'sell')
-
-                    buy_exists = False
-
-                except (ccxt.BadRequest, ccxt.ExchangeError) as error:
-                    logger.info(error)
-                    print(f'Order has been fully filled, taking {returned_buy_order["amount"]}')
-
-                    if await check_and_take(taker_client, maker_client, returned_buy_order, pair, 'sell'):
-                        buy_exists = False
-                        logger.info('Was filled in the mean time, C&T')
-                    else:
-                        time.sleep(0.2)
-                        await maker_client.cancel_order(id=returned_buy_order['id'], symbol=pair)
-                        logger.info('Double tap cancel')
-
+                await cancel_order_abstraction(maker_client, returned_buy_order, pair)
+                await check_and_take(taker_client, maker_client, returned_buy_order, pair)
+                buy_exists = False
 
                 if await check_if_solvent(maker_client, taker_client, best_bid_maker, optimal_buy_size, pair=pair):
-                    returned_buy_order = await create_order_abstraction(taker_client, maker_client, best_bid_maker, optimal_buy_size, pair, 'buy')
+                    returned_buy_order = await create_and_return_order_abstraction(maker_client, best_bid_maker, optimal_buy_size, pair, 'buy')
+                    buy_exists = True
 
                 else:
                     print('Insufficient funds!')
@@ -417,30 +351,13 @@ async def make_and_take(taker_client, maker_client, config, pair):
                 print('Order no longer within acceptable size range, cancelling.')
                 logger.info('Order no longer within acceptable size range, cancelling.')
 
+                await cancel_order_abstraction(maker_client, returned_buy_order, pair)
+                await check_and_take(taker_client, maker_client, returned_buy_order, pair)
                 buy_exists = False
 
-                try:
-
-                    # If the order is partially filled, start the take process.
-
-                    await maker_client.cancel_order(id=returned_buy_order['id'], symbol=pair)
-                    await check_and_take(taker_client, maker_client, returned_buy_order, pair, 'sell')
-
-
-                except (ccxt.BadRequest, ccxt.ExchangeError) as error:
-                    logger.info(error)
-                    print(f'Order has been fully filled, taking {returned_buy_order["amount"]}')
-
-                    if await check_and_take(taker_client, maker_client, returned_buy_order, pair, 'sell'):
-                        buy_exists = False
-                        logger.info('Was filled in the mean time, C&T')
-                    else:
-                        time.sleep(0.2)
-                        await maker_client.cancel_order(id=returned_buy_order['id'], symbol=pair)
-                        logger.info('Double tap cancel')
-
                 if await check_if_solvent(maker_client, taker_client, best_bid_maker, optimal_buy_size, pair=pair):
-                    returned_buy_order = await create_order_abstraction(taker_client, maker_client, best_bid_maker, optimal_buy_size, pair, 'buy')
+                    returned_buy_order = await create_and_return_order_abstraction(maker_client, best_bid_maker, optimal_buy_size, pair, 'buy')
+                    buy_exists = True
 
                 else:
                     print('Insufficient funds!')
@@ -454,7 +371,7 @@ async def make_and_take(taker_client, maker_client, config, pair):
 
                 # Check if some of the order has been filled. If yes, the order is cancelled and the flag removed.
 
-                if await check_and_take(taker_client, maker_client, returned_buy_order, pair, 'sell'):
+                if await check_and_take(taker_client, maker_client, returned_buy_order, pair):
                     buy_exists = False
                     logger.info(f"C&T, buy doesn't exist anymore")
 
@@ -463,31 +380,13 @@ async def make_and_take(taker_client, maker_client, config, pair):
             # The arbitrage condition is no longer there, cancel open orders after checking them.
 
             buy_arbitrage = False
-            logger.info('Arb now false')
+            logger.info('Buy arb now false')
 
             if buy_exists:
 
-                if await check_and_take(taker_client, maker_client, returned_buy_order, pair, 'sell'):
-                    buy_exists = False
-                    logger.info('C&T success, buy no longer exists')
+                print('No more arb, cancelling buys.')
+                logger.info('No more arb, cancelling buys.')
 
-                else:
-                    print('No more arb, cancelling buys.')
-                    logger.info('No more arb, cancelling buys.')
-
-                    try:
-
-                        # If the order is partially filled, start the take process.
-
-                        await maker_client.cancel_order(id=returned_buy_order['id'], symbol=pair)
-                        await check_and_take(taker_client, maker_client, returned_buy_order, pair, 'sell')
-
-                        buy_exists = False
-
-                    except (ccxt.BadRequest, ccxt.ExchangeError) as error:
-                        logger.info(error)
-                        print(f'Order has been fully filled, taking {returned_buy_order["amount"]}')
-
-                        if await check_and_take(taker_client, maker_client, returned_buy_order, pair, 'sell'):
-                            logger.info('Was filled in the mean time, C&T')
-                            buy_exists = False
+                await cancel_order_abstraction(maker_client, returned_buy_order, pair)
+                await check_and_take(taker_client, maker_client, returned_buy_order, pair)
+                buy_exists = False
