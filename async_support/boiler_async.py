@@ -184,8 +184,11 @@ async def check_if_solvent(buy_client, sell_client, price, quantity, pair):
 
         if (quantity * price * 2 < buy_client_balance[quote_asset]['free']
                 and quantity * 2 < sell_client_balance[base_asset]['free']):
+            logger.info(f'Check if solvent success.')
             return True
         else:
+            print('Insufficient funds!')
+            logger.info(f'Insufficient funds!')
             return False
 
     except KeyError:
@@ -304,6 +307,8 @@ def within_percentage_range(x, y, percentage):
 
 
 async def create_and_return_order_abstraction(maker_client, price, size, pair, side):
+    """This function contains all the steps necessary for the creation and safe retrieval of a maker order.
+    Includes a retry mechanism."""
 
     # Some exchanges only respond with an order id, hence the code complication with the ['id']
     # to retrieve a full object
@@ -320,37 +325,85 @@ async def create_and_return_order_abstraction(maker_client, price, size, pair, s
                                                        params={'clientOrderId': f't-{order_time()}_{identifier}'})
 
     # Retrying in case of error
-
-    try:
-        returned_order = await maker_client.fetch_order(id=order['id'], symbol=pair)
-        logger.info(f'Solvent, sell order created')
-    except ccxt.ExchangeError as error:
-        print('Order fetch failed, trying again.')
-        time.sleep(0.2)
-        logger.info('Order fetch failed, trying again.')
-        logger.info(error)
+    for attempt in range(5):
+        logger.info(f'Trying to fetch order. Attempt n.{attempt + 1}')
         try:
             returned_order = await maker_client.fetch_order(id=order['id'], symbol=pair)
-            logger.info(f'Solvent, {side} order created')
+            logger.info(f'Solvent, sell order created')
+            return returned_order
         except ccxt.ExchangeError as error:
-            logger.info('Order fetch failed again.')
-            logger.info(error)
+            print(f'Order fetch failed, trying again. Attempt n.{attempt + 1}')
             time.sleep(0.2)
-            returned_order = await maker_client.fetch_order(id=order['id'], symbol=pair)
+            logger.info('Order fetch failed, trying again.')
+            logger.info(error)
 
-    return returned_order
+    logger.info('All order fetch retries were unsuccessful.')
+    raise ccxt.ExchangeError('All order fetch retries were unsuccessful.')
+
+
+
 
 
 async def cancel_order_abstraction(maker_client, order, pair):
+    """This function represents to steps needed to safely cancel an order, with the needed exceptions.
+    It includes a retry logic with a maximum amount of attempts."""
 
-    logger.info('Trying to cancel order.')
+
+    for attempt in range(5):
+
+        logger.info(f'Trying to cancel order. Attempt n.{attempt + 1}')
+        try:
+            await maker_client.cancel_order(id=order['id'], symbol=pair)
+        except ccxt.BadRequest as e:
+            logger.info(e)
+            logger.info('Order was likely fully filled.')
+        except ccxt.ExchangeError as e:
+            logger.info(e)
+            logger.info('Order likely not found, retrying')
+            time.sleep(0.2)
+        else:
+            break
+
+
+async def take_take(buy_client, sell_client, pair, sell_client_bids, buy_client_asks, spread, sizing, max_order_size, spread_extension):
+
     try:
-        await maker_client.cancel_order(id=order['id'], symbol=pair)
-    except ccxt.BadRequest as e:
-        logger.info(e)
-        logger.info('Order was likely fully filled.')
-    except ccxt.ExchangeError as e:
-        logger.info(e)
-        logger.info('Order likely not found, retrying')
-        time.sleep(0.2)
-        await maker_client.cancel_order(id=order['id'], symbol=pair)
+
+        taker_target_ask, taker_target_bid, taker_order_size = order_book_matcher(sell_client_bids, buy_client_asks,
+                                                                                  spread, sizing,
+                                                                                  max_order_size,
+                                                                                  extend_spread=spread_extension)
+
+        if await check_if_solvent(buy_client, sell_client,
+                                  quantity=taker_order_size, price=taker_target_ask, pair=pair):
+            try:
+                take_take_order_id = f't-{order_time()}_tt'
+
+                order_batch = asyncio.gather(
+                    place_buy_order(pair, buy_client, taker_target_ask, taker_order_size, take_take_order_id),
+                    place_sell_order(pair, sell_client, taker_target_bid, taker_order_size,
+                                     take_take_order_id))
+                await order_batch
+
+                # Returning True allows to check the orders were placed, for example to prioritize execution.
+
+                return True
+
+                # The continue statement puts the priority on taking whenever possible,
+                # since it is most efficient. Downside is that some orders may remain stuck
+                # if the account is no longer solvent.
+
+            except RuntimeError:
+                print("Going too fast.")
+                time.sleep(10)
+        else:
+            return False
+
+    except TypeError:
+        print("Could not match order books.")
+
+    except AttributeError:
+        print('Attribute error')
+
+    except IndexError:
+        (print('End of orderbook'))
