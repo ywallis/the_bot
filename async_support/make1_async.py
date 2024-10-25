@@ -6,6 +6,9 @@ from boiler_async import (check_and_take, check_if_solvent, maker_order_sizer, w
 from datetime import datetime
 import time
 import logging
+from ccxt.base.types import Order
+from ccxt.base.exchange import Exchange
+
 
 logger = logging.getLogger(__name__)
 
@@ -15,28 +18,28 @@ async def make_and_take(taker_client, maker_client, config, pair):
     1. A taker logic, acting immediately in two order books in case a profitable imbalance is spotted.
     2. A maker1 logic, offering liquidity on one side, if the position can be hedged profitably on the other."""
 
-    taker_client = taker_client
-    maker_client = maker_client
-    maker_spread = config['maker_spread']
-    maker_size = config['maker_size']
-    maker_min_size = config['min_maker_size']
-    taker_spread = config['taker_spread']
-    taker_sizing = config['taker_sizing']
-    taker_max_order_size = config['taker_max_order_size']
-    taker_only = config['taker_only']
-    spread_extension = config['spread_extension']
+    taker_client: Exchange = taker_client
+    maker_client: Exchange = maker_client
+    maker_spread: float = config['maker_spread']
+    maker_size: float = config['maker_size']
+    maker_min_size: float = config['min_maker_size']
+    taker_spread: float = config['taker_spread']
+    taker_sizing: float = config['taker_sizing']
+    taker_max_order_size: float = config['taker_max_order_size']
+    taker_only: bool = config['taker_only']
+    spread_extension: int = config['spread_extension']
 
-    buy_exists = False
-    sell_exists = False
-    returned_buy_order = None
-    returned_sell_order = None
-    watching = True
+    buy_exists: bool = False
+    sell_exists: bool = False
+    returned_buy_order: Order = Order
+    returned_sell_order: Order = Order
+    watching: bool = True
 
     # Arbitrage set to true for taker_only loops
 
-    buy_arbitrage = True
-    sell_arbitrage = True
-    open_orders = await maker_client.fetch_open_orders(pair)
+    buy_arbitrage: bool = True
+    sell_arbitrage: bool = True
+    open_orders: list[Order] = await maker_client.fetch_open_orders(pair)
 
     # Check for hanging orders in case of errors
 
@@ -79,15 +82,15 @@ async def make_and_take(taker_client, maker_client, config, pair):
         batch = asyncio.gather(taker_client.fetch_order_book(pair), maker_client.fetch_order_book(pair))
         taker_order_book, maker_order_book = await batch
 
-        taker_client_bids = taker_order_book['bids']
-        taker_client_asks = taker_order_book['asks']
-        maker_client_bids = maker_order_book['bids']
-        maker_client_asks = maker_order_book['asks']
+        taker_client_bids: list[list] = taker_order_book['bids']
+        taker_client_asks: list[list] = taker_order_book['asks']
+        maker_client_bids: list[list] = maker_order_book['bids']
+        maker_client_asks: list[list] = maker_order_book['asks']
 
-        best_bid_taker = taker_client_bids[0][0]
-        best_ask_taker = taker_client_asks[0][0]
-        best_bid_maker = maker_client_bids[0][0]
-        best_ask_maker = maker_client_asks[0][0]
+        best_bid_taker: float = taker_client_bids[0][0]
+        best_ask_taker: float = taker_client_asks[0][0]
+        best_bid_maker: float = maker_client_bids[0][0]
+        best_ask_maker: float = maker_client_asks[0][0]
 
         all_bids = {taker_client.name: best_bid_taker, maker_client.name: best_bid_maker}
         all_asks = {taker_client.name: best_ask_taker, maker_client.name: best_ask_maker}

@@ -36,7 +36,7 @@ ALPH = {'pair': 'ALPH/USDT',
 
 ALPH_test = {'pair': 'ALPH/USDT',
              'name': 'ALPH_test',
-             'production': False,
+             'production': True,
              'low_balance_threshold': 10,
              'taker_exchange': {'id': 'gate',
                                 'key': gateio_key_test,

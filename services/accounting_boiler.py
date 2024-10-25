@@ -151,7 +151,6 @@ def unaddressed_imbalances(pair, imbalances, orders):
     # Core loop, iterates over all imbalances and checks for a pending order. If none exists, they will be counted.
 
     for order_no in imbalance_dict.keys():
-        side = ""
 
         if order_no not in orders:
 

@@ -1,7 +1,5 @@
 import os
 import sys
-import ccxt
-from datetime import datetime
 
 # Adding directory to PATH
 sys.path.append(".")

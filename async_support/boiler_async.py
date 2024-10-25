@@ -1,18 +1,21 @@
 import asyncio
 import logging
 import time
+
 import ccxt.async_support as ccxt
 from datetime import datetime
-
+from ccxt.base.types import Order, OrderSide
+from ccxt.base.exchange import Exchange
 
 logger = logging.getLogger(__name__)
 
 # GROSS! FIX
-gate_fee = 0.001
-bitget_fee = 0.001
+gate_fee: float = 0.001
+bitget_fee: float = 0.001
 
-def order_book_matcher(bids, asks, spread, sizing, max_order_size, min_order_size=0.01, extend_spread=0):
 
+def order_book_matcher(bids: list[list[float]], asks: list[list[float]], spread: float, sizing: float,
+                       max_order_size: float, min_order_size=0.01, extend_spread=0) -> tuple[float, float, float]:
     """This function takes in two order books sides represented by lists.
     It will then go both lists, and generate a target ask, target bid, and appropriate size to
     extract maximum value from both books. Other inputs are floats.
@@ -21,11 +24,11 @@ def order_book_matcher(bids, asks, spread, sizing, max_order_size, min_order_siz
 
     # REMOVE MIN ORDER DEFAULT EVENTUALLY
 
-    dynamic_arb = True
-    bid_counter = 0
-    ask_counter = 0
-    cumulative_bid = 0
-    cumulative_ask = 0
+    dynamic_arb: bool = True
+    bid_counter: int = 0
+    ask_counter: int = 0
+    cumulative_bid: float = 0
+    cumulative_ask: float = 0
 
     while dynamic_arb:
 
@@ -105,19 +108,18 @@ def order_book_matcher(bids, asks, spread, sizing, max_order_size, min_order_siz
             dynamic_arb = False
 
 
-async def place_sell_order(pair, client, price, quantity, identifier):
-
+async def place_sell_order(pair: str, client: Exchange, price: float, quantity: float, identifier: str) -> Order:
     """This function places a sell limit order using a CCXT client.
     It then outputs a confirmation of that order to the console and logs."""
 
     print(f'Placing a {quantity} {pair} sell order on {client.name} for {price}.')
     logger.info(f'Placing a {quantity} {pair} sell order on {client.name} for {price}.')
-    order = await client.create_limit_order(symbol=pair, side='sell', amount=quantity, price=price,
-                                     params={'clientOrderId': identifier})
+    order: Order = await client.create_limit_order(symbol=pair, side='sell', amount=quantity, price=price,
+                                                   params={'clientOrderId': identifier})
     return order
 
 
-async def place_buy_order(pair, client, price, quantity, identifier):
+async def place_buy_order(pair: str, client: Exchange, price: float, quantity: float, identifier: str) -> Order:
     """This function places a buy limit order using a CCXT client.
     It then outputs a confirmation of that order to the console and logs.
     It includes a modification for exchanges using the base asset for fees,
@@ -133,8 +135,8 @@ async def place_buy_order(pair, client, price, quantity, identifier):
         print(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
         logger.info(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
 
-        order = await client.create_limit_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price,
-                                         params={'clientOrderId': identifier})
+        order: Order = await client.create_limit_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price,
+                                                       params={'clientOrderId': identifier})
         return order
 
     elif client.name == 'Bitget':
@@ -147,8 +149,8 @@ async def place_buy_order(pair, client, price, quantity, identifier):
         print(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
         logger.info(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
 
-        order = await client.create_limit_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price,
-                                         params={'clientOrderId': identifier})
+        order: Order = await client.create_limit_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price,
+                                                       params={'clientOrderId': identifier})
         return order
 
     else:
@@ -156,21 +158,21 @@ async def place_buy_order(pair, client, price, quantity, identifier):
         print(f'Placing a {quantity} {pair} buy order on {client.name} for {price}.')
         logger.info(f'Placing a {quantity} {pair} buy order on {client.name} for {price}.')
 
-        order = await client.create_limit_order(symbol=pair, side='buy', amount=quantity, price=price,
-                                         params={'clientOrderId': identifier})
+        order: Order = await client.create_limit_order(symbol=pair, side='buy', amount=quantity, price=price,
+                                                       params={'clientOrderId': identifier})
 
         return order
 
 
-async def fetch_balances(buy_client, sell_client):
-
+async def fetch_balances(buy_client: Exchange, sell_client: Exchange) -> tuple[list[list], list[list]]:
     batch = asyncio.gather(buy_client.fetch_balance(), sell_client.fetch_balance())
     buy_client_balance, sell_client_balance = await batch
 
     return buy_client_balance, sell_client_balance
 
 
-async def check_if_solvent(buy_client, sell_client, price, quantity, pair):
+async def check_if_solvent(buy_client: Exchange, sell_client: Exchange, price: float, quantity: float,
+                           pair: str) -> bool:
     """This function checks if two exchanges have the necessary balances to place
     two arbitrage orders in their relevant assets."""
 
@@ -200,8 +202,7 @@ async def check_if_solvent(buy_client, sell_client, price, quantity, pair):
         return False
 
 
-async def check_and_take(client_a, client_b, order, pair):
-
+async def check_and_take(client_a: Exchange, client_b: Exchange, order: Order, pair: str) -> bool:
     """This function checks if a placed maker order has been filled or partially filled
     and generates an equivalent taker order on another exchange."""
 
@@ -211,10 +212,10 @@ async def check_and_take(client_a, client_b, order, pair):
 
     if func_order['side'] == 'buy':
 
-        market_side = 'sell'
+        market_side: OrderSide = 'sell'
 
     else:
-        market_side = 'buy'
+        market_side: OrderSide = 'buy'
 
     filled = float(func_order['filled'])
     print(f'{filled} from order filled')
@@ -241,7 +242,6 @@ async def check_and_take(client_a, client_b, order, pair):
         # adding stable inventory condition for gateio
 
         if market_side == 'buy' and client_a.name == 'Gate.io':
-
             # Apply current fee level to keep stable inventory
             fee_ratio = 1 / (1 - gate_fee)
 
@@ -255,25 +255,24 @@ async def check_and_take(client_a, client_b, order, pair):
         # Targeting best price on taker exchange here would help keep inventory stable.
 
         await client_a.create_market_order(symbol=pair, side=market_side, amount=filled, price=order['price'],
-                                     params={'clientOrderId': func_order['clientOrderId']})
+                                           params={'clientOrderId': func_order['clientOrderId']})
         print(f'Market {market_side} {filled} {pair} on {client_b.name}')
 
         return True
 
 
-def order_time():
-
+def order_time() -> str:
     """Creates a datetime-based stamp to make unique and custom order numbers."""
 
     return datetime.now().strftime('%y%m%d_%H%M%S_%f')
 
 
-def maker_order_sizer(maker_level, taker_book, side, min_spread, min_maker_size, max_maker_size):
-
+def maker_order_sizer(maker_level: float, taker_book: list[list], side: OrderSide, min_spread: float,
+                      min_maker_size: float, max_maker_size: float) -> float:
     """NEEDS FLESHING OUT!
     Goal of function is to watch how much liquidity is available on the taker client within the defined spread."""
 
-    cumulative = 0
+    cumulative: float = 0
     if side == 'sell':
         for level in taker_book:
             if maker_level >= level[0] * min_spread:
@@ -296,8 +295,7 @@ def maker_order_sizer(maker_level, taker_book, side, min_spread, min_maker_size,
         return cumulative
 
 
-def within_percentage_range(x, y, percentage):
-
+def within_percentage_range(x: float, y: float, percentage: float) -> bool:
     """Function checks whether x is within a definable percentage range from y."""
 
     lower_bound = y * (1 - percentage / 100)
@@ -306,7 +304,8 @@ def within_percentage_range(x, y, percentage):
     return lower_bound <= x <= upper_bound
 
 
-async def create_and_return_order_abstraction(maker_client, price, size, pair, side):
+async def create_and_return_order_abstraction(maker_client: Exchange, price: float, size: float, pair: str,
+                                              side: OrderSide) -> Order:
     """This function contains all the steps necessary for the creation and safe retrieval of a maker order.
     Includes a retry mechanism."""
 
@@ -322,10 +321,10 @@ async def create_and_return_order_abstraction(maker_client, price, size, pair, s
     logger.info(f'Making on {maker_client.name}, {side}ing {price}')
 
     order = await maker_client.create_limit_order(symbol=pair,
-                                                       side=side,
-                                                       amount=size,
-                                                       price=price,
-                                                       params={'clientOrderId': f't-{order_time()}_{identifier}'})
+                                                  side=side,
+                                                  amount=size,
+                                                  price=price,
+                                                  params={'clientOrderId': f't-{order_time()}_{identifier}'})
 
     # Retrying in case of error
     for attempt in range(5):
@@ -344,13 +343,9 @@ async def create_and_return_order_abstraction(maker_client, price, size, pair, s
     raise ccxt.ExchangeError('All order fetch retries were unsuccessful.')
 
 
-
-
-
-async def cancel_order_abstraction(maker_client, order, pair):
+async def cancel_order_abstraction(maker_client: Exchange, order: Order, pair: str):
     """This function represents to steps needed to safely cancel an order, with the needed exceptions.
     It includes a retry logic with a maximum amount of attempts."""
-
 
     for attempt in range(5):
 
@@ -365,13 +360,14 @@ async def cancel_order_abstraction(maker_client, order, pair):
             logger.warning('Order likely not found, retrying')
             time.sleep(0.2)
         else:
-            break
+            return
 
     logger.error('Order could not be cancelled after multiple retries.')
 
 
-async def take_take(buy_client, sell_client, pair, sell_client_bids, buy_client_asks, spread, sizing, max_order_size, spread_extension):
-
+async def take_take(buy_client: Exchange, sell_client: Exchange, pair: str, sell_client_bids: list[list],
+                    buy_client_asks: list[list], spread: float, sizing: float, max_order_size: float,
+                    spread_extension: int) -> bool:
     try:
 
         taker_target_ask, taker_target_bid, taker_order_size = order_book_matcher(sell_client_bids, buy_client_asks,

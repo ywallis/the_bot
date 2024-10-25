@@ -21,7 +21,6 @@ pg_config = dotenv_values(f'..{config_path}')
 def get_history(client, start_date_str):
 
     start_date = datetime.strptime(start_date_str, '%d/%m/%y')
-    start_date_utc = pytz.timezone('UTC').localize(start_date)
     loop_start = start_date
     original_loop_size = timedelta(minutes=30)
     loop_size = original_loop_size
