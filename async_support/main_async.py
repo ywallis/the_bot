@@ -35,8 +35,15 @@ instance_config = strategy['maker_exchanges'][maker_client_index]['settings']
 today = str(date.today())
 now = datetime.now()
 
-logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.DEBUG,
-                    filename=f'../Logs/{today}_maker_{strategy['name']}_{maker_client.name}.txt')
+if strategy['production']:
+
+    logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.WARNING,
+                        filename=f'../Logs/{today}_maker_{strategy['name']}_{maker_client.name}.txt')
+
+else:
+    logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.DEBUG,
+                        filename=f'../Logs/{today}_maker_{strategy['name']}_{maker_client.name}.txt')
+
 logger = logging.getLogger(__name__)
 
 
@@ -54,25 +61,25 @@ async def main_loop():
 
         except ccxt.NetworkError as e:
             print('Main loop level Network error')
-            logger.info('Main loop level Network error')
-            logger.info(e)
+            logger.error('Main loop level Network error')
+            logger.error(e)
 
         except ccxt.ExchangeError as e:
 
             # Has happened because of too many requests.
             time.sleep(5)
             print('Main loop level Exchange error')
-            logger.info('Main loop level Exchange error')
-            logger.info(e)
+            logger.error('Main loop level Exchange error')
+            logger.error(e)
 
         except TypeError as e:
             print('Main loop level type error, probably coroutine')
-            logger.info('Main loop level type error, probably coroutine')
-            logger.info(e)
+            logger.error('Main loop level type error, probably coroutine')
+            logger.error(e)
         except RuntimeError as e:
             print('Main loop level Runtime error')
-            logger.info('Main loop level Runtime error')
-            logger.info(e)
+            logger.error('Main loop level Runtime error')
+            logger.error(e)
 
 if __name__ == '__main__':
     print(f'Running strategy {strategy['pair']}, production is {str(strategy['production'])}')

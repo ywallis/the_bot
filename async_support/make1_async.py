@@ -1,7 +1,7 @@
 import asyncio
 
-from boiler_async import (check_and_take, check_if_solvent, place_buy_order, place_sell_order, order_book_matcher,
-                          order_time, maker_order_sizer, within_percentage_range, create_and_return_order_abstraction,
+from boiler_async import (check_and_take, check_if_solvent, maker_order_sizer, within_percentage_range,
+                          create_and_return_order_abstraction,
                           cancel_order_abstraction, take_take)
 from datetime import datetime
 import time
@@ -109,92 +109,16 @@ async def make_and_take(taker_client, maker_client, config, pair):
 
             # Using take_take as an if condition allows us to prioritize execution over the rest of the code.
 
-            if await take_take(taker_client, maker_client, pair, maker_client_bids, taker_client_asks, taker_spread, taker_sizing, taker_max_order_size, spread_extension):
-
+            if await take_take(taker_client, maker_client, pair, maker_client_bids, taker_client_asks, taker_spread,
+                               taker_sizing, taker_max_order_size, spread_extension):
                 continue
-
-            # try:
-            #
-            #     taker_target_ask, taker_target_bid, taker_order_size = order_book_matcher(maker_client_bids, taker_client_asks,
-            #                                                                               taker_spread, taker_sizing,
-            #                                                                               taker_max_order_size,
-            #                                                                               extend_spread=spread_extension)
-            #
-            #     if await check_if_solvent(taker_client, maker_client,
-            #                               quantity=taker_order_size, price=taker_target_ask, pair=pair):
-            #         try:
-            #             take_take_order_id = f't-{order_time()}_tt'
-            #
-            #             order_batch = asyncio.gather(
-            #                 place_buy_order(pair, taker_client, taker_target_ask, taker_order_size, take_take_order_id),
-            #                 place_sell_order(pair, maker_client, taker_target_bid, taker_order_size,
-            #                                  take_take_order_id))
-            #             await order_batch
-            #
-            #             # The continue statement puts the priority on taking whenever possible,
-            #             # since it is most efficient. Downside is that some orders may remain stuck
-            #             # if the account is no longer solvent.
-            #
-            #             continue
-            #
-            #         except RuntimeError:
-            #             print("Going too fast.")
-            #             time.sleep(10)
-            #
-            # except TypeError:
-            #     print("Could not match order books.")
-            #
-            # except AttributeError:
-            #     print('Attribute error')
-            #
-            # except IndexError:
-            #     (print('End of orderbook'))
-
-        # Start take_take with client_b as buyer, client_a as seller.
 
         if best_bid_taker >= best_ask_maker * taker_spread:
 
-            if await take_take(maker_client, taker_client, pair, taker_client_bids, maker_client_asks, taker_spread, taker_sizing,
+            if await take_take(maker_client, taker_client, pair, taker_client_bids, maker_client_asks, taker_spread,
+                               taker_sizing,
                                taker_max_order_size, spread_extension):
                 continue
-
-            # try:
-            #
-            #     taker_target_ask, taker_target_bid, taker_order_size = order_book_matcher(taker_client_bids, maker_client_asks,
-            #                                                                               taker_spread, taker_sizing,
-            #                                                                               taker_max_order_size,
-            #                                                                               extend_spread=spread_extension)
-            #
-            #     if await check_if_solvent(maker_client, taker_client,
-            #                               quantity=taker_order_size, price=taker_target_ask, pair=pair):
-            #         try:
-            #
-            #             take_take_order_id = f't-{order_time()}_tt'
-            #
-            #             order_batch = asyncio.gather(
-            #                 place_buy_order(pair, maker_client, taker_target_ask, taker_order_size, take_take_order_id),
-            #                 place_sell_order(pair, taker_client, taker_target_bid, taker_order_size,
-            #                                  take_take_order_id))
-            #             await order_batch
-            #
-            #             # The continue statement puts the priority on taking whenever possible,
-            #             # since it is most efficient. Downside is that some orders may remain stuck
-            #             # if the account is no longer solvent.
-            #
-            #             continue
-            #
-            #         except RuntimeError:
-            #             print("Going too fast.")
-            #             time.sleep(10)
-            #
-            # except TypeError:
-            #     print("Could not match order books.")
-            #
-            # except AttributeError:
-            #     print('Attribute error')
-            #
-            # except IndexError:
-            #     (print('End of orderbook'))
 
         # Function loops here for taker_only
 
@@ -211,18 +135,19 @@ async def make_and_take(taker_client, maker_client, config, pair):
 
             # Calculate the current optimal order size
 
-            optimal_sell_size = maker_order_sizer(best_ask_maker, taker_client_asks, "sell", maker_spread, maker_min_size,
+            optimal_sell_size = maker_order_sizer(best_ask_maker, taker_client_asks, "sell", maker_spread,
+                                                  maker_min_size,
                                                   maker_size)
 
             print(f'Optimal order size currently {optimal_sell_size}')
+            logger.info(f'Optimal order size currently {optimal_sell_size}')
 
             # If the flag for an existing sell doesn't exist yet, create a sell order at the bottom ask.
             # Includes a custom clientOrderId to differentiate these orders from hanging taker order.
 
             if not sell_exists:
-                print(f'Make on {maker_client.name}')
-                print(f'Selling {best_ask_maker}')
-                logger.info(f'Selling on {maker_client.name}, selling {best_ask_maker}')
+
+                logger.info(f'Sell does not exist')
 
                 if await check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
                     returned_sell_order = await create_and_return_order_abstraction(maker_client, best_ask_maker,
@@ -307,9 +232,8 @@ async def make_and_take(taker_client, maker_client, config, pair):
             # Includes a custom clientOrderId to differentiate these orders from hanging taker order.
 
             if not buy_exists:
-                print(f'Making on {maker_client.name}')
-                print(f'Buying {best_bid_maker}')
-                logger.info(f'Buying on {maker_client.name}, buying {best_bid_maker}')
+
+                logger.info(f'Buy does not exist')
 
                 if await check_if_solvent(maker_client, taker_client, best_bid_maker, optimal_buy_size, pair=pair):
                     returned_buy_order = await create_and_return_order_abstraction(maker_client, best_bid_maker,

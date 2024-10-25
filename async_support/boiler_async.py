@@ -318,6 +318,9 @@ async def create_and_return_order_abstraction(maker_client, price, size, pair, s
     else:
         identifier = 'eb'
 
+    print(f'Making on {maker_client.name}, {side}ing {price}')
+    logger.info(f'Making on {maker_client.name}, {side}ing {price}')
+
     order = await maker_client.create_limit_order(symbol=pair,
                                                        side=side,
                                                        amount=size,
@@ -334,10 +337,10 @@ async def create_and_return_order_abstraction(maker_client, price, size, pair, s
         except ccxt.ExchangeError as error:
             print(f'Order fetch failed, trying again. Attempt n.{attempt + 1}')
             time.sleep(0.2)
-            logger.info('Order fetch failed, trying again.')
-            logger.info(error)
+            logger.warning('Order fetch failed, trying again.')
+            logger.warning(error)
 
-    logger.info('All order fetch retries were unsuccessful.')
+    logger.error('All order fetch retries were unsuccessful.')
     raise ccxt.ExchangeError('All order fetch retries were unsuccessful.')
 
 
@@ -358,11 +361,13 @@ async def cancel_order_abstraction(maker_client, order, pair):
             logger.info(e)
             logger.info('Order was likely fully filled.')
         except ccxt.ExchangeError as e:
-            logger.info(e)
-            logger.info('Order likely not found, retrying')
+            logger.warning(e)
+            logger.warning('Order likely not found, retrying')
             time.sleep(0.2)
         else:
             break
+
+    logger.error('Order could not be cancelled after multiple retries.')
 
 
 async def take_take(buy_client, sell_client, pair, sell_client_bids, buy_client_asks, spread, sizing, max_order_size, spread_extension):
@@ -393,8 +398,10 @@ async def take_take(buy_client, sell_client, pair, sell_client_bids, buy_client_
                 # since it is most efficient. Downside is that some orders may remain stuck
                 # if the account is no longer solvent.
 
-            except RuntimeError:
+            except RuntimeError as e:
                 print("Going too fast.")
+                logger.warning(e)
+                logger.warning('Likely ordering too fast, sleeping for 10 seconds.')
                 time.sleep(10)
         else:
             return False
