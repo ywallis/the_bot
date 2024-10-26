@@ -149,7 +149,7 @@ async def place_buy_order(pair: str, client: Exchange, price: float, quantity: f
         print(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
         logger.info(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
 
-        order: Order = await client.create_limit_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price,
+        order = await client.create_limit_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price,
                                                        params={'clientOrderId': identifier})
         return order
 
@@ -158,7 +158,7 @@ async def place_buy_order(pair: str, client: Exchange, price: float, quantity: f
         print(f'Placing a {quantity} {pair} buy order on {client.name} for {price}.')
         logger.info(f'Placing a {quantity} {pair} buy order on {client.name} for {price}.')
 
-        order: Order = await client.create_limit_order(symbol=pair, side='buy', amount=quantity, price=price,
+        order = await client.create_limit_order(symbol=pair, side='buy', amount=quantity, price=price,
                                                        params={'clientOrderId': identifier})
 
         return order
@@ -215,7 +215,7 @@ async def check_and_take(client_a: Exchange, client_b: Exchange, order: Order, p
         market_side: OrderSide = 'sell'
 
     else:
-        market_side: OrderSide = 'buy'
+        market_side = 'buy'
 
     filled = float(func_order['filled'])
     print(f'{filled} from order filled')
@@ -259,6 +259,8 @@ async def check_and_take(client_a: Exchange, client_b: Exchange, order: Order, p
         print(f'Market {market_side} {filled} {pair} on {client_b.name}')
 
         return True
+
+    return False
 
 
 def order_time() -> str:
@@ -339,7 +341,8 @@ async def create_and_return_order_abstraction(maker_client: Exchange, price: flo
             logger.warning('Order fetch failed, trying again.')
             logger.warning(error)
 
-    logger.error('All order fetch retries were unsuccessful.')
+    logger.error('All order fetch retries were unsuccessful. Logging order details')
+    logger.error(order)
     raise ccxt.ExchangeError('All order fetch retries were unsuccessful.')
 
 
@@ -357,12 +360,13 @@ async def cancel_order_abstraction(maker_client: Exchange, order: Order, pair: s
             logger.info('Order was likely fully filled.')
         except ccxt.ExchangeError as e:
             logger.warning(e)
-            logger.warning('Order likely not found, retrying')
+            logger.warning('Order likely not found, retrying.')
             time.sleep(0.2)
         else:
             return
 
-    logger.error('Order could not be cancelled after multiple retries.')
+    logger.error('Order could not be cancelled after multiple retries. Logging order details')
+    logger.error(order)
 
 
 async def take_take(buy_client: Exchange, sell_client: Exchange, pair: str, sell_client_bids: list[list],
