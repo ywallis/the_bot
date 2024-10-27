@@ -414,3 +414,5 @@ async def take_take(buy_client: Exchange, sell_client: Exchange, pair: str, sell
 
     except IndexError:
         (print('End of orderbook'))
+
+    return False

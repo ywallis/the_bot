@@ -13,13 +13,13 @@ from ccxt.base.exchange import Exchange
 logger = logging.getLogger(__name__)
 
 
-async def make_and_take(taker_client, maker_client, config, pair):
+async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: dict, pair: str):
     """This function acts as a basic market making system, with the following two logics:
     1. A taker logic, acting immediately in two order books in case a profitable imbalance is spotted.
     2. A maker1 logic, offering liquidity on one side, if the position can be hedged profitably on the other."""
 
-    taker_client: Exchange = taker_client
-    maker_client: Exchange = maker_client
+    taker_client = taker_client
+    maker_client = maker_client
     maker_spread: float = config['maker_spread']
     maker_size: float = config['maker_size']
     maker_min_size: float = config['min_maker_size']
