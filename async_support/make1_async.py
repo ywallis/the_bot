@@ -150,6 +150,7 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
 
             if not sell_exists:
 
+                print(f'Sell does not exist')
                 logger.info(f'Sell does not exist')
 
                 if await check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
@@ -236,6 +237,7 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
 
             if not buy_exists:
 
+                print(f'Buy does not exist')
                 logger.info(f'Buy does not exist')
 
                 if await check_if_solvent(maker_client, taker_client, best_bid_maker, optimal_buy_size, pair=pair):

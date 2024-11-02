@@ -253,10 +253,15 @@ async def check_and_take(client_a: Exchange, client_b: Exchange, order: Order, p
             filled = 3.1 / float(order['price'])
 
         # Targeting best price on taker exchange here would help keep inventory stable.
-
-        await client_a.create_market_order(symbol=pair, side=market_side, amount=filled, price=order['price'],
-                                           params={'clientOrderId': func_order['clientOrderId']})
-        print(f'Market {market_side} {filled} {pair} on {client_b.name}')
+        try:
+            await client_a.create_market_order(symbol=pair, side=market_side, amount=filled, price=order['price'],
+                                               params={'clientOrderId': func_order['clientOrderId']})
+            print(f'Market {market_side} {filled} {pair} on {client_b.name}')
+        except ccxt.errors.InsufficientFunds as e:
+            print('Not enough funds to equalize! Logging order details.')
+            logger.error('Not enough funds to equalize! Logging order details')
+            logger.error(e)
+            logger.error(func_order)
 
         return True
 

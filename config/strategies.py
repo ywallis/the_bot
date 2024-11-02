@@ -68,8 +68,8 @@ ALPH_test = {'pair': 'ALPH/USDT',
                                                'spread_extension': 1}
                                   }]}
 
-AGI = {'pair': 'AGI/USDT',
-       'name': 'AGI',
+TOMI = {'pair': 'TOMI/USDT',
+       'name': 'TOMI',
        'production': True,
        'low_balance_threshold': 0,
        'taker_exchange': {'id': 'gate',
@@ -90,18 +90,18 @@ AGI = {'pair': 'AGI/USDT',
                          'spread_extension': 2,
                          }
             },
-           # {'id': 'bitget',
-           #  'key': bitget_key_test,
-           #  'secret': bitget_secret_test,
-           #  'password': bitget_password_test,
-           #  'settings': {'maker_spread': 1.0025,
-           #               'maker_size': 10,
-           #               'taker_spread': 1.0035,
-           #               'taker_sizing': 0.8,
-           #               'taker_max_order_size': 10,
-           #               'taker_only': False,
-           #               'spread_extension': 1}
-           #  }
+           {'id': 'bitget',
+            'key': bitget_key_test,
+            'secret': bitget_secret_test,
+            'password': bitget_password_test,
+            'settings': {'maker_spread': 1.0025,
+                         'maker_size': 10,
+                         'taker_spread': 1.0035,
+                         'taker_sizing': 0.8,
+                         'taker_max_order_size': 10,
+                         'taker_only': False,
+                         'spread_extension': 1}
+            }
        ]}
 
 HBAR = {'pair': 'HBAR/USDT',
@@ -140,4 +140,4 @@ HBAR = {'pair': 'HBAR/USDT',
             #  }
         ]}
 
-deployed_strategies = {'ALPH': ALPH, 'ALPH_test': ALPH_test, 'AGI': AGI, 'HBAR': HBAR}
+deployed_strategies = {'ALPH': ALPH, 'ALPH_test': ALPH_test, 'TOMI': TOMI}
