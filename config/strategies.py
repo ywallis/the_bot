@@ -68,8 +68,8 @@ ALPH_test = {'pair': 'ALPH/USDT',
                                                'spread_extension': 1}
                                   }]}
 
-TOMI = {'pair': 'TOMI/USDT',
-       'name': 'TOMI',
+PONKE = {'pair': 'PONKE/USDT',
+       'name': 'PONKE',
        'production': True,
        'low_balance_threshold': 0,
        'taker_exchange': {'id': 'gate',
@@ -82,7 +82,7 @@ TOMI = {'pair': 'TOMI/USDT',
             'key': mexc_key_test,
             'secret': mexc_secret_test,
             'settings': {'maker_spread': 1.0025,
-                         'maker_size': 10,
+                         'maker_size': 30,
                          'taker_spread': 1.0035,
                          'taker_sizing': 0.8,
                          'taker_max_order_size': 10,
@@ -140,4 +140,4 @@ HBAR = {'pair': 'HBAR/USDT',
             #  }
         ]}
 
-deployed_strategies = {'ALPH': ALPH, 'ALPH_test': ALPH_test, 'TOMI': TOMI}
+deployed_strategies = {'ALPH': ALPH, 'ALPH_test': ALPH_test, 'PONKE': PONKE}
