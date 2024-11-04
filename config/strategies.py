@@ -85,23 +85,23 @@ PONKE = {'pair': 'PONKE/USDT',
                          'maker_size': 30,
                          'taker_spread': 1.0035,
                          'taker_sizing': 0.8,
-                         'taker_max_order_size': 10,
+                         'taker_max_order_size': 20,
                          'taker_only': False,
                          'spread_extension': 2,
                          }
             },
-           {'id': 'bitget',
-            'key': bitget_key_test,
-            'secret': bitget_secret_test,
-            'password': bitget_password_test,
-            'settings': {'maker_spread': 1.0025,
-                         'maker_size': 10,
-                         'taker_spread': 1.0035,
-                         'taker_sizing': 0.8,
-                         'taker_max_order_size': 10,
-                         'taker_only': False,
-                         'spread_extension': 1}
-            }
+           # {'id': 'bitget',
+           #  'key': bitget_key_test,
+           #  'secret': bitget_secret_test,
+           #  'password': bitget_password_test,
+           #  'settings': {'maker_spread': 1.0025,
+           #               'maker_size': 10,
+           #               'taker_spread': 1.0035,
+           #               'taker_sizing': 0.8,
+           #               'taker_max_order_size': 10,
+           #               'taker_only': False,
+           #               'spread_extension': 1}
+           #  }
        ]}
 
 HBAR = {'pair': 'HBAR/USDT',
