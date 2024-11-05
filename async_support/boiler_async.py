@@ -257,7 +257,7 @@ async def check_and_take(client_a: Exchange, client_b: Exchange, order: Order, p
             await client_a.create_market_order(symbol=pair, side=market_side, amount=filled, price=order['price'],
                                                params={'clientOrderId': func_order['clientOrderId']})
             print(f'Market {market_side} {filled} {pair} on {client_b.name}')
-        except ccxt.errors.InsufficientFunds as e:
+        except ccxt.InsufficientFunds as e:
             print('Not enough funds to equalize! Logging order details.')
             logger.error('Not enough funds to equalize! Logging order details')
             logger.error(e)
