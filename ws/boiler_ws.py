@@ -69,15 +69,17 @@ async def process_order_update(taker_client, order):
 
 
     # Remove file writes after testing
+    client_order_id = order['clientOrderId']
 
     if order['status'] != 'open':
         if order['filled'] != 0:
-            if order['side'] == 'buy':
+            if client_order_id.endswith('_eb'):
                 with open('buys.txt', 'a') as file:
                     await asyncio.sleep(1)
                     file.write(f'\n{str(order)}')
                     asyncio.create_task(match_buy(taker_client, order))
-            else:
+
+            elif client_order_id.endswith('_es'):
                 with open('sells.txt', 'a') as file:
                     await asyncio.sleep(1)
                     file.write(f'\n{str(order)}')

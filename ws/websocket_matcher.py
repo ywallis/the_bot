@@ -10,31 +10,13 @@ from boiler_ws import process_order_update
 from services.heartbeat import heartbeat_sender
 import threading
 import copy
+import logging
+from datetime import date
 from config.option_picker import strategy_picker, maker_client_picker
 from arb_client_maker import arb_client_maker
-from config.env_var import mexc_key, mexc_secret, bitget_key, bitget_secret, bitget_password, gateio_secret, gateio_key
 
 from datetime import datetime, timezone
 
-
-
-async def loop(maker_client, taker_client, symbol):
-    since = datetime.now(timezone.utc)
-    timestamp = int(since.timestamp() * 1000)
-    while True:
-        orders = await maker_client.watch_orders(symbol, since=timestamp)
-        print('--------------------------------------------------------------')
-        print('Received', len(orders), 'after', maker_client.iso8601 (timestamp))
-        print(orders)
-
-        for order in orders:
-            with open('all_orders.txt', 'a') as file:
-                file.write(f'\n{str(order)}')
-
-            order_copy = copy.deepcopy(order)
-            asyncio.create_task(process_order_update(taker_client, order_copy))
-
-        print('waiting for next update...')
 
 
 ##### THIS SECTION WILL BE REPLACED BY A PARSER
@@ -52,13 +34,39 @@ pair = strategy['pair']
 
 instance_config = strategy['maker_exchanges'][maker_client_index]['settings']
 
+today = str(date.today())
+now = datetime.now()
+
+logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.DEBUG,
+                    filename=f'../Logs/{today}_matcher_{strategy['name']}_{maker_client.name}.txt')
+logger = logging.getLogger(__name__)
+
+async def loop():
+    since = datetime.now(timezone.utc)
+    timestamp = int(since.timestamp() * 1000)
+    while True:
+        orders = await maker_client.watch_orders(pair, since=timestamp)
+        print('--------------------------------------------------------------')
+        print('Received', len(orders), 'after', maker_client.iso8601 (timestamp))
+        print(orders)
+
+        for order in orders:
+
+            logger.info(order)
+
+            order_copy = copy.deepcopy(order)
+            asyncio.create_task(process_order_update(taker_client, order_copy))
+
+        print('waiting for next update...')
+
 async def main():
     try:
-        await loop(maker_client, taker_client, pair)
+        await loop()
     except ccxt.NetworkError as e:
-        print('Network error, ghetto logging.')
-        with open('disconnect.txt', 'a') as file:
-            file.write(f'\n{e}')
+        print('Network error, logging.')
+        logger.error('Network error')
+        logger.error(e)
+
     await maker_client.close()
 
 

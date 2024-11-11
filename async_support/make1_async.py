@@ -28,6 +28,7 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
     taker_max_order_size: float = config['taker_max_order_size']
     taker_only: bool = config['taker_only']
     spread_extension: int = config['spread_extension']
+    ws_matcher_active: bool = config['ws_matcher_active']
 
     buy_exists: bool = False
     sell_exists: bool = False
@@ -171,7 +172,8 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
                 logger.info('Order no longer at bottom of asks, cancelling.')
 
                 await cancel_order_abstraction(maker_client, returned_sell_order, pair)
-                await check_and_take(taker_client, maker_client, returned_sell_order, pair)
+                if not ws_matcher_active:
+                    await check_and_take(taker_client, maker_client, returned_sell_order, pair)
                 sell_exists = False
 
                 if await check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
@@ -187,7 +189,8 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
                 logger.info('Order no longer within acceptable size range, cancelling.')
 
                 await cancel_order_abstraction(maker_client, returned_sell_order, pair)
-                await check_and_take(taker_client, maker_client, returned_sell_order, pair)
+                if not ws_matcher_active:
+                    await check_and_take(taker_client, maker_client, returned_sell_order, pair)
                 sell_exists = False
 
                 if await check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
@@ -202,10 +205,11 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
                 logger.info(f"Sell order already present at {returned_sell_order['price']}")
 
                 # Check if some of the order has been filled. If yes, the order is cancelled and the flag removed.
+                if not ws_matcher_active:
 
-                if await check_and_take(taker_client, maker_client, returned_sell_order, pair):
-                    sell_exists = False
-                    logger.info(f"C&T, sell doesn't exist anymore")
+                    if await check_and_take(taker_client, maker_client, returned_sell_order, pair):
+                        sell_exists = False
+                        logger.info(f"C&T, sell doesn't exist anymore")
 
         else:
 
@@ -219,7 +223,8 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
                 logger.info('No more arb, cancelling sells.')
 
                 await cancel_order_abstraction(maker_client, returned_sell_order, pair)
-                await check_and_take(taker_client, maker_client, returned_sell_order, pair)
+                if not ws_matcher_active:
+                    await check_and_take(taker_client, maker_client, returned_sell_order, pair)
                 sell_exists = False
 
         # Buy side arbitrage
@@ -258,7 +263,8 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
                 logger.info('Order no longer at top of bids, cancelling.')
 
                 await cancel_order_abstraction(maker_client, returned_buy_order, pair)
-                await check_and_take(taker_client, maker_client, returned_buy_order, pair)
+                if not ws_matcher_active:
+                    await check_and_take(taker_client, maker_client, returned_buy_order, pair)
                 buy_exists = False
 
                 if await check_if_solvent(maker_client, taker_client, best_bid_maker, optimal_buy_size, pair=pair):
@@ -273,7 +279,8 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
                 logger.info('Order no longer within acceptable size range, cancelling.')
 
                 await cancel_order_abstraction(maker_client, returned_buy_order, pair)
-                await check_and_take(taker_client, maker_client, returned_buy_order, pair)
+                if not ws_matcher_active:
+                    await check_and_take(taker_client, maker_client, returned_buy_order, pair)
                 buy_exists = False
 
                 if await check_if_solvent(maker_client, taker_client, best_bid_maker, optimal_buy_size, pair=pair):
@@ -288,10 +295,10 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
                 logger.info(f"Buy order already present at {returned_buy_order['price']}")
 
                 # Check if some of the order has been filled. If yes, the order is cancelled and the flag removed.
-
-                if await check_and_take(taker_client, maker_client, returned_buy_order, pair):
-                    buy_exists = False
-                    logger.info(f"C&T, buy doesn't exist anymore")
+                if not ws_matcher_active:
+                    if await check_and_take(taker_client, maker_client, returned_buy_order, pair):
+                        buy_exists = False
+                        logger.info(f"C&T, buy doesn't exist anymore")
 
         else:
 
@@ -305,5 +312,7 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
                 logger.info('No more arb, cancelling buys.')
 
                 await cancel_order_abstraction(maker_client, returned_buy_order, pair)
-                await check_and_take(taker_client, maker_client, returned_buy_order, pair)
+
+                if not ws_matcher_active:
+                    await check_and_take(taker_client, maker_client, returned_buy_order, pair)
                 buy_exists = False

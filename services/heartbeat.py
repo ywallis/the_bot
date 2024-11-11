@@ -8,7 +8,7 @@ def heartbeat_sender(message: str):
 
     while True:
         socket.send_string(message)
-        print(message)
+        # print(message)
         time.sleep(1)  # Send heartbeat every 1 second
 
 def heartbeat_receiver(stop_event, message_str):
@@ -25,7 +25,7 @@ def heartbeat_receiver(stop_event, message_str):
             if socket.poll(heartbeat_timeout * 1000):  # Timeout in milliseconds
                 message = socket.recv_string()
                 if message == message_str:
-                    print("Heartbeat received")
+                    # print("Heartbeat received")
                     last_heartbeat = time.time()
             else:
                 # No heartbeat received in the expected time
