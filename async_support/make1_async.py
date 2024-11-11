@@ -1,6 +1,6 @@
 import asyncio
 
-from boiler_async import (check_and_take, check_if_solvent, maker_order_sizer, within_percentage_range,
+from async_support.boiler_async import (check_and_take, check_if_solvent, maker_order_sizer, within_percentage_range,
                           create_and_return_order_abstraction,
                           cancel_order_abstraction, take_take)
 from datetime import datetime
@@ -13,7 +13,7 @@ from ccxt.base.exchange import Exchange
 logger = logging.getLogger(__name__)
 
 
-async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: dict, pair: str):
+async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: dict, pair: str, event=None):
     """This function acts as a basic market making system, with the following two logics:
     1. A taker logic, acting immediately in two order books in case a profitable imbalance is spotted.
     2. A maker1 logic, offering liquidity on one side, if the position can be hedged profitably on the other."""
@@ -73,6 +73,11 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
     #     sell_exists = False
 
     while watching:
+
+        if event is not None:
+            if event.is_set():
+                print("Watcher interrupted due to missing heartbeat")
+                break
 
         # Slow watching if no open order
 

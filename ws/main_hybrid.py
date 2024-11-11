@@ -9,10 +9,12 @@ import logging
 
 import ccxt.async_support as ccxt
 import asyncio
-from make1_hybrid import make_and_take
+import threading
+from async_support.make1_async import make_and_take
 from config.option_picker import strategy_picker, maker_client_picker
 from config.min_max_usd_converter import min_max_usd_converter
 from async_support.arb_client_maker import arb_client_maker
+from services.heartbeat import heartbeat_receiver
 import time
 
 ##### THIS SECTION WILL BE REPLACED BY A PARSER
@@ -40,17 +42,20 @@ logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.DEBUG,
 logger = logging.getLogger(__name__)
 
 
-async def main_loop():
+async def main_loop(event):
     making = True
+
+    receiver_thread = threading.Thread(target=heartbeat_receiver, daemon=True, args=(event, strategy['name'] + strategy['maker_exchanges'][maker_client_index]['id'],))
+    receiver_thread.start()
 
     # Convert min/max settings from USD to base asset
     ticker_info = await taker_client.fetch_ticker(pair)
     current_usd_value = ticker_info['last']
     instance_config_usd = min_max_usd_converter(current_usd_value, instance_config)
 
-    while making is True:
+    while not event.is_set():
         try:
-            await make_and_take(taker_client, maker_client, instance_config_usd, pair)
+            await make_and_take(taker_client, maker_client, instance_config_usd, pair, stop_event)
 
         except ccxt.NetworkError as e:
             print('Main loop level Network error')
@@ -75,5 +80,6 @@ async def main_loop():
             logger.info(e)
 
 if __name__ == '__main__':
+    stop_event = threading.Event()
     print(f'Running strategy {strategy['pair']}, production is {str(strategy['production'])}')
-    asyncio.run(main_loop())
+    asyncio.run(main_loop(stop_event))
