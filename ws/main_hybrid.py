@@ -65,7 +65,7 @@ async def main_loop(event):
         except ccxt.ExchangeError as e:
 
             # Has happened because of too many requests.
-            time.sleep(5)
+            time.sleep(10)
             print('Main loop level Exchange error')
             logger.info('Main loop level Exchange error')
             logger.info(e)

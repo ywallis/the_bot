@@ -1,16 +1,23 @@
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+gate_fee = 0.001
+
 
 async def match_sell(client, order):
-    """This function places a buy limit order using a CCXT client.
-    It then outputs a confirmation of that order to the console and logs.
-    It includes a modification for exchanges using the base asset for fees,
-    to keep stable inventory in arbitrage setups."""
+    """This function takes in an incoming sell order change, and matches it in an arb setup."""
 
 
-    quantity = order['amount']
+    quantity = order['filled']
     price = order['price']
     identifier = order['clientOrderId']
     pair = order['symbol']
+
+    if float(price) * quantity <= 3:
+        quantity = 3.1 / float(order['price'])
 
     if client.name == 'Gate.io':
 
@@ -20,41 +27,46 @@ async def match_sell(client, order):
 
         quantity_with_fee = round(quantity * fee_ratio, 2)
 
-        await asyncio.sleep(1)
+        print(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
+        logger.info(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
 
-        print(f'Placed a {quantity_with_fee} {pair} buy order on {client.name} for {price}.')
+        asyncio.create_task(client.create_market_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price,
+                                                       params={'clientOrderId': identifier}))
 
         # Testing with appending to a file
-        if order['filled'] != 0:
-            with open('matched.txt', 'a') as file:
-                # file.write(f'\n{datetime.now()}\n{trade}\nPlacing a {quantity} {pair} buy order on {client.name} for {price}.')
-                file.write(f'\n{str(order)}')
+        # if order['filled'] != 0:
+        #     with open('matched.txt', 'a') as file:
+        #         # file.write(f'\n{datetime.now()}\n{trade}\nPlacing a {quantity} {pair} buy order on {client.name} for {price}.')
+        #         file.write(f'\n{str(order)}')
 
-
-        #logger.info(f'Placing a {quantity_with_fee} {pair} buy order on {client.name} for {trade['price']}.')
 
         # client.create_limit_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price,
         #                                  params={'clientOrderId': identifier})
 
 
 async def match_buy(client, order):
+    """This function takes in an incoming buy order change, and matches it in an arb setup."""
 
-    quantity = order['amount']
+
+    quantity = order['filled']
     price = order['price']
     identifier = order['clientOrderId']
     pair = order['symbol']
 
-    """This function places a sell limit order using a CCXT client.
-    It then outputs a confirmation of that order to the console and logs."""
+    if float(price) * quantity <= 3:
+        quantity = 3.1 / float(order['price'])
 
     print(f'Placing a {quantity} {pair} sell order on {client.name} for {price}.')
-    # logger.info(f'Placing a {quantity} {pair} sell order on {client.name} for {price}.')
+    logger.info(f'Placing a {quantity} {pair} sell order on {client.name} for {price}.')
+
+    asyncio.create_task(client.create_market_order(symbol=pair, side='sell', amount=quantity, price=price,
+                                               params={'clientOrderId': identifier}))
 
     # Testing with appending to a file
-    if order['filled'] != 0:
-        with open('matched.txt', 'a') as file:
-            # file.write(f'\n{datetime.now()}\n{trade}\nPlacing a {quantity} {pair} sell order on {client.name} for {price}.')
-            file.write(f'\n{str(order)}')
+    # if order['filled'] != 0:
+    #     with open('matched.txt', 'a') as file:
+    #         # file.write(f'\n{datetime.now()}\n{trade}\nPlacing a {quantity} {pair} sell order on {client.name} for {price}.')
+    #         file.write(f'\n{str(order)}')
 
     # return client.create_limit_order(symbol=pair, side='sell', amount=quantity, price=price,
     #                                  params={'clientOrderId': identifier})
@@ -74,15 +86,18 @@ async def process_order_update(taker_client, order):
     if order['status'] != 'open':
         if order['filled'] != 0:
             if client_order_id.endswith('_eb'):
-                with open('buys.txt', 'a') as file:
-                    await asyncio.sleep(1)
-                    file.write(f'\n{str(order)}')
-                    asyncio.create_task(match_buy(taker_client, order))
+                asyncio.create_task(match_buy(taker_client, order))
+
+                # with open('buys.txt', 'a') as file:
+                #     await asyncio.sleep(1)
+                #     file.write(f'\n{str(order)}')
 
             elif client_order_id.endswith('_es'):
-                with open('sells.txt', 'a') as file:
-                    await asyncio.sleep(1)
-                    file.write(f'\n{str(order)}')
-                    asyncio.create_task(match_sell(taker_client, order))
+                asyncio.create_task(match_sell(taker_client, order))
+
+                # with open('sells.txt', 'a') as file:
+                #     await asyncio.sleep(1)
+                #     file.write(f'\n{str(order)}')
 
     print(f'Processed trade {order['id']}')
+    logger.info(f'Processed trade {order['id']}')

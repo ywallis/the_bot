@@ -37,8 +37,15 @@ instance_config = strategy['maker_exchanges'][maker_client_index]['settings']
 today = str(date.today())
 now = datetime.now()
 
-logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.DEBUG,
-                    filename=f'../Logs/{today}_matcher_{strategy['name']}_{maker_client.name}.txt')
+if strategy['production']:
+
+    logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.WARNING,
+                        filename=f'../Logs/{today}_matcher_{strategy['name']}_{maker_client.name}.txt')
+
+else:
+    logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.DEBUG,
+                        filename=f'../Logs/{today}_matcher_{strategy['name']}_{maker_client.name}.txt')
+
 logger = logging.getLogger(__name__)
 
 async def loop():
@@ -60,17 +67,16 @@ async def loop():
         print('waiting for next update...')
 
 async def main():
-    try:
-        await loop()
-    except ccxt.NetworkError as e:
-        print('Network error, logging.')
-        logger.error('Network error')
-        logger.error(e)
 
-    await maker_client.close()
+    while True:
+        try:
+            await loop()
+        except ccxt.NetworkError as e:
+            print('Network error, logging.')
+            logger.error('Network error')
+            logger.error(e)
 
-
-gate_fee = 0.001
+    # await maker_client.close()
 
 
 if __name__ == '__main__':
