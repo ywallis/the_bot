@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+import json
 
 import ccxt.async_support as ccxt
 from datetime import datetime
@@ -421,3 +422,12 @@ async def take_take(buy_client: Exchange, sell_client: Exchange, pair: str, sell
         (print('End of orderbook'))
 
     return False
+
+
+def retrieve_ob_redis(redis_instance, key):
+    # Get the JSON string from Redis
+    serialized_ob = redis_instance.get(key)
+    if serialized_ob is None:
+        return None  # Key not found
+    # Deserialize the JSON string back to a CCXT ob
+    return json.loads(serialized_ob)

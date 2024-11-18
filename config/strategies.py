@@ -57,6 +57,7 @@ ALPH_test = {'pair': 'ALPH/USDT',
                                                'taker_only': False,
                                                'spread_extension': 2,
                                                'ws_matcher_active': True,
+                                               'ws_watcher_active': True,
                                                }
                                   },
                                  {'id': 'bitget',
@@ -70,7 +71,9 @@ ALPH_test = {'pair': 'ALPH/USDT',
                                                'taker_max_order_size': 12,
                                                'taker_only': False,
                                                'spread_extension': 1,
-                                               'ws_matcher_active': True, }
+                                               'ws_matcher_active': True,
+                                               'ws_watcher_active': True,
+                                               }
                                   }]}
 
 PONKE = {'pair': 'PONKE/USDT',

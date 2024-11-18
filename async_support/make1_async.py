@@ -1,9 +1,10 @@
 import asyncio
+import redis
 
 from async_support.boiler_async import (check_and_take, check_if_solvent, maker_order_sizer, within_percentage_range,
                           create_and_return_order_abstraction,
-                          cancel_order_abstraction, take_take)
-from datetime import datetime
+                          cancel_order_abstraction, take_take, retrieve_ob_redis)
+from datetime import datetime, timedelta, UTC
 import time
 import logging
 from ccxt.base.types import Order
@@ -13,7 +14,7 @@ from ccxt.base.exchange import Exchange
 logger = logging.getLogger(__name__)
 
 
-async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: dict, pair: str, event=None):
+async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: dict, pair: str, event=None, redis_instance=None):
     """This function acts as a basic market making system, with the following two logics:
     1. A taker logic, acting immediately in two order books in case a profitable imbalance is spotted.
     2. A maker1 logic, offering liquidity on one side, if the position can be hedged profitably on the other."""
@@ -29,6 +30,7 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
     taker_only: bool = config['taker_only']
     spread_extension: int = config['spread_extension']
     ws_matcher_active: bool = config['ws_matcher_active']
+    ws_watcher_active: bool = config['ws_matcher_active']
 
     buy_exists: bool = False
     sell_exists: bool = False
@@ -82,11 +84,30 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
 
         # Slow watching if no open order
 
-        if not buy_arbitrage and not sell_arbitrage:
+        if not buy_arbitrage and not sell_arbitrage and not ws_watcher_active:
             time.sleep(1)
 
-        batch = asyncio.gather(taker_client.fetch_order_book(pair), maker_client.fetch_order_book(pair))
-        taker_order_book, maker_order_book = await batch
+        # Introducing fetching from redis if activated
+
+        if not ws_watcher_active:
+            batch = asyncio.gather(taker_client.fetch_order_book(pair), maker_client.fetch_order_book(pair))
+            taker_order_book, maker_order_book = await batch
+        else:
+            taker_order_book = retrieve_ob_redis(redis_instance, f'{pair}-{taker_client.name}')
+            maker_order_book = retrieve_ob_redis(redis_instance, f'{pair}-{maker_client.name}')
+
+            current_time = datetime.now(UTC)
+            taker_order_book_time = datetime.fromtimestamp(taker_order_book['timestamp'] / 1000, UTC)
+            maker_order_book_time = datetime.fromtimestamp(maker_order_book['timestamp'] / 1000, UTC)
+
+            if current_time - taker_order_book_time > timedelta(seconds=5):
+                print("Taker order book is stale, waiting for update")
+                continue
+
+            if current_time - maker_order_book_time > timedelta(seconds=5):
+                print("Maker order book is stale, waiting for update")
+                continue
+
 
         taker_client_bids: list[list] = taker_order_book['bids']
         taker_client_asks: list[list] = taker_order_book['asks']

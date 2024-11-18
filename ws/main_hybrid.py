@@ -10,6 +10,7 @@ import logging
 import ccxt.async_support as ccxt
 import asyncio
 import threading
+import redis
 from async_support.make1_async import make_and_take
 from config.option_picker import strategy_picker, maker_client_picker
 from config.min_max_usd_converter import min_max_usd_converter
@@ -41,6 +42,10 @@ logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.DEBUG,
                     filename=f'../Logs/{today}_maker_{strategy['name']}_{maker_client.name}.txt')
 logger = logging.getLogger(__name__)
 
+# Initializing redis instance
+
+r = redis.Redis(host='localhost', port=6379, decode_responses=True)
+
 
 async def main_loop(event):
     making = True
@@ -55,7 +60,7 @@ async def main_loop(event):
 
     while not event.is_set():
         try:
-            await make_and_take(taker_client, maker_client, instance_config_usd, pair, stop_event)
+            await make_and_take(taker_client, maker_client, instance_config_usd, pair, stop_event, r)
 
         except ccxt.NetworkError as e:
             print('Main loop level Network error')
