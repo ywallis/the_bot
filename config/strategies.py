@@ -76,8 +76,8 @@ ALPH_test = {'pair': 'ALPH/USDT',
                                                }
                                   }]}
 
-PONKE = {'pair': 'PONKE/USDT',
-         'name': 'PONKE',
+CETUS = {'pair': 'CETUS/USDT',
+         'name': 'CETUS',
          'production': True,
          'low_balance_threshold': 0,
          'taker_exchange': {'id': 'gate',
@@ -90,14 +90,14 @@ PONKE = {'pair': 'PONKE/USDT',
               'key': mexc_key_test,
               'secret': mexc_secret_test,
               'settings': {'maker_spread': 1.002,
-                           'maker_size': 30,
+                           'maker_size': 50,
                            'taker_spread': 1.0035,
                            'taker_sizing': 0.8,
                            'taker_max_order_size': 20,
                            'taker_only': False,
                            'spread_extension': 2,
                            'ws_matcher_active': True,
-                           }
+                           'ws_watcher_active': True,                           }
               },
              # {'id': 'bitget',
              #  'key': bitget_key_test,
@@ -149,4 +149,4 @@ HBAR = {'pair': 'HBAR/USDT',
             #  }
         ]}
 
-deployed_strategies = {'ALPH': ALPH, 'ALPH_test': ALPH_test, 'PONKE': PONKE}
+deployed_strategies = {'ALPH': ALPH, 'ALPH_test': ALPH_test, 'CETUS': CETUS}
