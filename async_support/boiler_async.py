@@ -3,10 +3,10 @@ import logging
 import time
 import json
 
-import ccxt.async_support as ccxt
+import ccxt.async_support as ccxt # type: ignore
 from datetime import datetime
-from ccxt.base.types import Order, OrderSide
-from ccxt.base.exchange import Exchange
+from ccxt.base.types import Order, OrderSide # type: ignore
+from ccxt.base.exchange import Exchange # type: ignore
 
 logger = logging.getLogger(__name__)
 

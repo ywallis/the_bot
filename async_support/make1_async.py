@@ -1,14 +1,13 @@
 import asyncio
-import redis
-
+from typing import Dict
 from async_support.boiler_async import (check_and_take, check_if_solvent, maker_order_sizer, within_percentage_range,
                           create_and_return_order_abstraction,
                           cancel_order_abstraction, take_take, retrieve_ob_redis)
 from datetime import datetime, timedelta, UTC
 import time
 import logging
-from ccxt.base.types import Order
-from ccxt.base.exchange import Exchange
+from ccxt.base.types import Order # type: ignore
+from ccxt.base.exchange import Exchange # type: ignore
 
 
 logger = logging.getLogger(__name__)
@@ -43,6 +42,11 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
     buy_arbitrage: bool = True
     sell_arbitrage: bool = True
     open_orders: list[Order] = await maker_client.fetch_open_orders(pair)
+
+    # Variables to avoid duplication of take_take
+
+    taker_active: bool = True
+    current_nonce: str = ''
 
     # Check for hanging orders in case of errors
 
@@ -92,6 +96,7 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
         if not ws_watcher_active:
             batch = asyncio.gather(taker_client.fetch_order_book(pair), maker_client.fetch_order_book(pair))
             taker_order_book, maker_order_book = await batch
+
         else:
             taker_order_book = retrieve_ob_redis(redis_instance, f'{pair}-{taker_client.name}')
             maker_order_book = retrieve_ob_redis(redis_instance, f'{pair}-{maker_client.name}')
@@ -99,6 +104,19 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
             current_time = datetime.now(UTC)
             taker_order_book_time = datetime.fromtimestamp(taker_order_book['timestamp'] / 1000, UTC)
             maker_order_book_time = datetime.fromtimestamp(maker_order_book['timestamp'] / 1000, UTC)
+            logger.info(f'Taker from redis is \n {taker_order_book}')
+            logger.info(f'Maker from redis is \n {maker_order_book}')
+
+            # TODO check if nonce combination is new to allow tt
+            new_nonce: str = taker_order_book['nonce'] + maker_order_book['nonce']
+            if new_nonce != current_nonce:
+                taker_active = True
+            else:
+                taker_active = False
+                logger.info('Nonce combination has not changed, take_take is blocked.')
+            current_nonce = new_nonce
+
+            # TODO check if ob edge have changed
 
             if current_time - taker_order_book_time > timedelta(seconds=5):
                 print("Taker order book is stale, waiting for update")
@@ -119,11 +137,11 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
         best_bid_maker: float = maker_client_bids[0][0]
         best_ask_maker: float = maker_client_asks[0][0]
 
-        all_bids = {taker_client.name: best_bid_taker, maker_client.name: best_bid_maker}
-        all_asks = {taker_client.name: best_ask_taker, maker_client.name: best_ask_maker}
+        all_bids: Dict[str, float] = {taker_client.name: best_bid_taker, maker_client.name: best_bid_maker}
+        all_asks: Dict[str, float] = {taker_client.name: best_ask_taker, maker_client.name: best_ask_maker}
 
-        lowest_bid = min(all_bids, key=all_bids.get)
-        highest_ask = max(all_asks, key=all_asks.get)
+        lowest_bid = min(all_bids, key=lambda x: all_bids[x])
+        highest_ask = max(all_asks, key=lambda x: all_asks[x])
 
         watch_spread = round((all_asks[highest_ask] / all_bids[lowest_bid] - 1) * 100, 2)
 
@@ -135,7 +153,7 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
 
         # Start take_take with client_a as buyer, client_b as seller.
 
-        if best_bid_maker >= best_ask_taker * taker_spread:
+        if best_bid_maker >= best_ask_taker * taker_spread and taker_active:
 
             # Using take_take as an if condition allows us to prioritize execution over the rest of the code.
 
@@ -143,7 +161,7 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
                                taker_sizing, taker_max_order_size, spread_extension):
                 continue
 
-        if best_bid_taker >= best_ask_maker * taker_spread:
+        if best_bid_taker >= best_ask_maker * taker_spread and taker_active:
 
             if await take_take(maker_client, taker_client, pair, taker_client_bids, maker_client_asks, taker_spread,
                                taker_sizing,

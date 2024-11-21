@@ -34,6 +34,10 @@ pair = strategy['pair']
 
 instance_config = strategy['maker_exchanges'][maker_client_index]['settings']
 
+if not instance_config['ws_matcher_active']:
+    print('Matcher should not be active! Check config. Stopping.')
+    sys.exit()
+
 today = str(date.today())
 now = datetime.now()
 

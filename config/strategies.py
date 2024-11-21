@@ -2,7 +2,7 @@ from config.env_var import *
 
 ALPH = {'pair': 'ALPH/USDT',
         'name': 'ALPH',
-        'production': True,
+        'production': False,
         'low_balance_threshold': 1500,
         'taker_exchange': {'id': 'gate',
                            'key': gateio_key,
@@ -19,7 +19,8 @@ ALPH = {'pair': 'ALPH/USDT',
                                           'taker_max_order_size': 80,
                                           'taker_only': False,
                                           'spread_extension': 2,
-                                          'ws_matcher_active': False,
+                                          'ws_matcher_active': True,
+                                          'ws_watcher_active': True,
                                           }
                              },
                             {'id': 'bitget',
@@ -33,7 +34,8 @@ ALPH = {'pair': 'ALPH/USDT',
                                           'taker_max_order_size': 50,
                                           'taker_only': False,
                                           'spread_extension': 1,
-                                          'ws_matcher_active': False,
+                                          'ws_matcher_active': True,
+                                          'ws_watcher_active': True,
                                           }
                              }]}
 
@@ -97,7 +99,7 @@ CETUS = {'pair': 'CETUS/USDT',
                            'taker_only': False,
                            'spread_extension': 2,
                            'ws_matcher_active': True,
-                           'ws_watcher_active': True,                           }
+                           'ws_watcher_active': True, }
               },
              # {'id': 'bitget',
              #  'key': bitget_key_test,
