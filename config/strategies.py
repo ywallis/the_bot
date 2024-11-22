@@ -2,7 +2,7 @@ from config.env_var import *
 
 ALPH = {'pair': 'ALPH/USDT',
         'name': 'ALPH',
-        'production': False,
+        'production': True,
         'low_balance_threshold': 1500,
         'taker_exchange': {'id': 'gate',
                            'key': gateio_key,

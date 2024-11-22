@@ -7,7 +7,7 @@ sys.path.append("..")
 from datetime import date, datetime
 import logging
 
-import ccxt.async_support as ccxt
+import ccxt.async_support as ccxt # type: ignore
 import asyncio
 import threading
 import redis
@@ -48,7 +48,8 @@ r = redis.Redis(host='localhost', port=6379, decode_responses=True)
 
 
 async def main_loop(event):
-    making = True
+
+    # Loop is driven by heartbeat
 
     receiver_thread = threading.Thread(target=heartbeat_receiver, daemon=True, args=(event, strategy['name'] + strategy['maker_exchanges'][maker_client_index]['id'],))
     receiver_thread.start()
