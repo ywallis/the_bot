@@ -115,6 +115,7 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
                 else:
                     taker_active = False
                     logger.info('Nonce combination has not changed, take_take is blocked.')
+                    time.sleep(0.01)
                 current_nonce = new_nonce
 
             # TODO check if ob edge have changed
