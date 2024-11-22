@@ -38,9 +38,17 @@ instance_config = strategy['maker_exchanges'][maker_client_index]['settings']
 today = str(date.today())
 now = datetime.now()
 
-logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.DEBUG,
-                    filename=f'../Logs/{today}_maker_{strategy['name']}_{maker_client.name}.txt')
+if strategy['production']:
+
+    logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.WARNING,
+                        filename=f'../Logs/{today}_maker_{strategy['name']}_{maker_client.name}.txt')
+
+else:
+    logging.basicConfig(format="%(asctime)s: %(message)s", level=logging.DEBUG,
+                        filename=f'../Logs/{today}_maker_{strategy['name']}_{maker_client.name}.txt')
+
 logger = logging.getLogger(__name__)
+
 
 # Initializing redis instance
 
