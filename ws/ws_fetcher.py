@@ -27,6 +27,6 @@ while True:
     for client in all_clients:
         ob = retrieve_ob_redis(f'{pair}-{client.name}')
         print(f'{datetime.now()} Bid {ob["bids"][0][0]} and ask {ob["asks"][0][0]} at {ob['datetime']} on {client.name}.')
-        # print(ob)
+        print(ob)
 
     time.sleep(1)
