@@ -1,19 +1,19 @@
 import asyncio
-
-from boiler_async import (check_and_take, check_if_solvent, maker_order_sizer, within_percentage_range,
+from typing import Dict
+from async_support.boiler_async import (check_and_take, check_if_solvent, maker_order_sizer, within_percentage_range,
                           create_and_return_order_abstraction,
-                          cancel_order_abstraction, take_take)
-from datetime import datetime
+                          cancel_order_abstraction, take_take, retrieve_ob_redis)
+from datetime import datetime, timedelta, UTC
 import time
 import logging
-from ccxt.base.types import Order
-from ccxt.base.exchange import Exchange
+from ccxt.base.types import Order # type: ignore
+from ccxt.base.exchange import Exchange # type: ignore
 
 
 logger = logging.getLogger(__name__)
 
 
-async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: dict, pair: str):
+async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: dict, pair: str, event=None, redis_instance=None):
     """This function acts as a basic market making system, with the following two logics:
     1. A taker logic, acting immediately in two order books in case a profitable imbalance is spotted.
     2. A maker1 logic, offering liquidity on one side, if the position can be hedged profitably on the other."""
@@ -28,6 +28,8 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
     taker_max_order_size: float = config['taker_max_order_size']
     taker_only: bool = config['taker_only']
     spread_extension: int = config['spread_extension']
+    ws_matcher_active: bool = config['ws_matcher_active']
+    ws_watcher_active: bool = config['ws_matcher_active']
 
     buy_exists: bool = False
     sell_exists: bool = False
@@ -40,6 +42,11 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
     buy_arbitrage: bool = True
     sell_arbitrage: bool = True
     open_orders: list[Order] = await maker_client.fetch_open_orders(pair)
+
+    # Variables to avoid duplication of take_take
+
+    taker_active: bool = True
+    current_nonce: str = ''
 
     # Check for hanging orders in case of errors
 
@@ -74,13 +81,51 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
 
     while watching:
 
+        if event is not None:
+            if event.is_set():
+                print("Watcher interrupted due to missing heartbeat")
+                break
+
         # Slow watching if no open order
 
-        if not buy_arbitrage and not sell_arbitrage:
+        if not buy_arbitrage and not sell_arbitrage and not ws_watcher_active:
             time.sleep(1)
 
-        batch = asyncio.gather(taker_client.fetch_order_book(pair), maker_client.fetch_order_book(pair))
-        taker_order_book, maker_order_book = await batch
+        # Introducing fetching from redis if activated
+
+        if not ws_watcher_active:
+            batch = asyncio.gather(taker_client.fetch_order_book(pair), maker_client.fetch_order_book(pair))
+            taker_order_book, maker_order_book = await batch
+
+        else:
+            taker_order_book = retrieve_ob_redis(redis_instance, f'{pair}-{taker_client.name}')
+            maker_order_book = retrieve_ob_redis(redis_instance, f'{pair}-{maker_client.name}')
+
+            current_time = datetime.now(UTC)
+            taker_order_book_time = datetime.fromtimestamp(taker_order_book['timestamp'] / 1000, UTC)
+            maker_order_book_time = datetime.fromtimestamp(maker_order_book['timestamp'] / 1000, UTC)
+            logger.info(f'Taker from redis is \n {taker_order_book}')
+            logger.info(f'Maker from redis is \n {maker_order_book}')
+
+            # TODO check if nonce combination is new to allow tt
+            new_nonce: str = taker_order_book['nonce'] + maker_order_book['nonce']
+            if new_nonce != current_nonce:
+                taker_active = True
+            else:
+                taker_active = False
+                logger.info('Nonce combination has not changed, take_take is blocked.')
+            current_nonce = new_nonce
+
+            # TODO check if ob edge have changed
+
+            if current_time - taker_order_book_time > timedelta(seconds=5):
+                print("Taker order book is stale, waiting for update")
+                continue
+
+            if current_time - maker_order_book_time > timedelta(seconds=5):
+                print("Maker order book is stale, waiting for update")
+                continue
+
 
         taker_client_bids: list[list] = taker_order_book['bids']
         taker_client_asks: list[list] = taker_order_book['asks']
@@ -92,11 +137,11 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
         best_bid_maker: float = maker_client_bids[0][0]
         best_ask_maker: float = maker_client_asks[0][0]
 
-        all_bids = {taker_client.name: best_bid_taker, maker_client.name: best_bid_maker}
-        all_asks = {taker_client.name: best_ask_taker, maker_client.name: best_ask_maker}
+        all_bids: Dict[str, float] = {taker_client.name: best_bid_taker, maker_client.name: best_bid_maker}
+        all_asks: Dict[str, float] = {taker_client.name: best_ask_taker, maker_client.name: best_ask_maker}
 
-        lowest_bid = min(all_bids, key=all_bids.get)
-        highest_ask = max(all_asks, key=all_asks.get)
+        lowest_bid = min(all_bids, key=lambda x: all_bids[x])
+        highest_ask = max(all_asks, key=lambda x: all_asks[x])
 
         watch_spread = round((all_asks[highest_ask] / all_bids[lowest_bid] - 1) * 100, 2)
 
@@ -108,7 +153,7 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
 
         # Start take_take with client_a as buyer, client_b as seller.
 
-        if best_bid_maker >= best_ask_taker * taker_spread:
+        if best_bid_maker >= best_ask_taker * taker_spread and taker_active:
 
             # Using take_take as an if condition allows us to prioritize execution over the rest of the code.
 
@@ -116,7 +161,7 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
                                taker_sizing, taker_max_order_size, spread_extension):
                 continue
 
-        if best_bid_taker >= best_ask_maker * taker_spread:
+        if best_bid_taker >= best_ask_maker * taker_spread and taker_active:
 
             if await take_take(maker_client, taker_client, pair, taker_client_bids, maker_client_asks, taker_spread,
                                taker_sizing,
@@ -166,7 +211,8 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
                 logger.info('Order no longer at bottom of asks, cancelling.')
 
                 await cancel_order_abstraction(maker_client, returned_sell_order, pair)
-                await check_and_take(taker_client, maker_client, returned_sell_order, pair)
+                if not ws_matcher_active:
+                    await check_and_take(taker_client, maker_client, returned_sell_order, pair)
                 sell_exists = False
 
                 if await check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
@@ -182,7 +228,8 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
                 logger.info('Order no longer within acceptable size range, cancelling.')
 
                 await cancel_order_abstraction(maker_client, returned_sell_order, pair)
-                await check_and_take(taker_client, maker_client, returned_sell_order, pair)
+                if not ws_matcher_active:
+                    await check_and_take(taker_client, maker_client, returned_sell_order, pair)
                 sell_exists = False
 
                 if await check_if_solvent(taker_client, maker_client, best_ask_maker, optimal_sell_size, pair=pair):
@@ -197,10 +244,11 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
                 logger.info(f"Sell order already present at {returned_sell_order['price']}")
 
                 # Check if some of the order has been filled. If yes, the order is cancelled and the flag removed.
+                if not ws_matcher_active:
 
-                if await check_and_take(taker_client, maker_client, returned_sell_order, pair):
-                    sell_exists = False
-                    logger.info(f"C&T, sell doesn't exist anymore")
+                    if await check_and_take(taker_client, maker_client, returned_sell_order, pair):
+                        sell_exists = False
+                        logger.info(f"C&T, sell doesn't exist anymore")
 
         else:
 
@@ -214,7 +262,8 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
                 logger.info('No more arb, cancelling sells.')
 
                 await cancel_order_abstraction(maker_client, returned_sell_order, pair)
-                await check_and_take(taker_client, maker_client, returned_sell_order, pair)
+                if not ws_matcher_active:
+                    await check_and_take(taker_client, maker_client, returned_sell_order, pair)
                 sell_exists = False
 
         # Buy side arbitrage
@@ -253,7 +302,8 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
                 logger.info('Order no longer at top of bids, cancelling.')
 
                 await cancel_order_abstraction(maker_client, returned_buy_order, pair)
-                await check_and_take(taker_client, maker_client, returned_buy_order, pair)
+                if not ws_matcher_active:
+                    await check_and_take(taker_client, maker_client, returned_buy_order, pair)
                 buy_exists = False
 
                 if await check_if_solvent(maker_client, taker_client, best_bid_maker, optimal_buy_size, pair=pair):
@@ -268,7 +318,8 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
                 logger.info('Order no longer within acceptable size range, cancelling.')
 
                 await cancel_order_abstraction(maker_client, returned_buy_order, pair)
-                await check_and_take(taker_client, maker_client, returned_buy_order, pair)
+                if not ws_matcher_active:
+                    await check_and_take(taker_client, maker_client, returned_buy_order, pair)
                 buy_exists = False
 
                 if await check_if_solvent(maker_client, taker_client, best_bid_maker, optimal_buy_size, pair=pair):
@@ -283,10 +334,10 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
                 logger.info(f"Buy order already present at {returned_buy_order['price']}")
 
                 # Check if some of the order has been filled. If yes, the order is cancelled and the flag removed.
-
-                if await check_and_take(taker_client, maker_client, returned_buy_order, pair):
-                    buy_exists = False
-                    logger.info(f"C&T, buy doesn't exist anymore")
+                if not ws_matcher_active:
+                    if await check_and_take(taker_client, maker_client, returned_buy_order, pair):
+                        buy_exists = False
+                        logger.info(f"C&T, buy doesn't exist anymore")
 
         else:
 
@@ -300,5 +351,7 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
                 logger.info('No more arb, cancelling buys.')
 
                 await cancel_order_abstraction(maker_client, returned_buy_order, pair)
-                await check_and_take(taker_client, maker_client, returned_buy_order, pair)
+
+                if not ws_matcher_active:
+                    await check_and_take(taker_client, maker_client, returned_buy_order, pair)
                 buy_exists = False

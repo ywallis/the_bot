@@ -19,6 +19,8 @@ ALPH = {'pair': 'ALPH/USDT',
                                           'taker_max_order_size': 80,
                                           'taker_only': False,
                                           'spread_extension': 2,
+                                          'ws_matcher_active': True,
+                                          'ws_watcher_active': True,
                                           }
                              },
                             {'id': 'bitget',
@@ -31,7 +33,10 @@ ALPH = {'pair': 'ALPH/USDT',
                                           'taker_sizing': 0.8,
                                           'taker_max_order_size': 50,
                                           'taker_only': False,
-                                          'spread_extension': 1, }
+                                          'spread_extension': 1,
+                                          'ws_matcher_active': True,
+                                          'ws_watcher_active': True,
+                                          }
                              }]}
 
 ALPH_test = {'pair': 'ALPH/USDT',
@@ -50,59 +55,65 @@ ALPH_test = {'pair': 'ALPH/USDT',
                                                'maker_size': 10,
                                                'taker_spread': 1.0035,
                                                'taker_sizing': 0.8,
-                                               'taker_max_order_size': 10,
+                                               'taker_max_order_size': 12,
                                                'taker_only': False,
                                                'spread_extension': 2,
+                                               'ws_matcher_active': True,
+                                               'ws_watcher_active': True,
                                                }
                                   },
                                  {'id': 'bitget',
                                   'key': bitget_key_test,
                                   'secret': bitget_secret_test,
                                   'password': bitget_password_test,
-                                  'settings': {'maker_spread': 1.0025,
+                                  'settings': {'maker_spread': 1.003,
                                                'maker_size': 10,
-                                               'taker_spread': 1.0035,
+                                               'taker_spread': 1.004,
                                                'taker_sizing': 0.8,
-                                               'taker_max_order_size': 10,
+                                               'taker_max_order_size': 12,
                                                'taker_only': False,
-                                               'spread_extension': 1}
+                                               'spread_extension': 1,
+                                               'ws_matcher_active': True,
+                                               'ws_watcher_active': True,
+                                               }
                                   }]}
 
-PONKE = {'pair': 'PONKE/USDT',
-       'name': 'PONKE',
-       'production': True,
-       'low_balance_threshold': 0,
-       'taker_exchange': {'id': 'gate',
-                          'key': gateio_key_test,
-                          'secret': gateio_secret_test,
-                          },
+CETUS = {'pair': 'CETUS/USDT',
+         'name': 'CETUS',
+         'production': True,
+         'low_balance_threshold': 0,
+         'taker_exchange': {'id': 'gate',
+                            'key': gateio_key_test,
+                            'secret': gateio_secret_test,
+                            },
 
-       'maker_exchanges': [
-           {'id': 'mexc',
-            'key': mexc_key_test,
-            'secret': mexc_secret_test,
-            'settings': {'maker_spread': 1.0025,
-                         'maker_size': 30,
-                         'taker_spread': 1.0035,
-                         'taker_sizing': 0.8,
-                         'taker_max_order_size': 20,
-                         'taker_only': False,
-                         'spread_extension': 2,
-                         }
-            },
-           # {'id': 'bitget',
-           #  'key': bitget_key_test,
-           #  'secret': bitget_secret_test,
-           #  'password': bitget_password_test,
-           #  'settings': {'maker_spread': 1.0025,
-           #               'maker_size': 10,
-           #               'taker_spread': 1.0035,
-           #               'taker_sizing': 0.8,
-           #               'taker_max_order_size': 10,
-           #               'taker_only': False,
-           #               'spread_extension': 1}
-           #  }
-       ]}
+         'maker_exchanges': [
+             {'id': 'mexc',
+              'key': mexc_key_test,
+              'secret': mexc_secret_test,
+              'settings': {'maker_spread': 1.002,
+                           'maker_size': 50,
+                           'taker_spread': 1.0035,
+                           'taker_sizing': 0.8,
+                           'taker_max_order_size': 20,
+                           'taker_only': False,
+                           'spread_extension': 2,
+                           'ws_matcher_active': True,
+                           'ws_watcher_active': True, }
+              },
+             # {'id': 'bitget',
+             #  'key': bitget_key_test,
+             #  'secret': bitget_secret_test,
+             #  'password': bitget_password_test,
+             #  'settings': {'maker_spread': 1.0025,
+             #               'maker_size': 10,
+             #               'taker_spread': 1.0035,
+             #               'taker_sizing': 0.8,
+             #               'taker_max_order_size': 10,
+             #               'taker_only': False,
+             #               'spread_extension': 1}
+             #  }
+         ]}
 
 HBAR = {'pair': 'HBAR/USDT',
         'name': 'HBAR',
@@ -140,4 +151,4 @@ HBAR = {'pair': 'HBAR/USDT',
             #  }
         ]}
 
-deployed_strategies = {'ALPH': ALPH, 'ALPH_test': ALPH_test, 'PONKE': PONKE}
+deployed_strategies = {'ALPH': ALPH, 'ALPH_test': ALPH_test, 'CETUS': CETUS}
