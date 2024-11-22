@@ -86,7 +86,7 @@ async def main():
 if __name__ == '__main__':
 
     # Create the heartbeat sender as a daemon thread, uses strategy name + exchange for heartbeat
-    sender_thread = threading.Thread(target=heartbeat_sender, daemon=True, args=(strategy['name'] + strategy['maker_exchanges'][maker_client_index]['id'],))
+    sender_thread = threading.Thread(target=heartbeat_sender, daemon=True, args=(strategy['name'] + strategy['maker_exchanges'][maker_client_index]['id'], strategy['maker_exchanges'][maker_client_index]['settings']['zmq_port'],))
     sender_thread.start()
 
     # Start main async loop in main thread

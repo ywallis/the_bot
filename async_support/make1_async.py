@@ -108,13 +108,14 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
             logger.info(f'Maker from redis is \n {maker_order_book}')
 
             # TODO check if nonce combination is new to allow tt
-            new_nonce: str = taker_order_book['nonce'] + maker_order_book['nonce']
-            if new_nonce != current_nonce:
-                taker_active = True
-            else:
-                taker_active = False
-                logger.info('Nonce combination has not changed, take_take is blocked.')
-            current_nonce = new_nonce
+            if taker_order_book['nonce'] is not None and maker_order_book['nonce'] is not None:
+                new_nonce: str = taker_order_book['nonce'] + maker_order_book['nonce']
+                if new_nonce != current_nonce:
+                    taker_active = True
+                else:
+                    taker_active = False
+                    logger.info('Nonce combination has not changed, take_take is blocked.')
+                current_nonce = new_nonce
 
             # TODO check if ob edge have changed
 

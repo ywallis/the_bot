@@ -51,7 +51,7 @@ async def main_loop(event):
 
     # Loop is driven by heartbeat
 
-    receiver_thread = threading.Thread(target=heartbeat_receiver, daemon=True, args=(event, strategy['name'] + strategy['maker_exchanges'][maker_client_index]['id'],))
+    receiver_thread = threading.Thread(target=heartbeat_receiver, daemon=True, args=(event, strategy['name'] + strategy['maker_exchanges'][maker_client_index]['id'], strategy['maker_exchanges'][maker_client_index]['settings']['zmq_port'],))
     receiver_thread.start()
 
     # Convert min/max settings from USD to base asset

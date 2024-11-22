@@ -1,20 +1,20 @@
 import zmq
 import time
 
-def heartbeat_sender(message: str):
+def heartbeat_sender(message: str, port: int):
     context = zmq.Context()
     socket = context.socket(zmq.PUB)
-    socket.bind("tcp://*:5558")
+    socket.bind(f'tcp://*:{port}')
 
     while True:
         socket.send_string(message)
         # print(message)
         time.sleep(1)  # Send heartbeat every 1 second
 
-def heartbeat_receiver(stop_event, message_str):
+def heartbeat_receiver(stop_event, message_str, port):
     context = zmq.Context()
     socket = context.socket(zmq.SUB)
-    socket.connect("tcp://localhost:5558")
+    socket.connect(f'tcp://localhost:{port}')
     socket.setsockopt_string(zmq.SUBSCRIBE, "")
 
     heartbeat_timeout = 2  # Timeout in seconds

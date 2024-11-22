@@ -21,6 +21,7 @@ ALPH = {'pair': 'ALPH/USDT',
                                           'spread_extension': 2,
                                           'ws_matcher_active': True,
                                           'ws_watcher_active': True,
+                                          'zmq_port': 5555,
                                           }
                              },
                             {'id': 'bitget',
@@ -36,6 +37,7 @@ ALPH = {'pair': 'ALPH/USDT',
                                           'spread_extension': 1,
                                           'ws_matcher_active': True,
                                           'ws_watcher_active': True,
+                                          'zmq_port': 5556,
                                           }
                              }]}
 
@@ -60,6 +62,7 @@ ALPH_test = {'pair': 'ALPH/USDT',
                                                'spread_extension': 2,
                                                'ws_matcher_active': True,
                                                'ws_watcher_active': True,
+                                               'zmq_port': 5555,
                                                }
                                   },
                                  {'id': 'bitget',
@@ -75,6 +78,7 @@ ALPH_test = {'pair': 'ALPH/USDT',
                                                'spread_extension': 1,
                                                'ws_matcher_active': True,
                                                'ws_watcher_active': True,
+                                               'zmq_port': 5556,
                                                }
                                   }]}
 
@@ -99,7 +103,9 @@ CETUS = {'pair': 'CETUS/USDT',
                            'taker_only': False,
                            'spread_extension': 2,
                            'ws_matcher_active': True,
-                           'ws_watcher_active': True, }
+                           'ws_watcher_active': True,
+                           'zmq_port': 5557,
+                           }
               },
              # {'id': 'bitget',
              #  'key': bitget_key_test,
