@@ -59,11 +59,12 @@ async def loop(client):
     timestamp = int(since.timestamp() * 1000)
     while True:
         orders = await client.watch_orders(pair, since=timestamp)
+        orders_copy = copy.deepcopy(orders)
         print('--------------------------------------------------------------')
-        print(f'Received {len(orders)} orders at {datetime.now(timezone.utc)} on {client.name}')
-        print(orders)
+        print(f'Received {len(orders_copy)} orders at {datetime.now(timezone.utc)} on {client.name}')
+        print(orders_copy)
 
-        for order in orders:
+        for order in orders_copy:
 
             logger.info(f'Processing orders from {client.name}')
             logger.info(order)
