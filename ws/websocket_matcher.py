@@ -12,8 +12,7 @@ import threading
 import copy
 import logging
 from datetime import date
-# from config.option_picker import strategy_picker, maker_client_picker
-# from arb_client_maker import arb_client_maker
+from limited_set import LimitedSet
 from ws_clients import taker_client, maker_clients, strategy, pair
 
 
@@ -57,6 +56,7 @@ logger = logging.getLogger(__name__)
 async def loop(client):
     since = datetime.now(timezone.utc)
     timestamp = int(since.timestamp() * 1000)
+    recently_processed_orders = LimitedSet(100)
     while True:
         try:
             orders = await client.watch_orders(pair, since=timestamp)
@@ -69,13 +69,19 @@ async def loop(client):
 
                 logger.info(f'Processing orders from {client.name}')
                 logger.info(order)
+                print('TESTING, MATCHING TURNED OFF!')
 
                 # Creating deep copy of order before processing to avoid mutating.
 
                 order_copy = copy.deepcopy(order)
+
+                # Checking if the order: Is not open, has been at least partially filled, and whether the id had been processed recently.
+
                 if order_copy['status'] != 'open':
                     if order_copy['filled'] != 0:
-                        asyncio.create_task(process_order_update(taker_client, order_copy))
+                        if order_copy.get('id') not in recently_processed_orders:
+                            recently_processed_orders.add(order_copy.get('id'))
+                            # asyncio.create_task(process_order_update(taker_client, order_copy))
 
             print('waiting for next update...')
 
