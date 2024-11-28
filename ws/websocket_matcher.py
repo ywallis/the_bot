@@ -69,7 +69,7 @@ async def loop(client):
 
                 logger.info(f'Processing orders from {client.name}')
                 logger.info(order)
-                print('TESTING, MATCHING TURNED OFF!')
+                # print('TESTING, MATCHING TURNED OFF!')
 
                 # Creating deep copy of order before processing to avoid mutating.
 
@@ -81,7 +81,7 @@ async def loop(client):
                     if order_copy['filled'] != 0:
                         if order_copy.get('id') not in recently_processed_orders:
                             recently_processed_orders.add(order_copy.get('id'))
-                            # asyncio.create_task(process_order_update(taker_client, order_copy))
+                            asyncio.create_task(process_order_update(taker_client, order_copy))
                         else:
                             logger.warning(f'The order no {order_copy['id']} tried getting matched multiple times.')
 
