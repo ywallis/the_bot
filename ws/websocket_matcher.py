@@ -58,23 +58,29 @@ async def loop(client):
     since = datetime.now(timezone.utc)
     timestamp = int(since.timestamp() * 1000)
     while True:
-        orders = await client.watch_orders(pair, since=timestamp)
-        orders_copy = copy.deepcopy(orders)
-        print('--------------------------------------------------------------')
-        print(f'Received {len(orders_copy)} orders at {datetime.now(timezone.utc)} on {client.name}')
-        print(orders_copy)
+        try:
+            orders = await client.watch_orders(pair, since=timestamp)
+            orders_copy = copy.deepcopy(orders)
+            print('--------------------------------------------------------------')
+            print(f'Received {len(orders_copy)} orders at {datetime.now(timezone.utc)} on {client.name}')
+            print(orders_copy)
 
-        for order in orders_copy:
+            for order in orders_copy:
 
-            logger.info(f'Processing orders from {client.name}')
-            logger.info(order)
+                logger.info(f'Processing orders from {client.name}')
+                logger.info(order)
 
-            # Creating deep copy of order before processing to avoid mutating.
+                # Creating deep copy of order before processing to avoid mutating.
 
-            order_copy = copy.deepcopy(order)
-            asyncio.create_task(process_order_update(taker_client, order_copy))
+                order_copy = copy.deepcopy(order)
+                if order_copy['status'] != 'open':
+                    if order_copy['filled'] != 0:
+                        asyncio.create_task(process_order_update(taker_client, order_copy))
 
-        print('waiting for next update...')
+            print('waiting for next update...')
+
+        except Exception as e:
+            logger.error(f'Error in client loop {e}')
 
 async def main():
 
