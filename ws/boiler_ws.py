@@ -88,16 +88,10 @@ async def process_order_update(taker_client, order):
             if client_order_id.endswith('_eb'):
                 asyncio.create_task(match_buy(taker_client, order))
 
-                # with open('buys.txt', 'a') as file:
-                #     await asyncio.sleep(1)
-                #     file.write(f'\n{str(order)}')
 
             elif client_order_id.endswith('_es'):
                 asyncio.create_task(match_sell(taker_client, order))
 
-                # with open('sells.txt', 'a') as file:
-                #     await asyncio.sleep(1)
-                #     file.write(f'\n{str(order)}')
 
     print(f'Processed trade {order['id']}')
     logger.info(f'Processed trade {order['id']}')

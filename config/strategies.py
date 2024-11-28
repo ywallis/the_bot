@@ -1,9 +1,12 @@
 from config.env_var import *
 
+# TODO move ws status and zmq to strategy level
+
 ALPH = {'pair': 'ALPH/USDT',
         'name': 'ALPH',
         'production': True,
         'low_balance_threshold': 1500,
+        'zmq_port': 5555,
         'taker_exchange': {'id': 'gate',
                            'key': gateio_key,
                            'secret': gateio_secret,
@@ -45,6 +48,7 @@ ALPH_test = {'pair': 'ALPH/USDT',
              'name': 'ALPH_test',
              'production': False,
              'low_balance_threshold': 10,
+             'zmq_port': 5556,
              'taker_exchange': {'id': 'gate',
                                 'key': gateio_key_test,
                                 'secret': gateio_secret_test,
@@ -78,7 +82,7 @@ ALPH_test = {'pair': 'ALPH/USDT',
                                                'spread_extension': 1,
                                                'ws_matcher_active': True,
                                                'ws_watcher_active': True,
-                                               'zmq_port': 5556,
+                                               'zmq_port': 5555,
                                                }
                                   }]}
 
@@ -86,6 +90,7 @@ CETUS = {'pair': 'CETUS/USDT',
          'name': 'CETUS',
          'production': True,
          'low_balance_threshold': 0,
+         'zmq_port': 5557,
          'taker_exchange': {'id': 'gate',
                             'key': gateio_key_test,
                             'secret': gateio_secret_test,
