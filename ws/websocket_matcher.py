@@ -89,6 +89,8 @@ async def loop(client):
 
         except Exception as e:
             logger.error(f'Error in client loop {e}')
+            await client.close()
+
 
 async def main():
 
@@ -99,6 +101,7 @@ async def main():
             print('Network error, logging.')
             logger.error('Network error')
             logger.error(e)
+
 
     # await maker_client.close()
 
