@@ -86,45 +86,45 @@ ALPH_test = {'pair': 'ALPH/USDT',
                                                }
                                   }]}
 
-CETUS = {'pair': 'CETUS/USDT',
-         'name': 'CETUS',
-         'production': True,
-         'low_balance_threshold': 0,
-         'zmq_port': 5557,
-         'taker_exchange': {'id': 'gate',
-                            'key': gateio_key_test,
-                            'secret': gateio_secret_test,
-                            },
+MOODENG = {'pair': 'MOODENG/USDT',
+           'name': 'MOODENG',
+           'production': True,
+           'low_balance_threshold': 0,
+           'zmq_port': 5557,
+           'taker_exchange': {'id': 'gate',
+                              'key': gateio_key_test,
+                              'secret': gateio_secret_test,
+                              },
 
-         'maker_exchanges': [
-             {'id': 'mexc',
-              'key': mexc_key_test,
-              'secret': mexc_secret_test,
-              'settings': {'maker_spread': 1.002,
-                           'maker_size': 50,
-                           'taker_spread': 1.0035,
-                           'taker_sizing': 0.8,
-                           'taker_max_order_size': 20,
-                           'taker_only': False,
-                           'spread_extension': 2,
-                           'ws_matcher_active': True,
-                           'ws_watcher_active': True,
-                           'zmq_port': 5557,
-                           }
-              },
-             # {'id': 'bitget',
-             #  'key': bitget_key_test,
-             #  'secret': bitget_secret_test,
-             #  'password': bitget_password_test,
-             #  'settings': {'maker_spread': 1.0025,
-             #               'maker_size': 10,
-             #               'taker_spread': 1.0035,
-             #               'taker_sizing': 0.8,
-             #               'taker_max_order_size': 10,
-             #               'taker_only': False,
-             #               'spread_extension': 1}
-             #  }
-         ]}
+           'maker_exchanges': [
+               {'id': 'mexc',
+                'key': mexc_key_test,
+                'secret': mexc_secret_test,
+                'settings': {'maker_spread': 1.002,
+                             'maker_size': 50,
+                             'taker_spread': 1.0035,
+                             'taker_sizing': 0.8,
+                             'taker_max_order_size': 20,
+                             'taker_only': False,
+                             'spread_extension': 2,
+                             'ws_matcher_active': True,
+                             'ws_watcher_active': True,
+                             'zmq_port': 5557,
+                             }
+                },
+               # {'id': 'bitget',
+               #  'key': bitget_key_test,
+               #  'secret': bitget_secret_test,
+               #  'password': bitget_password_test,
+               #  'settings': {'maker_spread': 1.0025,
+               #               'maker_size': 10,
+               #               'taker_spread': 1.0035,
+               #               'taker_sizing': 0.8,
+               #               'taker_max_order_size': 10,
+               #               'taker_only': False,
+               #               'spread_extension': 1}
+               #  }
+           ]}
 
 HBAR = {'pair': 'HBAR/USDT',
         'name': 'HBAR',
@@ -162,4 +162,4 @@ HBAR = {'pair': 'HBAR/USDT',
             #  }
         ]}
 
-deployed_strategies = {'ALPH': ALPH, 'ALPH_test': ALPH_test, 'CETUS': CETUS}
+deployed_strategies = {'ALPH': ALPH, 'ALPH_test': ALPH_test, 'MOODENG': MOODENG}
