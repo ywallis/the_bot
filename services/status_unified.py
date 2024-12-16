@@ -18,13 +18,18 @@ from status_boiler import get_order_status, get_balance_status, fetch_all_open_o
 from status_clients import all_clients, low_balance_threshold, pair
 from accounting_boiler import unaddressed_imbalances
 from sql_connector import send_sql_query
-from sql_queries import fetch_imbalances
-
+from query_loader import QueryLoader
 
 email_sent = False
 bot_activated = True
 
 if __name__ == '__main__':
+
+    # Initialize QueryLoader
+
+    query_loader = QueryLoader()
+    query_loader.load_queries()
+    fetch_imbalances = query_loader.get_query('fetch_imbalances')
 
     while bot_activated:
         try:

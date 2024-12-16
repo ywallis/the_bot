@@ -6,13 +6,19 @@ sys.path.append("..")
 
 from services.status_clients import taker_client, pair, all_clients
 from services.sql_connector import send_sql_query
-from services.sql_queries import *
 from status_boiler import fetch_all_open_orders_client_order_id
+from services.query_loader import QueryLoader
 
 from dotenv import dotenv_values
 
 config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '/docker/database/', '.env'))
 pg_config = dotenv_values(f'..{config_path}')
+
+# Initialize QueryLoader
+
+query_loader = QueryLoader()
+query_loader.load_queries()
+fetch_imbalances = query_loader.get_query('fetch_imbalances')
 
 print('Uses a static spread for the time being, please modify.')
 spread = 1.003
