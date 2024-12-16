@@ -1,4 +1,5 @@
 import psycopg
+from psycopg import sql
 import os
 from dotenv import dotenv_values
 
@@ -107,11 +108,14 @@ def export_to_sql(data, credentials, table):
 
             # Insert data
             columns = data[0].keys()  # Get the column names from the dictionary
-            columns_str = ', '.join(columns)  # Comma-separated column names
-            placeholders = ', '.join(['%s'] * len(columns))  # Generate placeholders for each column
+            columns_identifiers = [sql.Identifier(col.lower()) for col in columns]
 
             # Insert query
-            insert_query = f"INSERT INTO {table} ({columns_str}) VALUES ({placeholders}) ON CONFLICT (exchange, id, side) DO NOTHING"
+            insert_query = sql.SQL("INSERT INTO {} ({}) VALUES ({}) ON CONFLICT (exchange, id, side) DO NOTHING").format(
+                sql.Identifier(table),
+                sql.SQL(', ').join(columns_identifiers),
+                sql.SQL(', ').join(sql.Placeholder() * len(columns))
+            )
 
             # Convert dictionaries to tuple format for psycopg3
             values = [tuple(d.values()) for d in data]
