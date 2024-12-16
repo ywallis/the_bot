@@ -9,14 +9,20 @@ sys.path.append("..")
 
 from services.status_clients import pair, all_clients
 from services.sql_connector import send_sql_query
-from services.sql_queries import *
 from services.accounting_boiler import prepare_items_for_pg, export_to_sql
+from services.query_loader import QueryLoader
 
 
 from dotenv import dotenv_values
 
 config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '/docker/database/', '.env'))
 pg_config = dotenv_values(f'..{config_path}')
+
+# Initialize QueryLoader
+
+query_loader = QueryLoader()
+query_loader.load_queries()
+orphans = query_loader.get_query('find_orphans')
 
 print('Looking to place orphans with:')
 for client in all_clients:
