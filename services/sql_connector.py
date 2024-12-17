@@ -2,7 +2,7 @@ import psycopg
 import pandas as pd
 
 
-def send_sql_query(pg_config: dict, sql_query: str, raw: bool = False):
+def send_sql_query(pg_config: dict, sql_query: str, raw: bool = False, parameters=None):
     """
     Sends an SQL query to a PostgreSQL database and returns the result.
 
@@ -10,10 +10,13 @@ def send_sql_query(pg_config: dict, sql_query: str, raw: bool = False):
         pg_config (dict): Configuration for connecting to PostgreSQL.
         sql_query (str): SQL query to execute.
         raw (bool): If True, returns raw rows and column names; otherwise, returns a DataFrame.
+        parameters (dict): If any, the variables for the query.
 
     Returns:
         pd.DataFrame or tuple: Query result as a DataFrame or raw rows and column names.
     """
+    if parameters is None:
+        parameters = dict()
     try:
         # Establish a connection to the database
         with psycopg.connect(
@@ -24,7 +27,7 @@ def send_sql_query(pg_config: dict, sql_query: str, raw: bool = False):
             # Create a cursor object
             with conn.cursor() as cur:
                 # Execute the SQL query
-                cur.execute(sql_query)
+                cur.execute(sql_query, parameters)
 
                 # Fetch all rows
                 rows = cur.fetchall()
