@@ -11,6 +11,8 @@ SELECT
 
 FROM
     trades
+WHERE
+    trades.symbol = %(symbol)s
 GROUP BY
     trades.symbol,
     DATE(datetime)
