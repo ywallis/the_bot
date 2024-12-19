@@ -30,6 +30,8 @@ if __name__ == '__main__':
     query_loader = QueryLoader()
     query_loader.load_queries()
     fetch_imbalances = query_loader.get_query('fetch_imbalances')
+    daily_overview = query_loader.get_query('daily_overview')
+    monthly_overview = query_loader.get_query('monthly_overview')
 
     while bot_activated:
         try:
