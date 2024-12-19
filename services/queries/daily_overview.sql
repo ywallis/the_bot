@@ -21,4 +21,4 @@ ORDER BY
     trades.symbol
 
 LIMIT
-7
+%(range)s

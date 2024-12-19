@@ -22,7 +22,7 @@ query_loader.load_queries()
 daily_overview = query_loader.get_query('daily_overview')
 monthly_overview = query_loader.get_query('monthly_overview')
 
-daily_performance = send_sql_query(pg_config, daily_overview, False, {'symbol': test_sym})
+daily_performance = send_sql_query(pg_config, daily_overview, False, {'symbol': test_sym, 'range': 7})
 #daily_performance = send_sql_query(pg_config, daily_overview, False)
 print('Daily performance:')
 print(daily_performance)
