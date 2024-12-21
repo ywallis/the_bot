@@ -2,7 +2,7 @@
 
 SELECT
     overview.symbol,
-    DATE_TRUNC('month', overview.date) AS month,
+    TO_CHAR(DATE_TRUNC('month', overview.date), 'YYYY-MM') AS month,
     SUM(overview.usdt_gain) AS total_usdt_gain,
     SUM(overview.inventory_delta) AS total_inventory_delta
 FROM (
