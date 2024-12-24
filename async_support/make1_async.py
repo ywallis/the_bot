@@ -84,6 +84,7 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
         if event is not None:
             if event.is_set():
                 print("Watcher interrupted due to missing heartbeat")
+                logger.warning("Watcher interrupted due to missing heartbeat")
                 break
 
         # Slow watching if no open order
@@ -124,10 +125,12 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
 
             if current_time - taker_order_book_time > timedelta(seconds=5):
                 print("Taker order book is stale, waiting for update")
+                logger.info("Taker order book is stale, waiting for update")
                 continue
 
             if current_time - maker_order_book_time > timedelta(seconds=5):
                 print("Maker order book is stale, waiting for update")
+                logger.info("Maker order book is stale, waiting for update")
                 continue
 
 
@@ -149,7 +152,7 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
 
         watch_spread = round((all_asks[highest_ask] / all_bids[lowest_bid] - 1) * 100, 2)
 
-        print(f'Watching at {datetime.now()}.'
+        logger.info(f'Watching at {datetime.now()}.'
               f'\nLowest on {lowest_bid} for {all_bids[lowest_bid]}, '
               f'highest on {highest_ask} for {all_asks[highest_ask]} ({watch_spread}%).')
 
@@ -191,7 +194,6 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
                                                   maker_min_size,
                                                   maker_size)
 
-            print(f'Optimal order size currently {optimal_sell_size}')
             logger.info(f'Optimal order size currently {optimal_sell_size}')
 
             # If the flag for an existing sell doesn't exist yet, create a sell order at the bottom ask.
@@ -244,7 +246,6 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
             # If the flag for an existing sell order exists, check if it has been filled.
 
             else:
-                print(f"Sell order already present at {returned_sell_order['price']}")
                 logger.info(f"Sell order already present at {returned_sell_order['price']}")
 
                 # Check if some of the order has been filled. If yes, the order is cancelled and the flag removed.
@@ -283,7 +284,7 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
             optimal_buy_size = maker_order_sizer(best_bid_maker, taker_client_bids, "buy", maker_spread, maker_min_size,
                                                  maker_size)
 
-            print(f'Optimal order size currently {optimal_buy_size}')
+            logger.info(f'Optimal order size currently {optimal_buy_size}')
 
             # If the flag for an existing buy doesn't exist yet, create a buy order at the top bid.
             # Includes a custom clientOrderId to differentiate these orders from hanging taker order.
@@ -334,7 +335,6 @@ async def make_and_take(taker_client: Exchange, maker_client: Exchange, config: 
             # If the flag for an existing buy order exists, check if it has been filled.
 
             else:
-                print(f"Buy order already present at {returned_buy_order['price']}")
                 logger.info(f"Buy order already present at {returned_buy_order['price']}")
 
                 # Check if some of the order has been filled. If yes, the order is cancelled and the flag removed.
