@@ -325,8 +325,8 @@ async def create_and_return_order_abstraction(maker_client: Exchange, price: flo
     else:
         identifier = 'eb'
 
-    print(f'Making on {maker_client.name}, {side}ing {price}')
-    logger.info(f'Making on {maker_client.name}, {side}ing {price}')
+    print(f'Making at {datetime.now()} on {maker_client.name}, {side}ing {price}')
+    logger.info(f'Making at {datetime.now()} on {maker_client.name}, {side}ing {price}')
 
     order = await maker_client.create_limit_order(symbol=pair,
                                                   side=side,
