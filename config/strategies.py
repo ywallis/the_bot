@@ -86,8 +86,8 @@ ALPH_test = {'pair': 'ALPH/USDT',
                                                }
                                   }]}
 
-MOODENG = {'pair': 'MOODENG/USDT',
-           'name': 'MOODENG',
+BANANAS31 = {'pair': 'BANANAS31/USDT',
+           'name': 'BANANAS31',
            'production': True,
            'low_balance_threshold': 0,
            'zmq_port': 5557,
@@ -162,4 +162,4 @@ HBAR = {'pair': 'HBAR/USDT',
             #  }
         ]}
 
-deployed_strategies = {'ALPH': ALPH, 'ALPH_test': ALPH_test, 'MOODENG': MOODENG}
+deployed_strategies = {'ALPH': ALPH, 'ALPH_test': ALPH_test, 'BANANAS31': BANANAS31}
