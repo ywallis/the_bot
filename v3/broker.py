@@ -1,17 +1,24 @@
 from enums import OrderSide, MessageType
 from structs import CancellationMessage, OrderMessage
 from utils import parse_message
-from ccxt.base.exchange import Exchange # pyright: ignore[reportMissingTypeStubs] 
+from ccxt.base.exchange import Exchange  # pyright: ignore[reportMissingTypeStubs]
+
 # from ws.ws_clients import all_clients_dict
 import tomllib
 import asyncio
 from redis.asyncio import Redis, ConnectionPool
+import json
 
 redis_in = Redis(host="localhost", port=6379, decode_responses=True)
 redis_out = Redis(host="localhost", port=6379, decode_responses=True)
 
 CONFIG_FILE = "config.toml"
-queue_name = "broker"
+CHANNEL_NAME = "broker"
+
+fake_clients = {"mexc": "mexc_client",
+                "gate": "gate_client",
+                "bitget": "bitget_client"}
+
 
 def load_worker_settings():
     """Load worker settings from a TOML file."""
@@ -19,37 +26,72 @@ def load_worker_settings():
         config = tomllib.load(f)
     return config.get("exchanges", {})
 
-def take_action(job: str):
-    print(job)
+
+async def worker(exchange, queue, ccxt_client):
+    """Processes messages from the queue and sends them to the correct ccxt_client."""
+    while True:
+        data = await queue.get()
+        if data is None:  # Shutdown signal
+            queue.task_done()
+            break
+
+        print(f"Worker [{exchange}] processing: {data} -> {ccxt_client}")
+        await asyncio.sleep(1)  # Simulate async processing
+        await redis_out.publish(data['id'], "CONFIRMED")
+        
+        queue.task_done()
 
 
-def process_message(order: CancellationMessage | OrderMessage, clients: dict[str, Exchange]):
-    # This is where messages will be processed. I currently imagine two types of messages: place order and cancel order. Obviously, more data is needed to cancel an order than to create oe, but I think that can be ignore in a first step. This will be a good place to practice both serialisation and enum/match in python and rust.
+async def redis_subscriber(queues):
+    """Listens to Redis channel and routes messages to the correct queue."""
+    redis = await Redis(host="localhost", port=6379, decode_responses=True)
+    pubsub = redis.pubsub()
+    await pubsub.subscribe(CHANNEL_NAME)
 
-    pass
+    print("Subscribed to Redis channel:", CHANNEL_NAME)
 
+    try:
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                data = json.loads(message["data"])
+                exchange = data.get("exchange")
 
-async def pull_from_queue(queue: str, timeout: int) -> str | None:
+                if exchange in queues:
+                    await queues[exchange].put(data)
+                    print("Data is", data)
+                else:
+                    print(
+                        f"Warning: Received unknown message type '{exchange}', ignoring..."
+                    )
+    finally:
+        await pubsub.unsubscribe(CHANNEL_NAME)
+        await redis.close()
 
-    redis_results: tuple[str, str] | None = await redis_in.blpop([queue], timeout=timeout)  # pyright: ignore [reportAssignmentType, reportUnknownMemberType]
-
-    print("Result:", redis_results)
-
-    if redis_results:
-        _key, message = redis_results
-        # print(f"Message is {message}")
-        return message
-    else:
-        print("Queue is empty")
-        return None
 
 async def main():
+    worker_settings = load_worker_settings()
+    print(worker_settings)
+    queues = {exchange: asyncio.Queue() for exchange in worker_settings}
+    print(queues)
 
-    while True:
-        data = await pull_from_queue(queue_name, 0)
+    subscriber_task = asyncio.create_task(redis_subscriber(queues))
+
+
+    for exchange in worker_settings:
+        asyncio.create_task(
+            worker(exchange, queues[exchange], fake_clients[exchange])
+        )
+
+    # worker_tasks = {
+    #     exchange: asyncio.create_task(
+    #         worker(exchange, queues[exchange], fake_clients[exchange])
+    #     )
+    #     for exchange in worker_settings
+    # }
+
+    await asyncio.gather(subscriber_task, return_exceptions=True)
 
 
 if __name__ == "__main__":
     print("Hi from main")
-    print(load_worker_settings())
     asyncio.run(main())

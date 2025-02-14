@@ -34,7 +34,7 @@ class MessageProcessor:
 
     def __init__(self):
 
-        self.pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=10)
+        self.pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=15)
         self.redis = Redis(host="localhost", port=6379, decode_responses=True, connection_pool=self.pool)
         self.redis_pubsub = Redis(connection_pool=self.pool, decode_responses=True).pubsub()
         self.locks = {}  # Dictionary to store locks dynamically
@@ -63,9 +63,9 @@ class MessageProcessor:
 
     async def send_to_broker(self, msg: OrderMessage | CancellationMessage):
         flattened = json.dumps(dict(msg), default=str)
-        _: Awaitable[int] = await self.redis.rpush("broker", flattened) # type: ignore
+        _: Awaitable[int] = await self.redis.publish("broker", flattened) # type: ignore
 
-        print('seeeend')
+        print(flattened)
         
         return_redis_instance = Redis(host="localhost", port=6379, decode_responses=True, connection_pool=self.pool)
         return_redis_pubsub = return_redis_instance.pubsub()
@@ -74,11 +74,15 @@ class MessageProcessor:
         print(f"Waiting for message on channel {msg['id']}")
         async for message in return_redis_pubsub.listen():
             if message["type"] == "message":
-                print("Received:", message)
-                break  # Exit loop once a message is received        # message = await return_redis_pubsub.get_message(ignore_subscribe_messages=True, timeout=None)
+                print("Received:", message['data'])
+                break  
+
+
+        # SO FAR EVERYTHING GETS CONFIRMED BY A RESPONSE!!
+
 
         await return_redis_pubsub.unsubscribe(msg["id"])
-        await return_redis_instance.close()
+        await return_redis_instance.aclose()
         print(f"Unsubscribed from {msg['id']}")
         print("End of send to broker")
 
@@ -89,9 +93,7 @@ class MessageProcessor:
         logger.debug(f"Sending {msg['id']} to broker")
         # TODO: Replace with broker connector
         await self.send_to_broker(msg)
-        await asyncio.sleep(3)
         order_confirmed = True
-        print("This should not print for now")
 
         return order_confirmed
 
