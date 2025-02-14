@@ -1,11 +1,12 @@
 import logging
+import json
 from pythonjsonlogger.json import JsonFormatter
 import asyncio
-from typing import cast
+from typing import cast, Awaitable
 from copy import copy
 from enums import MessageType
 from structs import OrderMessage, CancellationMessage
-from redis.asyncio import Redis
+from redis.asyncio import Redis, ConnectionPool
 from datetime import datetime
 from utils import parse_message
 
@@ -33,7 +34,9 @@ class MessageProcessor:
 
     def __init__(self):
 
-        self.redis = Redis(host="localhost", port=6379, decode_responses=True)
+        self.pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=10)
+        self.redis = Redis(host="localhost", port=6379, decode_responses=True, connection_pool=self.pool)
+        self.redis_pubsub = Redis(connection_pool=self.pool, decode_responses=True).pubsub()
         self.locks = {}  # Dictionary to store locks dynamically
         self.message_queue = (
             {}
@@ -48,7 +51,6 @@ class MessageProcessor:
         strategy: str = msg["strategy"]
         prior = copy(self.message_queue[strategy])
         logger.debug(f"Replacing {prior['id']} with {msg['id']}")
-        # Add logging here
         self.message_queue[strategy] = msg
         return prior["id"]
 
@@ -59,20 +61,45 @@ class MessageProcessor:
             logger.debug(f"No lock found, creating one for {strategy}")
         return self.locks[strategy]
 
+    async def send_to_broker(self, msg: OrderMessage | CancellationMessage):
+        flattened = json.dumps(dict(msg), default=str)
+        _: Awaitable[int] = await self.redis.rpush("broker", flattened) # type: ignore
+
+        print('seeeend')
+        
+        return_redis_instance = Redis(host="localhost", port=6379, decode_responses=True, connection_pool=self.pool)
+        return_redis_pubsub = return_redis_instance.pubsub()
+        await return_redis_pubsub.subscribe(msg['id'])
+
+        print(f"Waiting for message on channel {msg['id']}")
+        async for message in return_redis_pubsub.listen():
+            if message["type"] == "message":
+                print("Received:", message)
+                break  # Exit loop once a message is received        # message = await return_redis_pubsub.get_message(ignore_subscribe_messages=True, timeout=None)
+
+        await return_redis_pubsub.unsubscribe(msg["id"])
+        await return_redis_instance.close()
+        print(f"Unsubscribed from {msg['id']}")
+        print("End of send to broker")
+
+
     async def place_order(self, msg: OrderMessage) -> bool:
         """Sends an order object to the broker and expects a confirmation."""
 
         logger.debug(f"Sending {msg['id']} to broker")
         # TODO: Replace with broker connector
+        await self.send_to_broker(msg)
         await asyncio.sleep(3)
         order_confirmed = True
+        print("This should not print for now")
 
         return order_confirmed
 
-    async def place_cancellation(self, id: str) -> bool:
+    # The cancellation actually only requires the "open order" OrderMessage
+    async def place_cancellation(self, order: OrderMessage) -> bool:
         """Sends an order object to the broker and expects a confirmation."""
 
-        logger.debug(f"Cancelling {id} with broker")
+        logger.debug(f"Cancelling {order['id']} with broker")
         # TODO: Replace with broker connector
         await asyncio.sleep(3)
         cancellation_confirmed = True
@@ -122,7 +149,7 @@ class MessageProcessor:
                         f"Cancelling order {self.open_orders[strategy]['id']} for strategy {strategy}"
                     )
 
-                    if await self.place_cancellation(self.open_orders[strategy]['id']):
+                    if await self.place_cancellation(self.open_orders[strategy]):
                         del(self.open_orders[strategy])
 
                 else:
@@ -135,7 +162,7 @@ class MessageProcessor:
                 if strategy in self.open_orders:
                     logger.debug(f"Cancelling order {self.open_orders[strategy]['id']} for strategy {strategy} and replacing with order {msg['id']}")
 
-                    if await self.place_cancellation(self.open_orders[strategy]['id']):
+                    if await self.place_cancellation(self.open_orders[strategy]):
                         del(self.open_orders[strategy])
 
                     if await self.place_order(order_msg):
