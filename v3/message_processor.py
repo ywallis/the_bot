@@ -1,8 +1,9 @@
 import logging
 import json
-from pythonjsonlogger.json import JsonFormatter
 import asyncio
-from typing import cast, Awaitable
+import logging
+import logging_config 
+from typing import cast
 from copy import copy
 from enums import MessageType
 from structs import OrderMessage, CancellationMessage
@@ -14,20 +15,14 @@ from utils import parse_message, cancellation_from_order
 # TODO:
 # - Logging
 # - Testing
-# - CCXT broker response
-# - Cancel / Cancel and replace in order processing dependant on open order
+# - Define CCXT broker response
 
 # NOTES:
 # The strategy knows when to void it's own signals.
 # Returns from tasks will probably just be used for logs.
 
-logger = logging.getLogger()
-
-logHandler = logging.StreamHandler()
-formatter = JsonFormatter("{filename}{asctime}{message}{exc_info}", style="{")
-logHandler.setFormatter(formatter)
-logger.addHandler(logHandler)
-logger.setLevel(logging.INFO)
+logging_config.setup_logging()
+logger = logging.getLogger(__name__)
 
 
 class MessageProcessor:
@@ -61,7 +56,7 @@ class MessageProcessor:
             logger.debug(f"No lock found, creating one for {strategy}")
         return self.locks[strategy]
 
-    async def send_to_broker(self, msg: OrderMessage | CancellationMessage):
+    async def send_to_broker(self, msg: OrderMessage | CancellationMessage) -> bool:
         flattened = json.dumps(dict(msg), default=str)
 
         # Now using context manager to ensure redis instances are dropped.
@@ -74,31 +69,29 @@ class MessageProcessor:
                 await pubsub.subscribe(msg["id"])
                 async for message in pubsub.listen():
                     if message["type"] == "message":
-                        # print("Received:", message['data'].decode())
                         logger.info(f"Received reply from boker for msg {msg['id']}: {message['data'].decode()}")
                         break
                 await pubsub.unsubscribe(msg["id"])
 
+        # This is where parsing and returning the reponse will happen. So far this always returns true.
+
+        return True
 
     async def place_order(self, msg: OrderMessage) -> bool:
         """Sends an order object to the broker and expects a confirmation."""
 
         logger.debug(f"Sending {msg['id']} to broker")
         # TODO: Replace with broker connector
-        await self.send_to_broker(msg)
-        order_confirmed = True
+        order_confirmed = await self.send_to_broker(msg)
 
         return order_confirmed
 
-    # The cancellation actually only requires the "open order" OrderMessage
     async def place_cancellation(self, order: CancellationMessage) -> bool:
         """Sends an order object to the broker and expects a confirmation."""
 
         logger.debug(f"Cancelling {order['id']} with broker")
         # TODO: Replace with broker connector
-        await self.send_to_broker(order)
-        await asyncio.sleep(0.01)
-        cancellation_confirmed = True
+        cancellation_confirmed = await self.send_to_broker(order)
 
         return cancellation_confirmed
 
@@ -106,7 +99,7 @@ class MessageProcessor:
         """Process the message if the lock is available."""
 
         if msg is None:
-            logger.error("Invalid parsing")
+            logger.error(f"Invalid parsing for message {msg}")
             return
 
         strategy: str = msg["strategy"]

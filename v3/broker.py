@@ -1,13 +1,18 @@
+import logging
+import logging_config 
 from enums import OrderSide, MessageType
 from structs import CancellationMessage, OrderMessage
 from utils import parse_message
 from ccxt.base.exchange import Exchange  # pyright: ignore[reportMissingTypeStubs]
 
-# from ws.ws_clients import all_clients_dict
 import tomllib
 import asyncio
 from redis.asyncio import Redis, ConnectionPool
 import json
+
+# Initializing centralized logging
+logging_config.setup_logging()
+logger = logging.getLogger(__name__)
 
 redis_in = Redis(host="localhost", port=6379, decode_responses=True)
 redis_out = Redis(host="localhost", port=6379, decode_responses=True)
@@ -35,9 +40,14 @@ async def worker(exchange, queue, ccxt_client):
             queue.task_done()
             break
 
-        print(f"Worker [{exchange}] processing: {data} -> {ccxt_client}")
-        await asyncio.sleep(0.01)  # Simulate async processing
-        await redis_out.publish(data['id'], f"{data['id']} confirmed on {exchange}")
+        parsed_data = parse_message(data)
+        if parsed_data is None:
+            logger.error(f"Invalid parsing for message {parsed_data}")
+
+        elif parsed_data['kind'] == MessageType.ORDER:
+            print(f"Worker [{exchange}] processing: {data} -> {ccxt_client}")
+            await asyncio.sleep(0.01)  # Simulate async processing
+            await redis_out.publish(data['id'], f"{data['id']} confirmed on {exchange}")
         
         queue.task_done()
 
