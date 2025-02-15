@@ -36,7 +36,7 @@ async def worker(exchange, queue, ccxt_client):
             break
 
         print(f"Worker [{exchange}] processing: {data} -> {ccxt_client}")
-        await asyncio.sleep(1)  # Simulate async processing
+        await asyncio.sleep(0.05)  # Simulate async processing
         await redis_out.publish(data['id'], "CONFIRMED")
         
         queue.task_done()

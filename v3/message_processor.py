@@ -34,8 +34,8 @@ class MessageProcessor:
 
     def __init__(self):
 
-        self.pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=15)
-        self.redis = Redis(host="localhost", port=6379, decode_responses=True, connection_pool=self.pool)
+        self.pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=50)
+        self.redis = Redis(decode_responses=True, connection_pool=self.pool)
         self.redis_pubsub = Redis(connection_pool=self.pool, decode_responses=True).pubsub()
         self.locks = {}  # Dictionary to store locks dynamically
         self.message_queue = (
@@ -63,27 +63,20 @@ class MessageProcessor:
 
     async def send_to_broker(self, msg: OrderMessage | CancellationMessage):
         flattened = json.dumps(dict(msg), default=str)
-        _: Awaitable[int] = await self.redis.publish("broker", flattened) # type: ignore
 
-        print(flattened)
-        
-        return_redis_instance = Redis(host="localhost", port=6379, decode_responses=True, connection_pool=self.pool)
-        return_redis_pubsub = return_redis_instance.pubsub()
-        await return_redis_pubsub.subscribe(msg['id'])
+        # Now using context manager to ensure redis instances are dropped.
 
-        print(f"Waiting for message on channel {msg['id']}")
-        async for message in return_redis_pubsub.listen():
-            if message["type"] == "message":
-                print("Received:", message['data'])
-                break  
+        async with Redis(connection_pool=self.pool, decode_responses=True) as redis:
+            await redis.publish("broker", flattened)
 
-
-        # SO FAR EVERYTHING GETS CONFIRMED BY A RESPONSE!!
-
-
-        await return_redis_pubsub.unsubscribe(msg["id"])
-        await return_redis_instance.aclose()
-        print(f"Unsubscribed from {msg['id']}")
+            async with redis.pubsub() as pubsub:
+                await pubsub.subscribe(msg["id"])
+                async for message in pubsub.listen():
+                    if message["type"] == "message":
+                        print("Received:", message['data'])
+                        break
+                await pubsub.unsubscribe(msg["id"])
+                print(f"Unsubscribed from {msg['id']}")
         print("End of send to broker")
 
 
