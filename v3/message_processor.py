@@ -8,7 +8,7 @@ from enums import MessageType
 from structs import OrderMessage, CancellationMessage
 from redis.asyncio import Redis, ConnectionPool
 from datetime import datetime
-from utils import parse_message
+from utils import parse_message, cancellation_from_order
 
 # This is the draft for my trading system message processor
 # TODO:
@@ -34,7 +34,7 @@ class MessageProcessor:
 
     def __init__(self):
 
-        self.pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=50)
+        self.pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=20)
         self.redis = Redis(decode_responses=True, connection_pool=self.pool)
         self.redis_pubsub = Redis(connection_pool=self.pool, decode_responses=True).pubsub()
         self.locks = {}  # Dictionary to store locks dynamically
@@ -66,18 +66,18 @@ class MessageProcessor:
 
         # Now using context manager to ensure redis instances are dropped.
 
-        async with Redis(connection_pool=self.pool, decode_responses=True) as redis:
+        async with Redis(connection_pool=self.pool) as redis:
             await redis.publish("broker", flattened)
 
+            logger.info(f"Sending message with id {msg['id']} and type {msg['kind']} to broker.")
             async with redis.pubsub() as pubsub:
                 await pubsub.subscribe(msg["id"])
                 async for message in pubsub.listen():
                     if message["type"] == "message":
-                        print("Received:", message['data'])
+                        # print("Received:", message['data'].decode())
+                        logger.info(f"Received reply from boker for msg {msg['id']}: {message['data'].decode()}")
                         break
                 await pubsub.unsubscribe(msg["id"])
-                print(f"Unsubscribed from {msg['id']}")
-        print("End of send to broker")
 
 
     async def place_order(self, msg: OrderMessage) -> bool:
@@ -91,12 +91,13 @@ class MessageProcessor:
         return order_confirmed
 
     # The cancellation actually only requires the "open order" OrderMessage
-    async def place_cancellation(self, order: OrderMessage) -> bool:
+    async def place_cancellation(self, order: CancellationMessage) -> bool:
         """Sends an order object to the broker and expects a confirmation."""
 
         logger.debug(f"Cancelling {order['id']} with broker")
         # TODO: Replace with broker connector
-        await asyncio.sleep(3)
+        await self.send_to_broker(order)
+        await asyncio.sleep(0.01)
         cancellation_confirmed = True
 
         return cancellation_confirmed
@@ -144,7 +145,8 @@ class MessageProcessor:
                         f"Cancelling order {self.open_orders[strategy]['id']} for strategy {strategy}"
                     )
 
-                    if await self.place_cancellation(self.open_orders[strategy]):
+                    cancellation = cancellation_from_order(self.open_orders[strategy])
+                    if await self.place_cancellation(cancellation):
                         del(self.open_orders[strategy])
 
                 else:
@@ -157,7 +159,8 @@ class MessageProcessor:
                 if strategy in self.open_orders:
                     logger.debug(f"Cancelling order {self.open_orders[strategy]['id']} for strategy {strategy} and replacing with order {msg['id']}")
 
-                    if await self.place_cancellation(self.open_orders[strategy]):
+                    cancellation = cancellation_from_order(self.open_orders[strategy])
+                    if await self.place_cancellation(cancellation):
                         del(self.open_orders[strategy])
 
                     if await self.place_order(order_msg):
@@ -212,7 +215,7 @@ class MessageProcessor:
                         logger.info(f"BATCH: {result}")
                     # print(f"Collected results: {sorted(results)}")
 
-            await asyncio.sleep(5)  # Check every 20 second
+            await asyncio.sleep(2)  # Check every 20 second
 
 
 async def main():

@@ -4,8 +4,6 @@ from decimal import Decimal
 import json
 
 
-
-
 def parse_message(message_raw: str) -> OrderMessage | CancellationMessage | None:
 
     message: dict[str, str] = json.loads(message_raw)
@@ -28,3 +26,12 @@ def parse_message(message_raw: str) -> OrderMessage | CancellationMessage | None
                 id=message["id"],
             )
 
+
+def cancellation_from_order(order: OrderMessage) -> CancellationMessage:
+
+    return CancellationMessage(
+        kind=MessageType.CANCELLATION,
+        strategy=order["strategy"],
+        exchange=order["exchange"],
+        id=order["id"],
+    )
