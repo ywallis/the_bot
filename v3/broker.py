@@ -7,8 +7,13 @@ from ccxt.base.exchange import Exchange  # pyright: ignore[reportMissingTypeStub
 
 import tomllib
 import asyncio
-from redis.asyncio import Redis, ConnectionPool
+from redis.asyncio import Redis
 import json
+
+# TODO
+# - Replying back to the message processor via redis needs to happen in a new "worked" which collects results.
+#   As of now, I don't know how I will handle things such as retry mechanisms? Do they need to be integrated in the flow? I will essentially await my abstraction?
+
 
 # Initializing centralized logging
 logging_config.setup_logging()
@@ -41,13 +46,21 @@ async def worker(exchange, queue, ccxt_client):
             break
 
         parsed_data = parse_message(data)
+
         if parsed_data is None:
             logger.error(f"Invalid parsing for message {parsed_data}")
 
         elif parsed_data['kind'] == MessageType.ORDER:
-            print(f"Worker [{exchange}] processing: {data} -> {ccxt_client}")
+            logger.debug(f"Worker [{exchange}] processing order: {data} -> {ccxt_client}")
+            # await ccxt_client.create_order()
             await asyncio.sleep(0.01)  # Simulate async processing
-            await redis_out.publish(data['id'], f"{data['id']} confirmed on {exchange}")
+            await redis_out.publish(data['id'], f"{data['id']} order confirmed on {exchange}")
+
+        elif parsed_data['kind'] == MessageType.CANCELLATION:
+            logger.debug(f"Worker [{exchange}] processing cancellation: {data} -> {ccxt_client}")
+            # await ccxt_client.cancel_order()
+            await asyncio.sleep(0.01)  # Simulate async processing
+            await redis_out.publish(data['id'], f"{data['id']} cancellation confirmed on {exchange}")
         
         queue.task_done()
 
@@ -58,7 +71,7 @@ async def redis_subscriber(queues):
     pubsub = redis.pubsub()
     await pubsub.subscribe(CHANNEL_NAME)
 
-    print("Subscribed to Redis channel:", CHANNEL_NAME)
+    logger.debug("Subscribed to Redis channel:", CHANNEL_NAME)
 
     try:
         async for message in pubsub.listen():
@@ -68,9 +81,8 @@ async def redis_subscriber(queues):
 
                 if exchange in queues:
                     await queues[exchange].put(data)
-                    print("Data is", data)
                 else:
-                    print(
+                    logger.error(
                         f"Warning: Received unknown message type '{exchange}', ignoring..."
                     )
     finally:
@@ -80,9 +92,7 @@ async def redis_subscriber(queues):
 
 async def main():
     worker_settings = load_worker_settings()
-    print(worker_settings)
     queues = {exchange: asyncio.Queue() for exchange in worker_settings}
-    print(queues)
 
     subscriber_task = asyncio.create_task(redis_subscriber(queues))
 
@@ -92,16 +102,8 @@ async def main():
             worker(exchange, queues[exchange], fake_clients[exchange])
         )
 
-    # worker_tasks = {
-    #     exchange: asyncio.create_task(
-    #         worker(exchange, queues[exchange], fake_clients[exchange])
-    #     )
-    #     for exchange in worker_settings
-    # }
-
     await asyncio.gather(subscriber_task, return_exceptions=True)
 
 
 if __name__ == "__main__":
-    print("Hi from main")
     asyncio.run(main())
