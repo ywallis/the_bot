@@ -36,7 +36,7 @@ def load_worker_settings():
     return config.get("exchanges", {})
 
 
-async def worker(exchange_name: str, queue: asyncio.Queue(), ccxt_client):
+async def worker(exchange_name: str, queue: asyncio.Queue, ccxt_client):
     """Processes messages from the queue and sends them to the correct ccxt_client."""
     while True:
         data = await queue.get()
