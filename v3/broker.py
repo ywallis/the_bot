@@ -36,7 +36,7 @@ def load_worker_settings():
     return config.get("exchanges", {})
 
 
-async def worker(exchange, queue, ccxt_client):
+async def worker(exchange_name: str, queue: asyncio.Queue(), ccxt_client):
     """Processes messages from the queue and sends them to the correct ccxt_client."""
     while True:
         data = await queue.get()
@@ -44,23 +44,20 @@ async def worker(exchange, queue, ccxt_client):
             queue.task_done()
             break
 
-        # parsed_data = parse_message(data)
-        parsed_data = data
+        if data is None:
+            logger.error(f"Invalid parsing for message {data}")
 
-        if parsed_data is None:
-            logger.error(f"Invalid parsing for message {parsed_data}")
-
-        elif parsed_data['kind'] == MessageType.ORDER:
-            logger.debug(f"Worker [{exchange}] processing order: {data} -> {ccxt_client}")
+        elif data['kind'] == MessageType.ORDER:
+            logger.debug(f"Worker [{exchange_name}] processing order: {data} -> {ccxt_client}")
             # await ccxt_client.create_order()
             await asyncio.sleep(0.01)  # Simulate async processing
-            await redis_out.publish(data['id'], f"{data['id']} order confirmed on {exchange}")
+            await redis_out.publish(data['id'], f"{data['id']} order confirmed on {exchange_name}")
 
-        elif parsed_data['kind'] == MessageType.CANCELLATION:
-            logger.debug(f"Worker [{exchange}] processing cancellation: {data} -> {ccxt_client}")
+        elif data['kind'] == MessageType.CANCELLATION:
+            logger.debug(f"Worker [{exchange_name}] processing cancellation: {data} -> {ccxt_client}")
             # await ccxt_client.cancel_order()
             await asyncio.sleep(0.01)  # Simulate async processing
-            await redis_out.publish(data['id'], f"{data['id']} cancellation confirmed on {exchange}")
+            await redis_out.publish(data['id'], f"{data['id']} cancellation confirmed on {exchange_name}")
         
         queue.task_done()
 
