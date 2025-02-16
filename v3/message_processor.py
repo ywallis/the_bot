@@ -74,6 +74,7 @@ class MessageProcessor:
                 await pubsub.unsubscribe(msg["id"])
 
         # This is where parsing and returning the reponse will happen. So far this always returns true.
+        # This should be simple: Confirmation, retry mechanism in case of errors, and informing/stopping the strat in case something goes out of bounds.
 
         return True
 

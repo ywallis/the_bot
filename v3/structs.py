@@ -7,6 +7,7 @@ class OrderMessage(TypedDict):
     strategy: str
     exchange: str
     id: str
+    pair: str
     side: OrderSide
     price: Decimal
     amount: Decimal
@@ -17,3 +18,4 @@ class CancellationMessage(TypedDict):
     strategy: str
     exchange: str
     id: str  # Should the id be created by the strategy or by the order manager? My gut says the latter. No point in generating some for messages that get ignored.
+    pair: str

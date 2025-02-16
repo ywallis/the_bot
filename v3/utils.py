@@ -14,6 +14,7 @@ def parse_message(message_raw: str) -> OrderMessage | CancellationMessage | None
                 strategy=message["strategy"],
                 exchange=message["exchange"],
                 id=message["id"],
+                pair=message['pair'],
                 side=OrderSide(message["side"]),
                 price=Decimal(message["price"]),
                 amount=Decimal(message["amount"]),
@@ -24,6 +25,7 @@ def parse_message(message_raw: str) -> OrderMessage | CancellationMessage | None
                 strategy=message["strategy"],
                 exchange=message["exchange"],
                 id=message["id"],
+                pair=message['pair'],
             )
 
 
@@ -34,4 +36,5 @@ def cancellation_from_order(order: OrderMessage) -> CancellationMessage:
         strategy=order["strategy"],
         exchange=order["exchange"],
         id=order["id"],
+        pair=order['pair'],
     )

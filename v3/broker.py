@@ -8,7 +8,6 @@ from ccxt.base.exchange import Exchange  # pyright: ignore[reportMissingTypeStub
 import tomllib
 import asyncio
 from redis.asyncio import Redis
-import json
 
 # TODO
 # - Replying back to the message processor via redis needs to happen in a new "worked" which collects results.
@@ -45,7 +44,8 @@ async def worker(exchange, queue, ccxt_client):
             queue.task_done()
             break
 
-        parsed_data = parse_message(data)
+        # parsed_data = parse_message(data)
+        parsed_data = data
 
         if parsed_data is None:
             logger.error(f"Invalid parsing for message {parsed_data}")
@@ -76,15 +76,20 @@ async def redis_subscriber(queues):
     try:
         async for message in pubsub.listen():
             if message["type"] == "message":
-                data = json.loads(message["data"])
-                exchange = data.get("exchange")
-
-                if exchange in queues:
-                    await queues[exchange].put(data)
+                print(message['data'])
+                data = parse_message(message["data"])
+                if data is None:
+                    logger.error(f"Invalid parsing for message {data}")
                 else:
-                    logger.error(
-                        f"Warning: Received unknown message type '{exchange}', ignoring..."
-                    )
+
+                    exchange = data.get("exchange")
+
+                    if exchange in queues:
+                        await queues[exchange].put(data)
+                    else:
+                        logger.error(
+                            f"Warning: Received unknown message type '{exchange}', ignoring..."
+                        )
     finally:
         await pubsub.unsubscribe(CHANNEL_NAME)
         await redis.close()
