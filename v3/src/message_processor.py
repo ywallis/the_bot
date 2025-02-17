@@ -2,7 +2,7 @@ import logging
 import json
 import asyncio
 import logging
-import logging_config 
+import src.logging_config 
 from typing import cast
 from copy import copy
 from enums import MessageType
@@ -20,7 +20,7 @@ from utils import parse_message, cancellation_from_order
 # The strategy knows when to void it's own signals.
 # Returns from tasks will probably just be used for logs.
 
-logging_config.setup_logging()
+src.logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
 
