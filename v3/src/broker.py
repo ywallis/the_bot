@@ -1,13 +1,14 @@
 import logging
 import logging_config 
+from typing import Protocol
 from enums import OrderSide, MessageType
 from structs import CancellationMessage, OrderMessage
 from utils import parse_message
-from ccxt.base.exchange import Exchange  # pyright: ignore[reportMissingTypeStubs]
-
+import ccxt.async_support as ccxt
 import tomllib
 import asyncio
 from redis.asyncio import Redis
+
 
 # TODO
 # - Replying back to the message processor via redis needs to happen in a new "worked" which collects results.
@@ -29,6 +30,10 @@ fake_clients = {"mexc": "mexc_client",
                 "bitget": "bitget_client"}
 
 
+class CustomExchange(Protocol):
+    async def create_limit_order(self, symbol: str, side: str, amount: float, price: float) -> dict: ...
+
+
 def load_worker_settings():
     """Load worker settings from a TOML file."""
     with open(CONFIG_FILE, "rb") as f:
@@ -36,22 +41,30 @@ def load_worker_settings():
     return config.get("exchanges", {})
 
 
-async def worker(exchange_name: str, queue: asyncio.Queue, ccxt_client):
+async def worker(exchange_name: str, queue: asyncio.Queue, ccxt_client: CustomExchange):
     """Processes messages from the queue and sends them to the correct ccxt_client."""
+
+    # STILL A BIG GAP IN THE PROCESSING, THE TRY/EXCEPT ONLY LOOKS AT WHETHER THE EXCHANGE RESPONDED, NOT WHAT THE RESPONSE IS.
+
     while True:
         data = await queue.get()
         if data is None:  # Shutdown signal
             queue.task_done()
             break
 
-        if data is None:
-            logger.error(f"Invalid parsing for message {data}")
-
         elif data['kind'] == MessageType.ORDER:
             logger.debug(f"Worker [{exchange_name}] processing order: {data} -> {ccxt_client}")
-            # await ccxt_client.create_order()
-            await asyncio.sleep(0.01)  # Simulate async processing
-            await redis_out.publish(data['id'], f"{data['id']} order confirmed on {exchange_name}")
+            try:
+                order = await ccxt_client.create_limit_order(symbol=data['pair'], side=data['side'].value, amount=data['amount'], price=data['price'])
+                # await asyncio.sleep(0.01)  # Simulate async processing
+            
+            except ccxt.ExchangeError as error:
+                logger.error(f"Order creation seems to have failed")
+                await redis_out.publish(data['id'], f"{data['id']} order failed on {exchange_name}")
+
+            else:
+
+                await redis_out.publish(data['id'], f"{data['id']} order response on {exchange_name} is :{order}")
 
         elif data['kind'] == MessageType.CANCELLATION:
             logger.debug(f"Worker [{exchange_name}] processing cancellation: {data} -> {ccxt_client}")

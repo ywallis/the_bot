@@ -5,8 +5,8 @@ import json
 
 import ccxt.async_support as ccxt # type: ignore
 from datetime import datetime
-from ccxt.base.types import Order, OrderSide # type: ignore
-from ccxt.base.exchange import Exchange # type: ignore
+from ccxt.async_support.base.types import Order, OrderSide # type: ignore
+from ccxt.async_support.base.exchange import Exchange # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -328,11 +328,16 @@ async def create_and_return_order_abstraction(maker_client: Exchange, price: flo
     print(f'Making at {datetime.now()} on {maker_client.name}, {side}ing {price}')
     logger.info(f'Making at {datetime.now()} on {maker_client.name}, {side}ing {price}')
 
-    order = await maker_client.create_limit_order(symbol=pair,
-                                                  side=side,
-                                                  amount=size,
-                                                  price=price,
-                                                  params={'clientOrderId': f't-{order_time()}_{identifier}'})
+    try:
+        order: Order = await maker_client.create_limit_order(symbol=pair,
+                                                      side=side,
+                                                      amount=size,
+                                                      price=price,
+                                                             params={'clientOrderId': f't-{order_time()}_{identifier}'}) # type: ignore
+
+    except ccxt.ExchangeError as error:
+        logger.error(f"Order creation seems to have failed")
+        raise ccxt.ExchangeError("Order creation failed")
 
     # Retrying in case of error
     for attempt in range(5):

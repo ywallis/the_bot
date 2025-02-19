@@ -105,7 +105,7 @@ requires-dist = [
     { name = "aiohttp", specifier = "==3.9.3" },
     { name = "aiosignal", specifier = "==1.3.1" },
     { name = "attrs", specifier = "==23.2.0" },
-    { name = "ccxt", specifier = "==4.4.32" },
+    { name = "ccxt", specifier = ">=4.4.60" },
     { name = "certifi", specifier = "==2024.2.2" },
     { name = "cffi", specifier = "==1.16.0" },
     { name = "charset-normalizer", specifier = "==3.3.2" },
@@ -151,7 +151,7 @@ wheels = [
 
 [[package]]
 name = "ccxt"
-version = "4.4.32"
+version = "4.4.60"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiodns" },
@@ -163,9 +163,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "yarl" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3c/c8/0ebea6dba98583547451a41fd1e7ae58a526d8d49a5e59fb3141578e55b1/ccxt-4.4.32.tar.gz", hash = "sha256:83a2f46978a9383a165a376cda6bf4ce16165a6220721a0a7f657a7368282c95", size = 5113332 }
+sdist = { url = "https://files.pythonhosted.org/packages/39/6a/fa967d14d85e6b8089699591721dc58c9bbcba0f7687d7bc69ba80ffc96a/ccxt-4.4.60.tar.gz", hash = "sha256:b3adb07675de764aeca291c49c9b7ac04fd3a51635d7341a76c686367ed9e02d", size = 5279073 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ef/ec/9e5aec08a49c2d43d1c59336e0f1ee00c0d9e3fc496b9a8160ceb00b6807/ccxt-4.4.32-py2.py3-none-any.whl", hash = "sha256:a80c2ad23d337a81e2c7f25dfb2d3766b553ab3db6b8dbf5bf8fade6af80a104", size = 5483079 },
+    { url = "https://files.pythonhosted.org/packages/f8/b6/68e11ee52b3d0eaacb9439d8a8c5a22569065b6f28d3713d795cbd48616a/ccxt-4.4.60-py2.py3-none-any.whl", hash = "sha256:02c467e8da8a1a6503d4d7cdf682c07b6928b7ce100ec0fb8f62066a021f21b4", size = 5639228 },
 ]
 
 [[package]]
