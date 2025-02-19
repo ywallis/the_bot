@@ -1,10 +1,11 @@
 import logging
 import logging_config 
-from typing import Protocol
 from enums import OrderSide, MessageType
-from structs import CancellationMessage, OrderMessage
+from structs import CancellationMessage, OrderMessage, CustomExchange
+from errors import BrokerError
 from utils import parse_message
 import ccxt.async_support as ccxt
+from ccxt_abstractions import create_and_return_order
 import tomllib
 import asyncio
 from redis.asyncio import Redis
@@ -30,10 +31,6 @@ fake_clients = {"mexc": "mexc_client",
                 "bitget": "bitget_client"}
 
 
-class CustomExchange(Protocol):
-    async def create_limit_order(self, symbol: str, side: str, amount: float, price: float) -> dict: ...
-
-
 def load_worker_settings():
     """Load worker settings from a TOML file."""
     with open(CONFIG_FILE, "rb") as f:
@@ -52,27 +49,32 @@ async def worker(exchange_name: str, queue: asyncio.Queue, ccxt_client: CustomEx
             queue.task_done()
             break
 
-        elif data['kind'] == MessageType.ORDER:
-            logger.debug(f"Worker [{exchange_name}] processing order: {data} -> {ccxt_client}")
+        else:
+
+            logger.debug(f"Worker [{exchange_name}] processing {data['kind'].value}: {data} -> {ccxt_client}")
+
             try:
-                order = await ccxt_client.create_limit_order(symbol=data['pair'], side=data['side'].value, amount=data['amount'], price=data['price'])
-                # await asyncio.sleep(0.01)  # Simulate async processing
+
+                if data['kind'] == MessageType.ORDER:
+
+                    confirmation = await create_and_return_order(data, ccxt_client)
+
+                elif data['kind'] == MessageType.CANCELLATION:
+                    # await ccxt_client.cancel_order()
+                    await asyncio.sleep(0.01)  # Simulate async processing
+                    confirmation = "fun"
             
-            except ccxt.ExchangeError as error:
-                logger.error(f"Order creation seems to have failed")
-                await redis_out.publish(data['id'], f"{data['id']} order failed on {exchange_name}")
+                ### I NEED A BETTER FLOW FOR THIS!!
 
-            else:
+                await redis_out.publish(data['id'], f"Reply from broker for {data['id']} on {exchange_name} is {confirmation}")
 
-                await redis_out.publish(data['id'], f"{data['id']} order response on {exchange_name} is :{order}")
-
-        elif data['kind'] == MessageType.CANCELLATION:
-            logger.debug(f"Worker [{exchange_name}] processing cancellation: {data} -> {ccxt_client}")
-            # await ccxt_client.cancel_order()
-            await asyncio.sleep(0.01)  # Simulate async processing
-            await redis_out.publish(data['id'], f"{data['id']} cancellation confirmed on {exchange_name}")
-        
-        queue.task_done()
+            except BrokerError as e:
+                # Catch  error here to notify order manager
+                
+                confirmation = e
+            
+            
+            queue.task_done()
 
 
 async def redis_subscriber(queues):
