@@ -72,12 +72,12 @@ async def worker(exchange_name: str, queue: asyncio.Queue, ccxt_client: CustomEx
             except BrokerError as e:
                 
                 
-                await redis_out.publish(data['id'], f"Error for {data['id']} on {exchange_name} is {e}")
+                await redis_out.publish(data['id'], f"{MessageType.ERROR}: Error for {data['id']} on {exchange_name} is {e}")
             
             else:
 
                 # Happy flow
-                await redis_out.publish(data['id'], f"Reply from broker for {data['id']} on {exchange_name} is {confirmation}")
+                await redis_out.publish(data['id'], f"{MessageType.CONFIRMATION}: Reply from broker for {data['id']} on {exchange_name} is {confirmation}")
             
             queue.task_done()
 

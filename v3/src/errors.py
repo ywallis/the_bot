@@ -1,7 +1,7 @@
 from ccxt.async_support import ExchangeError as ExchangeError
 
 class BrokerError(Exception):
-    """A custom exception class for specific error handling."""
+    """Error specifically relating to a custom CCXT order broker."""
 
     def __init__(self, message: str, code: int = 400):
         super().__init__(message)
