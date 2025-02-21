@@ -1,5 +1,11 @@
-[exchanges]
+[[exchanges]]
+name = "Gate.io" 
+id = "gate"
 
-gate = "gate"
-mexc = "mexc"
-bitget = "bitget"
+[[exchanges]]
+name = "Mexc" 
+id = "mexc"
+
+[[exchanges]]
+name = "Bitget" 
+id = "bitget"
