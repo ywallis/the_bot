@@ -1,4 +1,3 @@
-from ccxt.base import exchange
 from enums import MessageType, OrderSide
 from structs import OrderMessage, CancellationMessage
 from decimal import Decimal
