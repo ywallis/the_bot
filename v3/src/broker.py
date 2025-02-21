@@ -1,7 +1,7 @@
 import logging
 import logging_config 
-from enums import OrderSide, MessageType
-from structs import CancellationMessage, OrderMessage, CustomExchange
+from enums import MessageType
+from structs import CustomExchange
 from errors import BrokerError
 from utils import parse_message
 from ccxt_abstractions import create_and_return_order
@@ -24,7 +24,7 @@ redis_out = Redis(host="localhost", port=6379, decode_responses=True)
 CONFIG_FILE = "config.toml"
 CHANNEL_NAME = "broker"
 
-async def worker(exchange_name: str, queue: asyncio.Queue, ccxt_client: CustomExchange):
+async def worker(queue: asyncio.Queue, ccxt_client: CustomExchange):
     """Processes messages from the queue and sends them to the correct ccxt_client."""
 
     # STILL A BIG GAP IN THE PROCESSING, THE TRY/EXCEPT ONLY LOOKS AT WHETHER THE EXCHANGE RESPONDED, NOT WHAT THE RESPONSE IS.
@@ -38,7 +38,7 @@ async def worker(exchange_name: str, queue: asyncio.Queue, ccxt_client: CustomEx
 
         else:
 
-            logger.debug(f"Worker [{exchange_name}] processing {data['kind'].value}: {data} -> {ccxt_client}")
+            logger.debug(f"Worker [{ccxt_client.name}] processing {data['kind'].value}: {data} -> {ccxt_client.name}")
 
             try:
 
@@ -61,12 +61,12 @@ async def worker(exchange_name: str, queue: asyncio.Queue, ccxt_client: CustomEx
             except BrokerError as e:
                 
                 # Sad flow
-                await redis_out.publish(data['id'], f"{MessageType.ERROR}: Error for {data['id']} on {exchange_name} is {e}")
+                await redis_out.publish(data['id'], f"{MessageType.ERROR}: Error for {data['id']} on {ccxt_client.name} is {e}")
             
             else:
 
                 # Happy flow
-                await redis_out.publish(data['id'], f"{MessageType.CONFIRMATION}: Reply from broker for {data['id']} on {exchange_name} is {confirmation}")
+                await redis_out.publish(data['id'], f"{MessageType.CONFIRMATION}: Reply from broker for {data['id']} on {ccxt_client.name} is {confirmation}")
             
             queue.task_done()
 
@@ -110,7 +110,7 @@ async def main():
 
     for exchange in authenticated_clients.keys():
         asyncio.create_task(
-            worker(exchange, queues[exchange], authenticated_clients[exchange])
+            worker(queues[exchange], authenticated_clients[exchange])
         )
 
     await asyncio.gather(subscriber_task, return_exceptions=True)
