@@ -1,5 +1,4 @@
 from redis import Redis
-import time
 import json
 from datetime import datetime
 

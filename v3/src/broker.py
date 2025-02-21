@@ -4,12 +4,10 @@ from enums import OrderSide, MessageType
 from structs import CancellationMessage, OrderMessage, CustomExchange
 from errors import BrokerError
 from utils import parse_message
-import ccxt.async_support as ccxt
 from ccxt_abstractions import create_and_return_order
-import tomllib
 import asyncio
 from redis.asyncio import Redis
-
+from exchange_clients import authenticated_clients
 
 # TODO
 # - Replying back to the message processor via redis needs to happen in a new "worked" which collects results.
@@ -26,22 +24,11 @@ redis_out = Redis(host="localhost", port=6379, decode_responses=True)
 CONFIG_FILE = "config.toml"
 CHANNEL_NAME = "broker"
 
-fake_clients = {"mexc": "mexc_client",
-                "gate": "gate_client",
-                "bitget": "bitget_client"}
-
-
-def load_worker_settings():
-    """Load worker settings from a TOML file."""
-    with open(CONFIG_FILE, "rb") as f:
-        config = tomllib.load(f)
-    return config.get("exchanges", {})
-
-
 async def worker(exchange_name: str, queue: asyncio.Queue, ccxt_client: CustomExchange):
     """Processes messages from the queue and sends them to the correct ccxt_client."""
 
     # STILL A BIG GAP IN THE PROCESSING, THE TRY/EXCEPT ONLY LOOKS AT WHETHER THE EXCHANGE RESPONDED, NOT WHAT THE RESPONSE IS.
+    # Big pain point is that I think each worker can now only do one task at a time. Should maybe change to task logic?
 
     while True:
         data = await queue.get()
@@ -57,9 +44,11 @@ async def worker(exchange_name: str, queue: asyncio.Queue, ccxt_client: CustomEx
 
                 if data['kind'] == MessageType.ORDER:
 
+                    # This needs to change to "add_task asap"
                     confirmation = await create_and_return_order(data, ccxt_client)
 
                 elif data['kind'] == MessageType.CANCELLATION:
+                    # This needs to change to "add_task asap"
                     # await ccxt_client.cancel_order()
                     await asyncio.sleep(0.01)  # Simulate async processing
                     confirmation = "fun"
@@ -71,7 +60,7 @@ async def worker(exchange_name: str, queue: asyncio.Queue, ccxt_client: CustomEx
 
             except BrokerError as e:
                 
-                
+                # Sad flow
                 await redis_out.publish(data['id'], f"{MessageType.ERROR}: Error for {data['id']} on {exchange_name} is {e}")
             
             else:
@@ -113,15 +102,15 @@ async def redis_subscriber(queues):
 
 
 async def main():
-    worker_settings = load_worker_settings()
-    queues = {exchange: asyncio.Queue() for exchange in worker_settings}
+
+    queues = {exchange: asyncio.Queue() for exchange in authenticated_clients.keys()}
 
     subscriber_task = asyncio.create_task(redis_subscriber(queues))
 
 
-    for exchange in worker_settings:
+    for exchange in authenticated_clients.keys():
         asyncio.create_task(
-            worker(exchange, queues[exchange], fake_clients[exchange])
+            worker(exchange, queues[exchange], authenticated_clients[exchange])
         )
 
     await asyncio.gather(subscriber_task, return_exceptions=True)
