@@ -7,6 +7,7 @@ class OrderMessage(TypedDict):
     strategy: str
     exchange: str
     id: str
+    exchange_id: str
     pair: str
     side: OrderSide
     price: Decimal
@@ -23,4 +24,5 @@ class CancellationMessage(TypedDict):
 class CustomExchange(Protocol):
     name: str
     async def create_limit_order(self, symbol: str, side: str, amount: float, price: float) -> dict: ...
+    async def cancel_order(self, id: str, symbol: str, params: dict) -> dict: ...
 

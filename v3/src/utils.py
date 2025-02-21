@@ -1,3 +1,4 @@
+from ccxt.base import exchange
 from enums import MessageType, OrderSide
 from structs import OrderMessage, CancellationMessage
 from decimal import Decimal
@@ -14,6 +15,7 @@ def parse_message(message_raw: str) -> OrderMessage | CancellationMessage | None
                 strategy=message["strategy"],
                 exchange=message["exchange"],
                 id=message["id"],
+                exchange_id=message['exchange_id'],
                 pair=message['pair'],
                 side=OrderSide(message["side"]),
                 price=Decimal(message["price"]),
