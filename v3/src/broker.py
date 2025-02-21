@@ -4,7 +4,7 @@ from enums import MessageType
 from structs import CustomExchange
 from errors import BrokerError
 from utils import parse_message
-from ccxt_abstractions import create_and_return_order
+from ccxt_abstractions import create_and_return_order, cancel_order_return_confirmation
 import asyncio
 from redis.asyncio import Redis
 from exchange_clients import authenticated_clients
@@ -50,8 +50,7 @@ async def worker(queue: asyncio.Queue, ccxt_client: CustomExchange):
                 elif data['kind'] == MessageType.CANCELLATION:
                     # This needs to change to "add_task asap"
                     # await ccxt_client.cancel_order()
-                    await asyncio.sleep(0.01)  # Simulate async processing
-                    confirmation = "fun"
+                    confirmation = await cancel_order_return_confirmation(data, ccxt_client)
             
                 else:
                     logger.error(f"Message of unknown type was allowed through: {data}")
