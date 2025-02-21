@@ -49,7 +49,6 @@ async def worker(queue: asyncio.Queue, ccxt_client: CustomExchange):
 
                 elif data['kind'] == MessageType.CANCELLATION:
                     # This needs to change to "add_task asap"
-                    # await ccxt_client.cancel_order()
                     confirmation = await cancel_order_return_confirmation(data, ccxt_client)
             
                 else:

@@ -25,7 +25,7 @@ async def cancel_order_return_confirmation(cancellation: CancellationMessage, cl
 
             return cancellation_confirmation 
     
-    # If this point is reached, it means no order was confirmed after all attempts
+    # If this point is reached, it means no cancellation was confirmed after all attempts
     
     raise BrokerError("Broker was unable to confirm an order") 
 
