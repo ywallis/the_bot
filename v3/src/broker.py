@@ -24,52 +24,61 @@ redis_out = Redis(host="localhost", port=6379, decode_responses=True)
 CONFIG_FILE = "config.toml"
 CHANNEL_NAME = "broker"
 
-async def worker(queue: asyncio.Queue, ccxt_client: CustomExchange):
+async def process_message(message, results_queue: asyncio.Queue, ccxt_client: CustomExchange):
+
+    try:
+
+        if message['kind'] == MessageType.ORDER:
+
+            logger.debug(f"Message with id {message['id']} was identified as {message['kind']}")
+            # This needs to change to "add_task asap"
+            confirmation = await create_and_return_order(message, ccxt_client)
+
+        elif message['kind'] == MessageType.CANCELLATION:
+            logger.debug(f"Message with id {message['id']} was identified as {message['kind']}")
+            confirmation = await cancel_order_return_confirmation(message, ccxt_client)
+    
+        else:
+            logger.error(f"Message of unknown type was allowed through: {message}")
+            raise BrokerError(f"Message of unknown type was allowed through: {message}")
+
+        # Happy flow
+        await results_queue.put((message['id'], MessageType.CONFIRMATION, confirmation))
+        await redis_out.publish(message['id'], f"{MessageType.CONFIRMATION}: Reply from broker for {message['id']} on {ccxt_client.name} is {confirmation}")
+
+    except BrokerError as e:
+        
+        # Sad flow
+        await results_queue.put((message['id'], MessageType.ERROR, e))
+        await redis_out.publish(message['id'], f"{MessageType.ERROR}: Error for {message['id']} on {ccxt_client.name} is {e}")
+    
+
+
+async def worker(queue: asyncio.Queue, results_queue: asyncio.Queue, ccxt_client: CustomExchange):
     """Processes messages from the queue and sends them to the correct ccxt_client."""
 
     # STILL A BIG GAP IN THE PROCESSING, THE TRY/EXCEPT ONLY LOOKS AT WHETHER THE EXCHANGE RESPONDED, NOT WHAT THE RESPONSE IS.
-    # Big pain point is that I think each worker can now only do one task at a time. Should maybe change to task logic?
 
     while True:
-        data = await queue.get()
-        if data is None:  # Shutdown signal
+        message = await queue.get()
+        if message is None:  # Shutdown signal
             queue.task_done()
             break
 
         else:
 
-            logger.debug(f"Worker [{ccxt_client.name}] processing {data['kind'].value}: {data} -> {ccxt_client.name}")
-
-            try:
-
-                if data['kind'] == MessageType.ORDER:
-
-                    # This needs to change to "add_task asap"
-                    confirmation = await create_and_return_order(data, ccxt_client)
-
-                elif data['kind'] == MessageType.CANCELLATION:
-                    # This needs to change to "add_task asap"
-                    confirmation = await cancel_order_return_confirmation(data, ccxt_client)
             
-                else:
-                    logger.error(f"Message of unknown type was allowed through: {data}")
-                    raise BrokerError(f"Message of unknown type was allowed through: {data}")
+            logger.debug(f"Worker [{ccxt_client.name}] processing {message['kind'].value}: {message} -> {ccxt_client.name}")
 
+            asyncio.create_task(process_message(message, results_queue, ccxt_client))
 
-            except BrokerError as e:
-                
-                # Sad flow
-                await redis_out.publish(data['id'], f"{MessageType.ERROR}: Error for {data['id']} on {ccxt_client.name} is {e}")
-            
-            else:
-
-                # Happy flow
-                await redis_out.publish(data['id'], f"{MessageType.CONFIRMATION}: Reply from broker for {data['id']} on {ccxt_client.name} is {confirmation}")
-            
             queue.task_done()
 
 
-async def redis_subscriber(queues):
+async def results_worker():
+    pass
+
+async def redis_subscriber(queues: dict[str, asyncio.Queue]):
     """Listens to Redis channel and routes messages to the correct queue."""
     redis = await Redis(host="localhost", port=6379, decode_responses=True)
     pubsub = redis.pubsub()
@@ -101,14 +110,15 @@ async def redis_subscriber(queues):
 
 async def main():
 
-    queues = {exchange: asyncio.Queue() for exchange in authenticated_clients.keys()}
+    worker_queues = {exchange: asyncio.Queue() for exchange in authenticated_clients.keys()}
 
-    subscriber_task = asyncio.create_task(redis_subscriber(queues))
+    results_queue = asyncio.Queue()
+    subscriber_task = asyncio.create_task(redis_subscriber(worker_queues))
 
 
     for exchange in authenticated_clients.keys():
         asyncio.create_task(
-            worker(queues[exchange], authenticated_clients[exchange])
+            worker(worker_queues[exchange], results_queue, authenticated_clients[exchange])
         )
 
     await asyncio.gather(subscriber_task, return_exceptions=True)
