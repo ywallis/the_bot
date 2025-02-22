@@ -44,13 +44,11 @@ async def process_message(message, results_queue: asyncio.Queue, ccxt_client: Cu
 
         # Happy flow
         await results_queue.put((message['id'], MessageType.CONFIRMATION, confirmation))
-        await redis_out.publish(message['id'], f"{MessageType.CONFIRMATION}: Reply from broker for {message['id']} on {ccxt_client.name} is {confirmation}")
 
     except BrokerError as e:
         
         # Sad flow
         await results_queue.put((message['id'], MessageType.ERROR, e))
-        await redis_out.publish(message['id'], f"{MessageType.ERROR}: Error for {message['id']} on {ccxt_client.name} is {e}")
     
 
 
@@ -75,8 +73,19 @@ async def worker(queue: asyncio.Queue, results_queue: asyncio.Queue, ccxt_client
             queue.task_done()
 
 
-async def results_worker():
-    pass
+async def results_worker(results_queue: asyncio.Queue):
+    """Processes the results queue and publishes responses via Redis."""
+
+    while True:
+        order_id, msg_type, message = await results_queue.get()
+        if order_id is None:  # Shutdown signal
+            results_queue.task_done()
+            break
+
+        logger.debug(f"Publishing result to Redis: {message}")
+        await redis_out.publish(order_id, f"{msg_type}: {message}")
+
+        results_queue.task_done()
 
 async def redis_subscriber(queues: dict[str, asyncio.Queue]):
     """Listens to Redis channel and routes messages to the correct queue."""
@@ -113,6 +122,7 @@ async def main():
     worker_queues = {exchange: asyncio.Queue() for exchange in authenticated_clients.keys()}
 
     results_queue = asyncio.Queue()
+    results_task = asyncio.create_task(results_worker(results_queue))
     subscriber_task = asyncio.create_task(redis_subscriber(worker_queues))
 
 
@@ -121,7 +131,7 @@ async def main():
             worker(worker_queues[exchange], results_queue, authenticated_clients[exchange])
         )
 
-    await asyncio.gather(subscriber_task, return_exceptions=True)
+    await asyncio.gather(subscriber_task, results_task, return_exceptions=True)
 
 
 if __name__ == "__main__":
