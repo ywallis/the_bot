@@ -38,7 +38,7 @@ def cancellation_from_order(order: OrderMessage) -> CancellationMessage:
         kind=MessageType.CANCELLATION,
         strategy=order["strategy"],
         exchange=order["exchange"],
-        id=order["id"],
+        id=order["exchange_id"],
         pair=order["pair"],
     )
 

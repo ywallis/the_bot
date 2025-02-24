@@ -13,11 +13,9 @@ exchanges = config.get("exchanges", [])
 
 authenticated_clients = {}
 
-print(exchanges)
 
 for exchange in exchanges:
     id = exchange["id"]
-    print(id)
     exchange_key = os.getenv(f"{id.upper()}_KEY")
     exchange_secret = os.getenv(f"{id.upper()}_SECRET")
     exchange_password = os.getenv(f"{id.upper()}_PASSWORD")
@@ -38,4 +36,3 @@ for exchange in exchanges:
         )
     authenticated_clients[id] = auth_client
 
-print(authenticated_clients)

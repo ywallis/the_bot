@@ -10,12 +10,12 @@ from structs import OrderMessage, CancellationMessage, Response
 from redis.asyncio import Redis, ConnectionPool
 from datetime import datetime
 from utils import identify_response, parse_message, cancellation_from_order
-from v3.src.errors import BrokerError
+from errors import BrokerError
+import ast
 
 # This is the draft for my trading system message processor
 # TODO:
 # - Testing
-# - Define CCXT broker response
 
 # NOTES:
 # The strategy knows when to void it's own signals.
@@ -78,15 +78,11 @@ class MessageProcessor:
                 async for message in pubsub.listen():
                     if message["type"] == "message":
                         response = message["data"].decode()
-                        logger.info(
+                        logger.debug(
                             f"Received reply from broker for msg {msg['id']}: {response}"
                         )
-                        print("PAYLOAD", response)
                         break
                 await pubsub.unsubscribe(msg["id"])
-
-        # This is where parsing and returning the reponse will happen. So far this always returns true.
-        # This should be simple: Confirmation, retry mechanism in case of errors, and informing/stopping the strat in case something goes out of bounds.
 
         return identify_response(response)
 
@@ -98,8 +94,10 @@ class MessageProcessor:
         confirmation: Response = await self.send_to_broker(msg)
 
         if confirmation.get("kind") == MessageType.ORDER:
-            exchange_id = json.loads(confirmation["text"])["id"]
+            # exchange_id = json.loads(confirmation.get("text"))["id"]
+            exchange_id = ast.literal_eval(confirmation.get("text"))["id"]
             msg["exchange_id"] = exchange_id
+            logger.info(f"Order with id {msg['id']} was sucessfully placed. Exchange id is {exchange_id}")
             return msg
         else:
             raise BrokerError(
@@ -113,6 +111,7 @@ class MessageProcessor:
         confirmation: Response = await self.send_to_broker(order)
 
         if confirmation.get("kind") == MessageType.CANCELLATION:
+            logger.info(f"Order with id {order['id']} was sucessfully cancelled.")
             return True
         else:
             raise BrokerError(message=f"Invalid response from broker:{confirmation}")
