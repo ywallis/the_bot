@@ -2,14 +2,15 @@ import logging
 import json
 import asyncio
 import logging
-import src.logging_config 
+import logging_config
 from typing import cast
 from copy import copy
 from enums import MessageType
-from structs import OrderMessage, CancellationMessage
+from structs import OrderMessage, CancellationMessage, Response
 from redis.asyncio import Redis, ConnectionPool
 from datetime import datetime
-from utils import parse_message, cancellation_from_order
+from utils import identify_response, parse_message, cancellation_from_order
+from v3.src.errors import BrokerError
 
 # This is the draft for my trading system message processor
 # TODO:
@@ -20,7 +21,7 @@ from utils import parse_message, cancellation_from_order
 # The strategy knows when to void it's own signals.
 # Returns from tasks will probably just be used for logs.
 
-src.logging_config.setup_logging()
+logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -28,9 +29,13 @@ class MessageProcessor:
 
     def __init__(self):
 
-        self.pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=20)
+        self.pool = ConnectionPool(
+            host="localhost", port=6379, db=0, max_connections=20
+        )
         self.redis = Redis(decode_responses=True, connection_pool=self.pool)
-        self.redis_pubsub = Redis(connection_pool=self.pool, decode_responses=True).pubsub()
+        self.redis_pubsub = Redis(
+            connection_pool=self.pool, decode_responses=True
+        ).pubsub()
         self.locks = {}  # Dictionary to store locks dynamically
         self.message_queue = (
             {}
@@ -55,45 +60,62 @@ class MessageProcessor:
             logger.debug(f"No lock found, creating one for {strategy}")
         return self.locks[strategy]
 
-    async def send_to_broker(self, msg: OrderMessage | CancellationMessage) -> bool:
+    async def send_to_broker(self, msg: OrderMessage | CancellationMessage) -> Response:
         flattened = json.dumps(dict(msg), default=str)
 
         # Now using context manager to ensure redis instances are dropped.
 
+        response: str = ""
+
         async with Redis(connection_pool=self.pool) as redis:
             await redis.publish("broker", flattened)
 
-            logger.info(f"Sending message with id {msg['id']} and type {msg['kind']} to broker.")
+            logger.info(
+                f"Sending message with id {msg['id']} and type {msg['kind']} to broker."
+            )
             async with redis.pubsub() as pubsub:
                 await pubsub.subscribe(msg["id"])
                 async for message in pubsub.listen():
                     if message["type"] == "message":
-                        logger.info(f"Received reply from boker for msg {msg['id']}: {message['data'].decode()}")
+                        response = message["data"].decode()
+                        logger.info(
+                            f"Received reply from broker for msg {msg['id']}: {response}"
+                        )
+                        print("PAYLOAD", response)
                         break
                 await pubsub.unsubscribe(msg["id"])
 
         # This is where parsing and returning the reponse will happen. So far this always returns true.
         # This should be simple: Confirmation, retry mechanism in case of errors, and informing/stopping the strat in case something goes out of bounds.
 
-        return True
+        return identify_response(response)
 
-    async def place_order(self, msg: OrderMessage) -> bool:
+    async def place_order(self, msg: OrderMessage) -> OrderMessage:
         """Sends an order object to the broker and expects a confirmation."""
 
         logger.debug(f"Sending {msg['id']} to broker")
         # TODO: Replace with broker connector
-        order_confirmed = await self.send_to_broker(msg)
+        confirmation: Response = await self.send_to_broker(msg)
 
-        return order_confirmed
+        if confirmation.get("kind") == MessageType.ORDER:
+            exchange_id = json.loads(confirmation["text"])["id"]
+            msg["exchange_id"] = exchange_id
+            return msg
+        else:
+            raise BrokerError(
+                message=f"Invalid response from broker:{confirmation['text']}"
+            )
 
     async def place_cancellation(self, order: CancellationMessage) -> bool:
         """Sends an order object to the broker and expects a confirmation."""
 
         logger.debug(f"Cancelling {order['id']} with broker")
-        # TODO: Replace with broker connector
-        cancellation_confirmed = await self.send_to_broker(order)
+        confirmation: Response = await self.send_to_broker(order)
 
-        return cancellation_confirmed
+        if confirmation.get("kind") == MessageType.CANCELLATION:
+            return True
+        else:
+            raise BrokerError(message=f"Invalid response from broker:{confirmation}")
 
     async def process_message(self, msg: OrderMessage | CancellationMessage | None):
         """Process the message if the lock is available."""
@@ -120,9 +142,7 @@ class MessageProcessor:
             else:
                 self.message_queue[strategy] = msg
 
-                return (
-                    f"{datetime.now():%M:%S:%f} {msg['id']} was queued"
-                )
+                return f"{datetime.now():%M:%S:%f} {msg['id']} was queued"
 
         async with lock:
             logger.debug(f"Processing {strategy} message: {msg['id']}")
@@ -140,7 +160,7 @@ class MessageProcessor:
 
                     cancellation = cancellation_from_order(self.open_orders[strategy])
                     if await self.place_cancellation(cancellation):
-                        del(self.open_orders[strategy])
+                        del self.open_orders[strategy]
 
                 else:
                     logger.warning(f"Received cancellation but no open order to cancel")
@@ -150,26 +170,31 @@ class MessageProcessor:
                 order_msg: OrderMessage = cast(OrderMessage, msg)
 
                 if strategy in self.open_orders:
-                    logger.debug(f"Cancelling order {self.open_orders[strategy]['id']} for strategy {strategy} and replacing with order {msg['id']}")
+                    logger.debug(
+                        f"Cancelling order {self.open_orders[strategy]['id']} for strategy {strategy} and replacing with order {msg['id']}"
+                    )
 
                     cancellation = cancellation_from_order(self.open_orders[strategy])
                     if await self.place_cancellation(cancellation):
-                        del(self.open_orders[strategy])
+                        del self.open_orders[strategy]
 
-                    if await self.place_order(order_msg):
-                        self.open_orders[strategy] = order_msg
+                    confirmed_order: OrderMessage = await self.place_order(order_msg)
+                    self.open_orders[strategy] = confirmed_order
+
                 else:
                     logger.debug(f"Placing order {msg['id']}")
 
-                    if await self.place_order(order_msg):
-                        self.open_orders[strategy] = order_msg
+                    confirmed_order = await self.place_order(order_msg)
+                    self.open_orders[strategy] = confirmed_order
 
             logger.debug(f"Finished processing {strategy} message: {msg['id']}")
 
         # This recursively starts processing for any message pending from the queue
 
         if strategy in self.message_queue:
-            logger.debug(f"{self.message_queue[strategy]['id']} in the queue, processing.")
+            logger.debug(
+                f"{self.message_queue[strategy]['id']} in the queue, processing."
+            )
             task = asyncio.create_task(
                 self.process_message(self.message_queue[strategy])
             )
@@ -201,7 +226,9 @@ class MessageProcessor:
                 )
                 self.tasks = list(pending)
                 # Collect results
-                results: list[str] = [task.result() for task in done if task.result() is not None]
+                results: list[str] = [
+                    task.result() for task in done if task.result() is not None
+                ]
                 if results:
                     # logger.info(reversed(results))
                     for result in reversed(results):

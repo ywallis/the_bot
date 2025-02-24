@@ -43,7 +43,7 @@ async def process_message(message, results_queue: asyncio.Queue, ccxt_client: Cu
             raise BrokerError(f"Message of unknown type was allowed through: {message}")
 
         # Happy flow
-        await results_queue.put((message['id'], MessageType.CONFIRMATION, confirmation))
+        await results_queue.put((message['id'], message['kind'], confirmation))
 
     except BrokerError as e:
         
@@ -55,7 +55,6 @@ async def process_message(message, results_queue: asyncio.Queue, ccxt_client: Cu
 async def worker(queue: asyncio.Queue, results_queue: asyncio.Queue, ccxt_client: CustomExchange):
     """Processes messages from the queue and sends them to the correct ccxt_client."""
 
-    # STILL A BIG GAP IN THE PROCESSING, THE TRY/EXCEPT ONLY LOOKS AT WHETHER THE EXCHANGE RESPONDED, NOT WHAT THE RESPONSE IS.
 
     while True:
         message = await queue.get()
@@ -83,7 +82,7 @@ async def results_worker(results_queue: asyncio.Queue):
             break
 
         logger.debug(f"Publishing result to Redis: {message}")
-        await redis_out.publish(order_id, f"{msg_type}: {message}")
+        await redis_out.publish(order_id, f"{msg_type}|{message}")
 
         results_queue.task_done()
 

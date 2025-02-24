@@ -14,6 +14,7 @@ order1: dict[str, str] = {
     "strategy": "ALPHm",
     "exchange": "mexc",
     "id": "abc1",
+    "exchange_id": "_",
     "pair": "ALPH/USDT",
     "side": "sell",
     "price": "3",
@@ -21,7 +22,7 @@ order1: dict[str, str] = {
 } 
 
 
-order2: OrderMessage = OrderMessage(kind=MessageType.ORDER, strategy="ALPHm", exchange="mexc", id="abc2", pair="ALPH/USDT", side=OrderSide.BUY, price=Decimal(4), amount=Decimal(10))
+order2: OrderMessage = OrderMessage(kind=MessageType.ORDER, strategy="ALPHm", exchange="mexc", id="abc2", exchange_id="_", pair="ALPH/USDT", side=OrderSide.BUY, price=Decimal(4), amount=Decimal(10))
 
 def test_parse_message():
 

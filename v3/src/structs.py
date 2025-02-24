@@ -26,3 +26,7 @@ class CustomExchange(Protocol):
     async def create_limit_order(self, symbol: str, side: str, amount: float, price: float) -> dict: ...
     async def cancel_order(self, id: str, symbol: str) -> dict: ...
 
+
+class Response(TypedDict):
+    kind: MessageType
+    text: str

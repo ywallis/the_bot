@@ -12,7 +12,7 @@ order_1: dict[str, str] = {
     "kind": "order",
     "strategy": "ALPH_gate",
     "exchange": "gate",
-    "id": f"mexc_{datetime.now():%M:%S:%f}",
+    "id": f"gate_{datetime.now():%M:%S:%f}",
     "exchange_id": "_",
     "pair": "ALPH/USDT",
     "side": "sell",
