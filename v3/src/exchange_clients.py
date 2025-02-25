@@ -13,7 +13,6 @@ exchanges = config.get("exchanges", [])
 
 authenticated_clients = {}
 
-
 for exchange in exchanges:
     id = exchange["id"]
     exchange_key = os.getenv(f"{id.upper()}_KEY")
