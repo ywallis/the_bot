@@ -1,10 +1,10 @@
 import pytest
 import asyncio
 from unittest.mock import AsyncMock
-from maker.src.errors import BrokerError
-from maker.src.structs import CustomExchange
-from maker.src.enums import MessageType
-from maker.src.broker import process_message  
+from apps.maker.src.errors import BrokerError
+from apps.maker.src.structs import CustomExchange
+from apps.maker.src.enums import MessageType
+from apps.maker.src.broker import process_message  
 
 # @pytest.mark.asyncio
 # async def test_process_message_order():

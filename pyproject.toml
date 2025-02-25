@@ -43,11 +43,9 @@ dependencies = [
     "python-json-logger>=3.2.1",
 ]
 
-[tool.uv]
-paths = ["apps/maker/src"]
-
 [tool.pytest.ini_options]
 pythonpath = ["apps/maker/src"]
 testpaths = [
-    "apps/maker/tests"
+    "apps/maker/tests",
+	"apps/maker/src"
 ]

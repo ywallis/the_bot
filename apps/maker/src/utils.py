@@ -65,10 +65,10 @@ def identify_response(string: str) -> Response:
 def is_order_message(
     message: CancellationMessage | OrderMessage | Any,
 ) -> TypeGuard[OrderMessage]:
-    return message.get("kind") == MessageType.ORDER.value
+    return message.get("kind").value == MessageType.ORDER.value
 
 
 def is_cancellation_message(
     message: CancellationMessage | OrderMessage | Any,
 ) -> TypeGuard[CancellationMessage]:
-    return message.get("kind") == MessageType.CANCELLATION.value
+    return message.get("kind").value == MessageType.CANCELLATION.value
