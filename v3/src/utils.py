@@ -1,3 +1,4 @@
+from typing import TypeGuard, Any
 from enums import MessageType, OrderSide
 from structs import OrderMessage, CancellationMessage, Response
 from decimal import Decimal
@@ -50,3 +51,15 @@ def identify_response(string: str) -> Response:
 
     items = string.split("|")
     return Response(kind=MessageType(items[0]), text=items[1])
+
+
+def is_order_message(
+    message: CancellationMessage | OrderMessage | Any,
+) -> TypeGuard[OrderMessage]:
+    return message.get("kind") == MessageType.ORDER
+
+
+def is_cancellation_message(
+    message: CancellationMessage | OrderMessage | Any,
+) -> TypeGuard[CancellationMessage]:
+    return message.get("kind") == MessageType.CANCELLATION

@@ -1,9 +1,10 @@
 import logging
+from typing import Any
 import logging_config
 from enums import MessageType
-from structs import CustomExchange
+from structs import CustomExchange, OrderMessage, CancellationMessage
 from errors import BrokerError
-from utils import parse_message
+from utils import is_order_message, parse_message, is_cancellation_message
 from ccxt_abstractions import create_and_return_order, cancel_order_return_confirmation
 import asyncio
 from redis.asyncio import Redis
@@ -19,22 +20,22 @@ redis_out = Redis(host="localhost", port=6379, decode_responses=True)
 CONFIG_FILE = "config.toml"
 CHANNEL_NAME = "broker"
 
-
 async def process_message(
-    message, results_queue: asyncio.Queue, ccxt_client: CustomExchange
+    message: CancellationMessage | OrderMessage | Any, results_queue: asyncio.Queue, ccxt_client: CustomExchange
 ):
 
     try:
 
-        if message["kind"] == MessageType.ORDER:
+        if is_order_message(message):
+        # if message.get("kind") == MessageType.ORDER:
 
             logger.debug(
                 f"Message with id {message['id']} was identified as {message['kind']}"
             )
-            # This needs to change to "add_task asap"
             confirmation = await create_and_return_order(message, ccxt_client)
 
-        elif message["kind"] == MessageType.CANCELLATION:
+        elif is_cancellation_message(message):
+        # elif message.get("kind") == MessageType.CANCELLATION:
             logger.debug(
                 f"Message with id {message['id']} was identified as {message['kind']}"
             )

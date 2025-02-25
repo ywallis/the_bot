@@ -1,37 +1,26 @@
 import sys
 import os
+from tests.test_data import order_raw, order_1, cancellation_1
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-import pytest
 import json
-from src.utils import parse_message, cancellation_from_order
-from src.structs import CancellationMessage, OrderMessage
-from src.enums import MessageType, OrderSide
-from decimal import Decimal
-
-order1: dict[str, str] = {
-    "kind": "order",
-    "strategy": "ALPHm",
-    "exchange": "mexc",
-    "id": "abc1",
-    "exchange_id": "_",
-    "pair": "ALPH/USDT",
-    "side": "sell",
-    "price": "3",
-    "amount": "10",
-} 
-
-
-order2: OrderMessage = OrderMessage(kind=MessageType.ORDER, strategy="ALPHm", exchange="mexc", id="abc2", exchange_id="_", pair="ALPH/USDT", side=OrderSide.BUY, price=Decimal(4), amount=Decimal(10))
+from src.utils import is_cancellation_message, is_order_message, parse_message, cancellation_from_order
 
 def test_parse_message():
 
-    parsed_order = parse_message(json.dumps(order1))
+    parsed_order = parse_message(json.dumps(order_raw))
 
     assert type(parsed_order) == dict
 
 def test_cancellation_from_order():
 
-    cancellation = cancellation_from_order(order2)
+    cancellation = cancellation_from_order(order_1)
 
     assert cancellation['kind'].value == "cancellation"
+
+def test_is_cancellation_message():
+
+    assert is_cancellation_message(cancellation_1)
+
+def test_is_order_message():
+    assert is_order_message(order_1)
