@@ -1,11 +1,11 @@
 [[exchanges]]
-name = "Gate.io" 
+name = "Gate.io"
 id = "gate"
 
 [[exchanges]]
-name = "Mexc" 
+name = "Mexc"
 id = "mexc"
 
 [[exchanges]]
-name = "Bitget" 
+name = "Bitget"
 id = "bitget"
