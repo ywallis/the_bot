@@ -1,13 +1,12 @@
 import os
 from dotenv import load_dotenv
-import tomllib
+from utils import load_config
 import ccxt.async_support as ccxt
 
 load_dotenv("../.env")
 # Load TOML file
-with open("../config/config.toml", "rb") as f:
-    config = tomllib.load(f)
 
+config = load_config()
 # Extract exchange items
 exchanges = config.get("exchanges", [])
 

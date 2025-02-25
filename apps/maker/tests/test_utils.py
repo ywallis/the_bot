@@ -1,6 +1,6 @@
 import sys
 import os
-from tests.test_data import order_raw, order_1, cancellation_1
+from maker.tests.test_data import order_raw, order_1, cancellation_1
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import json
@@ -20,7 +20,8 @@ def test_cancellation_from_order():
 
 def test_is_cancellation_message():
 
-    assert is_cancellation_message(cancellation_1)
+    assert is_cancellation_message(cancellation_1) is True
 
 def test_is_order_message():
-    assert is_order_message(order_1)
+
+    assert is_order_message(order_raw) is True

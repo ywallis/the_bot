@@ -1,8 +1,17 @@
+from pathlib import Path
+import tomllib
 from typing import TypeGuard, Any
 from enums import MessageType, OrderSide
 from structs import OrderMessage, CancellationMessage, Response
 from decimal import Decimal
 import json
+
+
+def load_config():
+    CONFIG_PATH = Path(__file__).parents[3] / "config" / "config.toml"
+    with open(CONFIG_PATH, "rb") as f:
+        config = tomllib.load(f)
+        return config
 
 
 def parse_message(
@@ -56,10 +65,10 @@ def identify_response(string: str) -> Response:
 def is_order_message(
     message: CancellationMessage | OrderMessage | Any,
 ) -> TypeGuard[OrderMessage]:
-    return message.get("kind") == MessageType.ORDER
+    return message.get("kind") == MessageType.ORDER.value
 
 
 def is_cancellation_message(
     message: CancellationMessage | OrderMessage | Any,
 ) -> TypeGuard[CancellationMessage]:
-    return message.get("kind") == MessageType.CANCELLATION
+    return message.get("kind") == MessageType.CANCELLATION.value
