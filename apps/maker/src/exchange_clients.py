@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from apps.maker.src.utils import load_config
 import ccxt.async_support as ccxt
 
-load_dotenv("../.env")
+load_dotenv()
 # Load TOML file
 
 config = load_config()

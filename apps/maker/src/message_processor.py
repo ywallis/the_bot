@@ -234,7 +234,7 @@ class MessageProcessor:
                 if results:
                     # logger.info(reversed(results))
                     for result in reversed(results):
-                        logger.info(f"BATCH: {result}")
+                        logger.debug(f"BATCH: {result}")
                     # print(f"Collected results: {sorted(results)}")
 
             await asyncio.sleep(2)  # Check every 20 second
