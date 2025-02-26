@@ -1,7 +1,7 @@
 from decimal import Decimal
 import json
 
-from apps.maker.src.structs import CancellationMessage, OrderMessage
+from apps.maker.src.structs import CancellationMessage, OrderMessage, Response
 from apps.maker.src.enums import MessageType, OrderSide
 
 order_raw: dict[str, str] = {
@@ -50,3 +50,5 @@ cancellation_1: CancellationMessage = CancellationMessage(
     id=order_2["id"],
     pair="ALPH/USDT",
 )
+
+order_1_response_positive: Response = Response(kind=MessageType.ORDER, text='{"id": "mock_response_1"}')
