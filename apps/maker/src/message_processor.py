@@ -1,17 +1,22 @@
-import logging
-import json
-import asyncio
-import logging
-import apps.maker.src.logging_config as logging_config
-from typing import cast
-from copy import copy
-from apps.maker.src.enums import MessageType
-from apps.maker.src.structs import OrderMessage, CancellationMessage, Response
-from redis.asyncio import Redis, ConnectionPool
-from datetime import datetime
-from apps.maker.src.utils import identify_response, parse_message, cancellation_from_order
-from apps.maker.src.errors import BrokerError
 import ast
+import asyncio
+import json
+import logging
+from copy import copy
+from datetime import datetime
+from typing import cast
+
+from redis.asyncio import ConnectionPool, Redis
+
+import apps.maker.src.logging_config as logging_config
+from apps.maker.src.enums import MessageType
+from apps.maker.src.errors import BrokerError
+from apps.maker.src.structs import CancellationMessage, OrderMessage, Response
+from apps.maker.src.utils import (
+    cancellation_from_order,
+    identify_response,
+    parse_message,
+)
 
 # This is the draft for my trading system message processor
 # TODO:
@@ -26,9 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 class MessageProcessor:
-
     def __init__(self):
-
         self.pool = ConnectionPool(
             host="localhost", port=6379, db=0, max_connections=20
         )
@@ -46,7 +49,6 @@ class MessageProcessor:
         self.tasks = []
 
     def replace_queued_value(self, msg: OrderMessage | CancellationMessage):
-
         strategy: str = msg["strategy"]
         prior = copy(self.message_queue[strategy])
         logger.debug(f"Replacing {prior['id']} with {msg['id']}")
@@ -97,7 +99,9 @@ class MessageProcessor:
             # exchange_id = json.loads(confirmation.get("text"))["id"]
             exchange_id = ast.literal_eval(confirmation.get("text"))["id"]
             msg["exchange_id"] = exchange_id
-            logger.info(f"Order with id {msg['id']} was sucessfully placed. Exchange id is {exchange_id}")
+            logger.info(
+                f"Order with id {msg['id']} was sucessfully placed. Exchange id is {exchange_id}"
+            )
             return msg
         else:
             raise BrokerError(
@@ -151,7 +155,6 @@ class MessageProcessor:
             # If an open order exists for the relevant strategy, cancel it. If it doesn't, do nothing but note it.
 
             if msg["kind"] == MessageType.CANCELLATION:
-
                 if strategy in self.open_orders:
                     logger.debug(
                         f"Cancelling order {self.open_orders[strategy]['id']} for strategy {strategy}"
@@ -162,7 +165,7 @@ class MessageProcessor:
                         del self.open_orders[strategy]
 
                 else:
-                    logger.warning(f"Received cancellation but no open order to cancel")
+                    logger.warning("Received cancellation but no open order to cancel")
 
             # If an open order exists, cancel it and replace it with the new one. If it doesn't, create a new one.
             elif msg["kind"] == MessageType.ORDER:
