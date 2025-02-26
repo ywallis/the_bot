@@ -1,5 +1,5 @@
 from typing import TypedDict, Protocol
-from enums import MessageType, OrderSide
+from apps.maker.src.enums import MessageType, OrderSide
 from decimal import Decimal
 
 class OrderMessage(TypedDict):

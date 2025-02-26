@@ -3,8 +3,13 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 from apps.maker.src.structs import CustomExchange
 from apps.maker.src.enums import MessageType
-from apps.maker.src.broker import process_message, worker, results_worker
-from apps.maker.tests.test_data import order_1, cancellation_1
+from apps.maker.src.broker import (
+    process_message,
+    worker,
+    results_worker,
+    redis_subscriber,
+)
+from apps.maker.tests.test_data import order_1, cancellation_1, order_raw_string
 
 
 # Need to create a ccxt response fixture
@@ -83,7 +88,9 @@ async def test_worker():
 @pytest.mark.asyncio
 async def test_results_worker_order(mocker):
     results_queue = asyncio.Queue()
-    mock_redis_publish = mocker.patch("apps.maker.src.broker.redis_out.publish", new_callable=AsyncMock)
+    mock_redis_publish = mocker.patch(
+        "apps.maker.src.broker.redis_out.publish", new_callable=AsyncMock
+    )
 
     await results_queue.put(("123", MessageType.ORDER, "success"))
     await results_queue.put((None, None, None))  # Stop signal
@@ -92,15 +99,54 @@ async def test_results_worker_order(mocker):
 
     mock_redis_publish.assert_called_once_with("123", f"{MessageType.ORDER}|success")
 
+
 @pytest.mark.asyncio
 async def test_results_worker_cancellation(mocker):
     results_queue = asyncio.Queue()
-    mock_redis_publish = mocker.patch("apps.maker.src.broker.redis_out.publish", new_callable=AsyncMock)
+    mock_redis_publish = mocker.patch(
+        "apps.maker.src.broker.redis_out.publish", new_callable=AsyncMock
+    )
 
     await results_queue.put(("234", MessageType.CANCELLATION, "success"))
     await results_queue.put((None, None, None))  # Stop signal
 
     await results_worker(results_queue)
 
-    mock_redis_publish.assert_called_once_with("234", f"{MessageType.CANCELLATION}|success")
+    mock_redis_publish.assert_called_once_with(
+        "234", f"{MessageType.CANCELLATION}|success"
+    )
 
+
+@pytest.mark.asyncio
+async def test_redis_subscriber_valid_message():
+    # Create a queue for the "binance" exchange.
+    queue = asyncio.Queue()
+    queues = {order_1["exchange"]: queue}
+
+    # Define a valid message payload.
+    valid_message_data = order_raw_string
+    valid_message = {"type": "message", "data": valid_message_data}
+
+    # Fake async generator to simulate pubsub.listen().
+    async def fake_listen():
+        # Yield one valid message and then exit.
+        yield valid_message
+
+    # Create a fake pubsub object.
+    pubsub = AsyncMock()
+    pubsub.subscribe = AsyncMock()
+    pubsub.unsubscribe = AsyncMock()
+    # Replace listen with our fake async generator.
+    pubsub.listen = fake_listen
+
+    # Patch the parse_message function to return a valid dictionary.
+    with patch("apps.maker.src.broker.parse_message", return_value=order_1):
+        await redis_subscriber(pubsub, queues)
+
+    # Verify that the parsed message was put into the "binance" queue.
+    result = await queue.get()
+    assert result == order_1
+
+    # Verify that subscribe and unsubscribe were called with the correct channel.
+    pubsub.subscribe.assert_awaited_once_with("broker")
+    pubsub.unsubscribe.assert_awaited_once_with("broker")

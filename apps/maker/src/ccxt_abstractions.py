@@ -1,9 +1,9 @@
 import asyncio
 import logging
 
-import logging_config
-from structs import CancellationMessage, OrderMessage, CustomExchange
-from errors import ExchangeError, BrokerError, RequestTimeout
+import apps.maker.src.logging_config as logging_config
+from apps.maker.src.structs import CancellationMessage, OrderMessage, CustomExchange
+from apps.maker.src.errors import ExchangeError, BrokerError, RequestTimeout
 
 # Initializing centralized logging
 logging_config.setup_logging()

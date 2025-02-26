@@ -2,15 +2,15 @@ import logging
 import json
 import asyncio
 import logging
-import logging_config
+import apps.maker.src.logging_config as logging_config
 from typing import cast
 from copy import copy
-from enums import MessageType
-from structs import OrderMessage, CancellationMessage, Response
+from apps.maker.src.enums import MessageType
+from apps.maker.src.structs import OrderMessage, CancellationMessage, Response
 from redis.asyncio import Redis, ConnectionPool
 from datetime import datetime
-from utils import identify_response, parse_message, cancellation_from_order
-from errors import BrokerError
+from apps.maker.src.utils import identify_response, parse_message, cancellation_from_order
+from apps.maker.src.errors import BrokerError
 import ast
 
 # This is the draft for my trading system message processor

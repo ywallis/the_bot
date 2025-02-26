@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from utils import load_config
+from apps.maker.src.utils import load_config
 import ccxt.async_support as ccxt
 
 load_dotenv("../.env")

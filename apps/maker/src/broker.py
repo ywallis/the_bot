@@ -1,6 +1,8 @@
 import logging
 from typing import Any
-import logging_config
+
+from redis.asyncio.client import PubSub
+import apps.maker.src.logging_config as logging_config
 from apps.maker.src.enums import MessageType
 from apps.maker.src.structs import CustomExchange, OrderMessage, CancellationMessage
 from apps.maker.src.errors import BrokerError
@@ -91,10 +93,8 @@ async def results_worker(results_queue: asyncio.Queue):
         results_queue.task_done()
 
 
-async def redis_subscriber(queues: dict[str, asyncio.Queue]):
+async def redis_subscriber(pubsub: PubSub, queues: dict[str, asyncio.Queue]):
     """Listens to Redis channel and routes messages to the correct queue."""
-    redis = await Redis(host="localhost", port=6379, decode_responses=True)
-    pubsub = redis.pubsub()
     await pubsub.subscribe(CHANNEL_NAME)
 
     logger.debug("Subscribed to Redis channel:", CHANNEL_NAME)
@@ -118,10 +118,12 @@ async def redis_subscriber(queues: dict[str, asyncio.Queue]):
                         )
     finally:
         await pubsub.unsubscribe(CHANNEL_NAME)
-        await redis.close()
 
 
 async def main():
+
+    redis = await Redis(host="localhost", port=6379, decode_responses=True)
+    pubsub: PubSub = redis.pubsub()
 
     worker_queues = {
         exchange: asyncio.Queue() for exchange in authenticated_clients.keys()
@@ -129,7 +131,7 @@ async def main():
 
     results_queue = asyncio.Queue()
     results_task = asyncio.create_task(results_worker(results_queue))
-    subscriber_task = asyncio.create_task(redis_subscriber(worker_queues))
+    subscriber_task = asyncio.create_task(redis_subscriber(pubsub, worker_queues))
 
     for exchange in authenticated_clients.keys():
         asyncio.create_task(
@@ -140,6 +142,7 @@ async def main():
 
     await asyncio.gather(subscriber_task, results_task, return_exceptions=True)
 
+    await redis.close()
 
 if __name__ == "__main__":
     asyncio.run(main())

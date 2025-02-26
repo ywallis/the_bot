@@ -2,7 +2,7 @@ from pathlib import Path
 import tomllib
 from typing import TypeGuard, Any
 from apps.maker.src.enums import MessageType, OrderSide
-from structs import OrderMessage, CancellationMessage, Response
+from apps.maker.src.structs import OrderMessage, CancellationMessage, Response
 from decimal import Decimal
 import json
 
