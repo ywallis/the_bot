@@ -1,14 +1,14 @@
 import logging
 from typing import Any
 import logging_config
-from enums import MessageType
-from structs import CustomExchange, OrderMessage, CancellationMessage
-from errors import BrokerError
-from utils import is_order_message, parse_message, is_cancellation_message
-from ccxt_abstractions import create_and_return_order, cancel_order_return_confirmation
+from apps.maker.src.enums import MessageType
+from apps.maker.src.structs import CustomExchange, OrderMessage, CancellationMessage
+from apps.maker.src.errors import BrokerError
+from apps.maker.src.utils import is_order_message, parse_message, is_cancellation_message
+from apps.maker.src.ccxt_abstractions import create_and_return_order, cancel_order_return_confirmation
 import asyncio
 from redis.asyncio import Redis
-from exchange_clients import authenticated_clients
+from apps.maker.src.exchange_clients import authenticated_clients
 
 # Initializing centralized logging
 logging_config.setup_logging()

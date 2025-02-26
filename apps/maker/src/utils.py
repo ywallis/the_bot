@@ -1,7 +1,7 @@
 from pathlib import Path
 import tomllib
 from typing import TypeGuard, Any
-from enums import MessageType, OrderSide
+from apps.maker.src.enums import MessageType, OrderSide
 from structs import OrderMessage, CancellationMessage, Response
 from decimal import Decimal
 import json
@@ -62,13 +62,13 @@ def identify_response(string: str) -> Response:
     return Response(kind=MessageType(items[0]), text=items[1])
 
 
-def is_order_message(
-    message: CancellationMessage | OrderMessage | Any,
-) -> TypeGuard[OrderMessage]:
-    return message.get("kind").value == MessageType.ORDER.value
+def is_order_message(message: Any) -> TypeGuard[OrderMessage]:
+    if not isinstance(message, dict):
+        return False
+    return message.get("kind") == MessageType.ORDER
 
 
-def is_cancellation_message(
-    message: CancellationMessage | OrderMessage | Any,
-) -> TypeGuard[CancellationMessage]:
-    return message.get("kind").value == MessageType.CANCELLATION.value
+def is_cancellation_message(message: Any) -> TypeGuard[CancellationMessage]:
+    if not isinstance(message, dict):
+        return False
+    return message.get("kind") == MessageType.CANCELLATION
