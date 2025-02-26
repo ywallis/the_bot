@@ -51,4 +51,6 @@ cancellation_1: CancellationMessage = CancellationMessage(
     pair="ALPH/USDT",
 )
 
-order_1_response_positive: Response = Response(kind=MessageType.ORDER, text='{"id": "mock_response_1"}')
+order_1_response_positive: Response = Response(
+    kind=MessageType.ORDER, text='{"id": "mock_response_1"}'
+)
