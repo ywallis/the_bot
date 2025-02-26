@@ -3,7 +3,7 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 from apps.maker.src.structs import CustomExchange
 from apps.maker.src.enums import MessageType
-from apps.maker.src.broker import process_message, worker
+from apps.maker.src.broker import process_message, worker, results_worker
 from apps.maker.tests.test_data import order_1, cancellation_1
 
 
@@ -78,3 +78,29 @@ async def test_worker():
     await worker_task  # Ensure it completes
 
     assert queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_results_worker_order(mocker):
+    results_queue = asyncio.Queue()
+    mock_redis_publish = mocker.patch("apps.maker.src.broker.redis_out.publish", new_callable=AsyncMock)
+
+    await results_queue.put(("123", MessageType.ORDER, "success"))
+    await results_queue.put((None, None, None))  # Stop signal
+
+    await results_worker(results_queue)
+
+    mock_redis_publish.assert_called_once_with("123", f"{MessageType.ORDER}|success")
+
+@pytest.mark.asyncio
+async def test_results_worker_cancellation(mocker):
+    results_queue = asyncio.Queue()
+    mock_redis_publish = mocker.patch("apps.maker.src.broker.redis_out.publish", new_callable=AsyncMock)
+
+    await results_queue.put(("234", MessageType.CANCELLATION, "success"))
+    await results_queue.put((None, None, None))  # Stop signal
+
+    await results_worker(results_queue)
+
+    mock_redis_publish.assert_called_once_with("234", f"{MessageType.CANCELLATION}|success")
+
