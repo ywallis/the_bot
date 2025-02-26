@@ -1,10 +1,9 @@
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, patch
-from apps.maker.src.errors import BrokerError
 from apps.maker.src.structs import CustomExchange
 from apps.maker.src.enums import MessageType
-from apps.maker.src.broker import process_message
+from apps.maker.src.broker import process_message, worker
 from apps.maker.tests.test_data import order_1, cancellation_1
 
 
@@ -61,3 +60,21 @@ async def test_process_message_unknown_type():
 
     expected_error_msg = "[Error 400]: Message of unknown type was allowed through: {'id': '789', 'kind': 'INVALID'}"
     assert str(result[2]) == expected_error_msg
+
+
+@pytest.mark.asyncio
+async def test_worker():
+    queue = asyncio.Queue()
+    results_queue = asyncio.Queue()
+    ccxt_client = AsyncMock(spec=CustomExchange)
+
+    ccxt_client.name = "mock_exchange"
+
+    await queue.put(order_1)
+    await queue.put(None)  # To stop the worker
+
+    worker_task = asyncio.create_task(worker(queue, results_queue, ccxt_client))
+
+    await worker_task  # Ensure it completes
+
+    assert queue.empty()
