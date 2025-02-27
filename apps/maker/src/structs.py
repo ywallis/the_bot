@@ -1,6 +1,8 @@
-from typing import TypedDict, Protocol
-from apps.maker.src.enums import MessageType, OrderSide, OrderType
 from decimal import Decimal
+from typing import Protocol, TypedDict
+
+from apps.maker.src.enums import MessageType, OrderSide, OrderType
+
 
 class OrderMessage(TypedDict):
     kind: MessageType
@@ -15,6 +17,13 @@ class OrderMessage(TypedDict):
     amount: Decimal
 
 
+class OrderBatchMessage(TypedDict):
+    kind: MessageType
+    strategy: str
+    id: str
+    orders: list[OrderMessage]
+
+
 class CancellationMessage(TypedDict):
     kind: MessageType
     strategy: str
@@ -22,9 +31,13 @@ class CancellationMessage(TypedDict):
     id: str
     pair: str
 
+
 class CustomExchange(Protocol):
     name: str
-    async def create_limit_order(self, symbol: str, side: str, amount: float, price: float) -> dict: ...
+
+    async def create_limit_order(
+        self, symbol: str, side: str, amount: float, price: float
+    ) -> dict: ...
     async def cancel_order(self, id: str, symbol: str) -> dict: ...
 
 

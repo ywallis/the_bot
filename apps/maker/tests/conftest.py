@@ -5,7 +5,12 @@ import pytest
 from copy import deepcopy
 
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
-from apps.maker.src.structs import CancellationMessage, OrderMessage, Response
+from apps.maker.src.structs import (
+    CancellationMessage,
+    OrderBatchMessage,
+    OrderMessage,
+    Response,
+)
 
 
 @pytest.fixture
@@ -86,6 +91,25 @@ def order_unique_1():
         amount=Decimal(10),
     )
     return deepcopy(order_unique_1)
+
+
+@pytest.fixture
+def order_batch_1(order_1, order_2):
+    order_batch_1: OrderBatchMessage = OrderBatchMessage(
+        kind=MessageType.ORDERBATCH, strategy="ALPH_gate", id="gate_test_batch", orders=[order_1, order_2]
+    )
+    return deepcopy(order_batch_1)
+
+
+@pytest.fixture
+def order_batch_raw(order_raw_string):
+    order_batch_1 = {
+        "kind": "orderbatch",
+        "strategy": "ALPH_gate",
+        "id": "gate_test_batch",
+        "orders": [order_raw_string, order_raw_string],
+    }
+    return deepcopy(order_batch_1)
 
 
 @pytest.fixture

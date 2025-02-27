@@ -11,7 +11,12 @@ from redis.asyncio import ConnectionPool, Redis
 import apps.maker.src.logging_config as logging_config
 from apps.maker.src.enums import MessageType, OrderType
 from apps.maker.src.errors import BrokerError
-from apps.maker.src.structs import CancellationMessage, OrderMessage, Response
+from apps.maker.src.structs import (
+    CancellationMessage,
+    OrderBatchMessage,
+    OrderMessage,
+    Response,
+)
 from apps.maker.src.utils import (
     cancellation_from_order,
     identify_response,
@@ -40,7 +45,9 @@ class MessageProcessor:
         )  # Keep track of last open order (could be cleaned up by the websocket watcher?)
         self.tasks = []
 
-    def replace_queued_value(self, msg: OrderMessage | CancellationMessage):
+    def replace_queued_value(
+        self, msg: OrderMessage | CancellationMessage | OrderBatchMessage
+    ):
         strategy: str = msg["strategy"]
         prior = copy(self.message_queue[strategy])
         logger.debug(f"Replacing {prior['id']} with {msg['id']}")
@@ -84,11 +91,9 @@ class MessageProcessor:
         """Sends an order object to the broker and expects a confirmation."""
 
         logger.debug(f"Sending {msg['id']} to broker")
-        # TODO: Replace with broker connector
         confirmation: Response = await self.send_to_broker(msg)
 
         if confirmation.get("kind") == MessageType.ORDER:
-            # exchange_id = json.loads(confirmation.get("text"))["id"]
             exchange_id = ast.literal_eval(confirmation.get("text"))["id"]
             msg["exchange_id"] = exchange_id
             logger.info(
@@ -112,7 +117,9 @@ class MessageProcessor:
         else:
             raise BrokerError(message=f"Invalid response from broker:{confirmation}")
 
-    async def process_message(self, msg: OrderMessage | CancellationMessage | None):
+    async def process_message(
+        self, msg: OrderMessage | CancellationMessage | OrderBatchMessage | None
+    ):
         """Process the message if the lock is available."""
 
         if msg is None:
@@ -145,6 +152,9 @@ class MessageProcessor:
             # This is where the order / cancellation happens.
 
             # If an open order exists for the relevant strategy, cancel it. If it doesn't, do nothing but note it.
+
+            if msg["kind"] == MessageType.ORDERBATCH:
+                return
 
             if msg["kind"] == MessageType.CANCELLATION:
                 if strategy in self.open_orders:

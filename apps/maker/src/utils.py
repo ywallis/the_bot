@@ -1,8 +1,13 @@
 from pathlib import Path
 import tomllib
-from typing import TypeGuard, Any
+from typing import TypeGuard, Any, cast
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
-from apps.maker.src.structs import OrderMessage, CancellationMessage, Response
+from apps.maker.src.structs import (
+    OrderBatchMessage,
+    OrderMessage,
+    CancellationMessage,
+    Response,
+)
 from decimal import Decimal
 import json
 
@@ -15,10 +20,13 @@ def load_config():
 
 
 def parse_message(
-    message_raw: str,
-) -> OrderMessage | CancellationMessage | None:
+    message_raw: str | dict,
+) -> OrderMessage | CancellationMessage | OrderBatchMessage | None:
+    if isinstance(message_raw, str):
+        message = json.loads(message_raw)
+    else:
+        message = message_raw
 
-    message: dict[str, str] = json.loads(message_raw)
     match message.get("kind"):
         case MessageType.ORDER.value:
             return OrderMessage(
@@ -41,10 +49,23 @@ def parse_message(
                 id=message["id"],
                 pair=message["pair"],
             )
+        case MessageType.ORDERBATCH.value:
+            order_list: list[OrderMessage] = []
+            for item in message["orders"]:
+                order = json.loads(item)
+                if order.get("kind") == MessageType.ORDER.value: #type: ignore
+                    result = parse_message(order)
+                    if result is not None:
+                        order_list.append(cast(OrderMessage, result))
+            return OrderBatchMessage(
+                kind=MessageType.ORDERBATCH,
+                strategy=message["strategy"],
+                id=message["id"],
+                orders=order_list,
+            )
 
 
 def cancellation_from_order(order: OrderMessage) -> CancellationMessage:
-
     return CancellationMessage(
         kind=MessageType.CANCELLATION,
         strategy=order["strategy"],
@@ -55,7 +76,6 @@ def cancellation_from_order(order: OrderMessage) -> CancellationMessage:
 
 
 def identify_response(string: str) -> Response:
-
     if string == "":
         return Response(kind=MessageType.ERROR, text="Redis connection failed")
 
@@ -73,3 +93,8 @@ def is_cancellation_message(message: Any) -> TypeGuard[CancellationMessage]:
     if not isinstance(message, dict):
         return False
     return message.get("kind") == MessageType.CANCELLATION
+
+def is_orderbatch_message(message: Any) -> TypeGuard[OrderBatchMessage]:
+    if not isinstance(message, dict):
+        return False
+    return message.get("kind") == MessageType.ORDERBATCH
