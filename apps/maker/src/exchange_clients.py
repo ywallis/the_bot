@@ -32,5 +32,6 @@ for exchange in exchanges:
         auth_client = getattr(ccxt, id)(
             {"apiKey": exchange_key, "secret": exchange_secret}
         )
+        auth_client.options['maxRetriesOnFailure'] = 1
     authenticated_clients[id] = auth_client
 
