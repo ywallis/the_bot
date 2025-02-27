@@ -1,5 +1,5 @@
 from typing import TypedDict, Protocol
-from apps.maker.src.enums import MessageType, OrderSide
+from apps.maker.src.enums import MessageType, OrderSide, OrderType
 from decimal import Decimal
 
 class OrderMessage(TypedDict):
@@ -10,6 +10,7 @@ class OrderMessage(TypedDict):
     exchange_id: str
     pair: str
     side: OrderSide
+    order_type: OrderType
     price: Decimal
     amount: Decimal
 

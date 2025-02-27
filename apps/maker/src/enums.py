@@ -1,17 +1,27 @@
 from enum import Enum
 
+
 class MessageType(Enum):
     ORDER = "order"
+    ORDERBATCH = "orderbatch"
     CANCELLATION = "cancellation"
     ERROR = "error"
-    def __str__(self):
-        return self.value  # Ensures JSON serialization works naturally
 
+    def __str__(self):
+        return self.value
 
 
 class OrderSide(Enum):
     SELL = "sell"
     BUY = "buy"
-    def __str__(self):
-        return self.value  # Ensures JSON serialization works naturally
 
+    def __str__(self):
+        return self.value
+
+
+class OrderType(Enum):
+    REPLACE = "replace"
+    UNIQUE = "unique"
+
+    def __str__(self):
+        return self.value

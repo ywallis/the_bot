@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 from copy import deepcopy
 
-from apps.maker.src.enums import MessageType, OrderSide
+from apps.maker.src.enums import MessageType, OrderSide, OrderType
 from apps.maker.src.structs import CancellationMessage, OrderMessage, Response
 
 
@@ -18,6 +18,7 @@ def order_raw_item():
         "exchange_id": "_",
         "pair": "ALPH/USDT",
         "side": "sell",
+        "order_type": "replace",
         "price": "100",
         "amount": "10",
     }
@@ -46,6 +47,7 @@ def order_1():
         exchange_id="_",
         pair="ALPH/USDT",
         side=OrderSide.SELL,
+        order_type=OrderType.REPLACE,
         price=Decimal(100),
         amount=Decimal(10),
     )
@@ -62,6 +64,7 @@ def order_2():
         exchange_id="_",
         pair="ALPH/USDT",
         side=OrderSide.SELL,
+        order_type=OrderType.REPLACE,
         price=Decimal(100),
         amount=Decimal(10),
     )
