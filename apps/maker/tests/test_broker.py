@@ -9,12 +9,11 @@ from apps.maker.src.broker import (
     results_worker,
     redis_subscriber,
 )
-from apps.maker.tests.test_data import order_1, cancellation_1, order_raw_string
 
 
 # Need to create a ccxt response fixture
 @pytest.mark.asyncio
-async def test_process_message_order():
+async def test_process_message_order(order_1):
     results_queue = asyncio.Queue()
     ccxt_client = AsyncMock()  # Mock the exchange client
 
@@ -23,7 +22,6 @@ async def test_process_message_order():
         "apps.maker.src.broker.create_and_return_order",
         new=AsyncMock(return_value="order_created"),
     ):
-
         await process_message(order_1, results_queue, ccxt_client)
         result = await results_queue.get()
 
@@ -31,7 +29,7 @@ async def test_process_message_order():
 
 
 @pytest.mark.asyncio
-async def test_process_message_cancellation():
+async def test_process_message_cancellation(cancellation_1):
     results_queue = asyncio.Queue()
     ccxt_client = AsyncMock()  # Mock the exchange client
 
@@ -40,7 +38,6 @@ async def test_process_message_cancellation():
         "apps.maker.src.broker.cancel_order_return_confirmation",
         new=AsyncMock(return_value="order_cancelled"),
     ):
-
         await process_message(cancellation_1, results_queue, ccxt_client)
         result = await results_queue.get()
 
@@ -68,7 +65,7 @@ async def test_process_message_unknown_type():
 
 
 @pytest.mark.asyncio
-async def test_worker():
+async def test_worker(order_1):
     queue = asyncio.Queue()
     results_queue = asyncio.Queue()
     ccxt_client = AsyncMock(spec=CustomExchange)
@@ -118,7 +115,7 @@ async def test_results_worker_cancellation(mocker):
 
 
 @pytest.mark.asyncio
-async def test_redis_subscriber_valid_message():
+async def test_redis_subscriber_valid_message(order_1, order_raw_string):
     # Create a queue for the "binance" exchange.
     queue = asyncio.Queue()
     queues = {order_1["exchange"]: queue}

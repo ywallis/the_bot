@@ -6,13 +6,8 @@ from apps.maker.src.enums import MessageType
 from apps.maker.src.errors import BrokerError
 from apps.maker.src.message_processor import (
     MessageProcessor,
-)  # Adjust your import accordingly
-from apps.maker.tests.test_data import (
-    order_1,
-    order_2,
-    cancellation_1,
-    order_1_response_positive,
 )
+from apps.maker.src.structs import CancellationMessage, OrderMessage, Response
 
 
 @pytest.fixture
@@ -28,7 +23,9 @@ def test_get_lock_creates_new_lock(processor: MessageProcessor):
     assert processor.get_lock(strategy) is lock
 
 
-def test_replace_queued_value(processor: MessageProcessor):
+def test_replace_queued_value(
+    order_1: OrderMessage, order_2: OrderMessage, processor: MessageProcessor
+):
     strategy = order_1["strategy"]
     # Initial queued order.
     processor.message_queue[strategy] = order_1
@@ -39,7 +36,12 @@ def test_replace_queued_value(processor: MessageProcessor):
 
 
 @pytest.mark.asyncio
-async def test_process_order_message_without_lock(monkeypatch, processor):
+async def test_process_order_message_without_lock(
+    order_1: OrderMessage,
+    order_1_response_positive: Response,
+    monkeypatch: pytest.MonkeyPatch,
+    processor: MessageProcessor,
+):
     strategy = order_1["strategy"]
 
     # Monkeypatch send_to_broker to simulate a valid broker response.
@@ -55,13 +57,19 @@ async def test_process_order_message_without_lock(monkeypatch, processor):
     monkeypatch.setattr(processor, "place_order", fake_place_order)
 
     result = await processor.process_message(order_1)
+    assert result is not None
     assert f"{order_1['id']} was processed" in result
     assert strategy in processor.open_orders
     assert processor.open_orders[strategy]["exchange_id"] == "exchange123"
 
 
 @pytest.mark.asyncio
-async def test_process_cancellation_message_with_open_order(monkeypatch, processor):
+async def test_process_cancellation_message_with_open_order(
+    order_1: OrderMessage,
+    cancellation_1: CancellationMessage,
+    monkeypatch: pytest.MonkeyPatch,
+    processor: MessageProcessor,
+):
     strategy = order_1["strategy"]
     # Pre-populate open_orders to simulate an existing order.
     processor.open_orders[strategy] = order_1
@@ -73,12 +81,15 @@ async def test_process_cancellation_message_with_open_order(monkeypatch, process
     monkeypatch.setattr(processor, "place_cancellation", fake_place_cancellation)
 
     result = await processor.process_message(cancellation_msg)
+    assert result is not None
     assert f"{cancellation_1['id']} was processed" in result
     assert strategy not in processor.open_orders
 
 
 @pytest.mark.asyncio
-async def test_process_message_queue(processor):
+async def test_process_message_queue(
+    order_1: OrderMessage, order_2: OrderMessage, processor: MessageProcessor
+):
     strategy = order_1["strategy"]
     # Acquire the lock to simulate it being busy.
     lock = processor.get_lock(strategy)
@@ -87,13 +98,16 @@ async def test_process_message_queue(processor):
     processor.message_queue[strategy] = order_1
     # Process a new order message; it should replace the queued one.
     result = await processor.process_message(order_2)
+    assert result is not None
     assert f"{order_2['id']} replaced {order_1['id']} in queue" in result
 
     lock.release()
 
 
 @pytest.mark.asyncio
-async def test_place_order_raises_broker_error(monkeypatch, processor):
+async def test_place_order_raises_broker_error(
+    order_1: OrderMessage, monkeypatch, processor
+):
     # Simulate an invalid broker response.
     async def fake_send_to_broker(_msg):
         return {"kind": MessageType.ERROR, "text": "error"}
