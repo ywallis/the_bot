@@ -1,7 +1,7 @@
 from pathlib import Path
 import tomllib
 from typing import TypeGuard, Any
-from apps.maker.src.enums import MessageType, OrderSide
+from apps.maker.src.enums import MessageType, OrderSide, OrderType
 from apps.maker.src.structs import OrderMessage, CancellationMessage, Response
 from decimal import Decimal
 import json
@@ -29,6 +29,7 @@ def parse_message(
                 exchange_id=message["exchange_id"],
                 pair=message["pair"],
                 side=OrderSide(message["side"]),
+                order_type=OrderType(message["order_type"]),
                 price=Decimal(message["price"]),
                 amount=Decimal(message["amount"]),
             )

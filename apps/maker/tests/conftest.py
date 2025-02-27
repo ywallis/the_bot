@@ -72,6 +72,23 @@ def order_2():
 
 
 @pytest.fixture
+def order_unique_1():
+    order_unique_1: OrderMessage = OrderMessage(
+        kind=MessageType.ORDER,
+        strategy="ALPH_gate",
+        exchange="gate",
+        id="gate_test_2",
+        exchange_id="_",
+        pair="ALPH/USDT",
+        side=OrderSide.SELL,
+        order_type=OrderType.UNIQUE,
+        price=Decimal(100),
+        amount=Decimal(10),
+    )
+    return deepcopy(order_unique_1)
+
+
+@pytest.fixture
 def cancellation_1():
     cancellation_1: CancellationMessage = CancellationMessage(
         kind=MessageType.CANCELLATION,

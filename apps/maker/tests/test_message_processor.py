@@ -87,6 +87,33 @@ async def test_process_cancellation_message_with_open_order(
 
 
 @pytest.mark.asyncio
+async def test_unique_order(
+    order_unique_1: OrderMessage,
+    order_1_response_positive: Response,
+    monkeypatch: pytest.MonkeyPatch,
+    processor: MessageProcessor,
+):
+    strategy = order_unique_1["strategy"]
+
+    # Monkeypatch send_to_broker to simulate a valid broker response.
+    async def fake_send_to_broker(_msg):
+        return order_1_response_positive
+
+    monkeypatch.setattr(processor, "send_to_broker", fake_send_to_broker)
+
+    # Optionally, override place_order if you want to simplify its logic.
+    async def fake_place_order(msg):
+        return {**msg, "exchange_id": "exchange123"}
+
+    monkeypatch.setattr(processor, "place_order", fake_place_order)
+
+    result = await processor.process_message(order_unique_1)
+    assert result is not None
+    assert f"{order_unique_1['id']} was processed" in result
+    assert strategy not in processor.open_orders
+
+
+@pytest.mark.asyncio
 async def test_process_message_queue(
     order_1: OrderMessage, order_2: OrderMessage, processor: MessageProcessor
 ):

@@ -9,7 +9,7 @@ from typing import cast
 from redis.asyncio import ConnectionPool, Redis
 
 import apps.maker.src.logging_config as logging_config
-from apps.maker.src.enums import MessageType
+from apps.maker.src.enums import MessageType, OrderType
 from apps.maker.src.errors import BrokerError
 from apps.maker.src.structs import CancellationMessage, OrderMessage, Response
 from apps.maker.src.utils import (
@@ -32,8 +32,12 @@ class MessageProcessor:
             connection_pool=self.pool, decode_responses=True
         ).pubsub()
         self.locks = {}  # Dictionary to store locks dynamically
-        self.message_queue = {}  # Dictionary to keep track of the next action to execute in case of a lock
-        self.open_orders = {}  # Keep track of last open order (could be cleaned up by the websocket watcher?)
+        self.message_queue = (
+            {}
+        )  # Dictionary to keep track of the next action to execute in case of a lock
+        self.open_orders = (
+            {}
+        )  # Keep track of last open order (could be cleaned up by the websocket watcher?)
         self.tasks = []
 
     def replace_queued_value(self, msg: OrderMessage | CancellationMessage):
@@ -168,13 +172,11 @@ class MessageProcessor:
                     if await self.place_cancellation(cancellation):
                         del self.open_orders[strategy]
 
-                    confirmed_order: OrderMessage = await self.place_order(order_msg)
-                    self.open_orders[strategy] = confirmed_order
-
                 else:
                     logger.debug(f"Placing order {msg['id']}")
 
-                    confirmed_order = await self.place_order(order_msg)
+                confirmed_order = await self.place_order(order_msg)
+                if confirmed_order["order_type"] == OrderType.REPLACE:
                     self.open_orders[strategy] = confirmed_order
 
             logger.debug(f"Finished processing {strategy} message: {msg['id']}")
