@@ -50,17 +50,11 @@ async def test_process_order_message_without_lock(
 
     monkeypatch.setattr(processor, "send_to_broker", fake_send_to_broker)
 
-    # Optionally, override place_order if you want to simplify its logic.
-    async def fake_place_order(msg):
-        return {**msg, "exchange_id": "exchange123"}
-
-    monkeypatch.setattr(processor, "place_order", fake_place_order)
-
     result = await processor.process_message(order_1)
     assert result is not None
     assert f"{order_1['id']} was processed" in result
     assert strategy in processor.open_orders
-    assert processor.open_orders[strategy]["exchange_id"] == "exchange123"
+    assert processor.open_orders[strategy]["exchange_id"] == "mock_response_1"
 
 
 @pytest.mark.asyncio
@@ -101,15 +95,29 @@ async def test_unique_order(
 
     monkeypatch.setattr(processor, "send_to_broker", fake_send_to_broker)
 
-    # Optionally, override place_order if you want to simplify its logic.
-    async def fake_place_order(msg):
-        return {**msg, "exchange_id": "exchange123"}
-
-    monkeypatch.setattr(processor, "place_order", fake_place_order)
-
     result = await processor.process_message(order_unique_1)
     assert result is not None
     assert f"{order_unique_1['id']} was processed" in result
+    assert strategy not in processor.open_orders
+
+@pytest.mark.asyncio
+async def test_order_batch(
+    order_batch_1: OrderMessage,
+    order_1_response_positive: Response,
+    monkeypatch: pytest.MonkeyPatch,
+    processor: MessageProcessor,
+):
+    strategy = order_batch_1["strategy"]
+
+    # Monkeypatch send_to_broker to simulate a valid broker response.
+    async def fake_send_to_broker(_msg):
+        return order_1_response_positive
+
+    monkeypatch.setattr(processor, "send_to_broker", fake_send_to_broker)
+
+    result = await processor.process_message(order_batch_1)
+    assert result is not None
+    assert f"{order_batch_1['id']} was processed" in result
     assert strategy not in processor.open_orders
 
 

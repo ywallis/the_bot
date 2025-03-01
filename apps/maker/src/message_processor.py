@@ -154,6 +154,14 @@ class MessageProcessor:
             # If an open order exists for the relevant strategy, cancel it. If it doesn't, do nothing but note it.
 
             if msg["kind"] == MessageType.ORDERBATCH:
+
+                order_batch = cast(OrderBatchMessage, msg)
+                logger.debug(f"Processing order batch {msg['id']}")
+                orders: list[OrderMessage] = []
+                for order in order_batch["orders"]:
+                    orders.append(order)
+
+                # Can probably just do a "gather place order *orderbatch" here
                 return
 
             if msg["kind"] == MessageType.CANCELLATION:
