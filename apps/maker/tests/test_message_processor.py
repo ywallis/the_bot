@@ -1,4 +1,5 @@
 import asyncio
+from typing import Callable
 
 import pytest
 
@@ -38,15 +39,15 @@ def test_replace_queued_value(
 @pytest.mark.asyncio
 async def test_process_order_message_without_lock(
     order_1: OrderMessage,
-    order_1_response_positive: Response,
+    order_response_positive: Callable,
     monkeypatch: pytest.MonkeyPatch,
     processor: MessageProcessor,
 ):
     strategy = order_1["strategy"]
 
     # Monkeypatch send_to_broker to simulate a valid broker response.
-    async def fake_send_to_broker(_msg):
-        return order_1_response_positive
+    async def fake_send_to_broker(msg):
+        return order_response_positive(msg)
 
     monkeypatch.setattr(processor, "send_to_broker", fake_send_to_broker)
 
@@ -54,7 +55,7 @@ async def test_process_order_message_without_lock(
     assert result is not None
     assert f"{order_1['id']} was processed" in result
     assert strategy in processor.open_orders
-    assert processor.open_orders[strategy]["exchange_id"] == "mock_response_1"
+    assert processor.open_orders[strategy]["exchange_id"] == f"{order_1['id']}mock_response"
 
 
 @pytest.mark.asyncio

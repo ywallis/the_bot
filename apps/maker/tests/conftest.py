@@ -1,5 +1,6 @@
 import json
 from decimal import Decimal
+from typing import Callable
 
 import pytest
 from copy import deepcopy
@@ -96,7 +97,10 @@ def order_unique_1():
 @pytest.fixture
 def order_batch_1(order_1, order_2):
     order_batch_1: OrderBatchMessage = OrderBatchMessage(
-        kind=MessageType.ORDERBATCH, strategy="ALPH_gate", id="gate_test_batch", orders=[order_1, order_2]
+        kind=MessageType.ORDERBATCH,
+        strategy="ALPH_gate",
+        id="gate_test_batch",
+        orders=[order_1, order_2],
     )
     return deepcopy(order_batch_1)
 
@@ -130,3 +134,15 @@ def order_1_response_positive():
         kind=MessageType.ORDER, text='{"id": "mock_response_1"}'
     )
     return deepcopy(order_1_response_positive)
+
+
+@pytest.fixture
+def order_response_positive() -> Callable[[str], Response]:
+    def _factory(msg):
+        order_response_positive: Response = Response(
+            kind=MessageType.ORDER, text=f'{{"id": "{msg["id"]}mock_response"}}'
+        )
+        return order_response_positive
+    return _factory
+
+    # return deepcopy(order_response_positive)
