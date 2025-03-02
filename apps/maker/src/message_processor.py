@@ -4,7 +4,7 @@ import json
 import logging
 from copy import copy
 from datetime import datetime
-from typing import cast
+from typing import Awaitable, cast
 
 from redis.asyncio import ConnectionPool, Redis
 
@@ -37,12 +37,8 @@ class MessageProcessor:
             connection_pool=self.pool, decode_responses=True
         ).pubsub()
         self.locks = {}  # Dictionary to store locks dynamically
-        self.message_queue = (
-            {}
-        )  # Dictionary to keep track of the next action to execute in case of a lock
-        self.open_orders = (
-            {}
-        )  # Keep track of last open order (could be cleaned up by the websocket watcher?)
+        self.message_queue = {}  # Dictionary to keep track of the next action to execute in case of a lock
+        self.open_orders = {}  # Keep track of last open order (could be cleaned up by the websocket watcher?)
         self.tasks = []
 
     def replace_queued_value(
@@ -154,15 +150,13 @@ class MessageProcessor:
             # If an open order exists for the relevant strategy, cancel it. If it doesn't, do nothing but note it.
 
             if msg["kind"] == MessageType.ORDERBATCH:
-
                 order_batch = cast(OrderBatchMessage, msg)
                 logger.debug(f"Processing order batch {msg['id']}")
-                orders: list[OrderMessage] = []
+                order_tasks: list[Awaitable] = []
                 for order in order_batch["orders"]:
-                    orders.append(order)
+                    order_tasks.append(self.place_order(order))
 
-                # Can probably just do a "gather place order *orderbatch" here
-                return
+                asyncio.gather(*order_tasks)
 
             if msg["kind"] == MessageType.CANCELLATION:
                 if strategy in self.open_orders:
