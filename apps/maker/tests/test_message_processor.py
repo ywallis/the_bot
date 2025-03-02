@@ -51,7 +51,10 @@ async def test_process_order_message_without_lock(
     assert result is not None
     assert f"{order_1['id']} was processed" in result
     assert strategy in processor.open_orders
-    assert processor.open_orders[strategy]["exchange_id"] == f"{order_1['id']}mock_response"
+    assert (
+        processor.open_orders[strategy]["exchange_id"]
+        == f"{order_1['id']}mock_response"
+    )
 
 
 @pytest.mark.asyncio
@@ -94,6 +97,7 @@ async def test_unique_order(
     assert f"{order_unique_1['id']} was processed" in result
     assert strategy not in processor.open_orders
 
+
 @pytest.mark.asyncio
 async def test_order_batch(
     order_batch_1: OrderMessage,
@@ -132,7 +136,10 @@ async def test_process_message_queue(
 
 @pytest.mark.asyncio
 async def test_place_order_raises_broker_error(
-    order_1: OrderMessage, fake_send_to_broker_negative: Callable[[str], Response], monkeypatch: pytest.MonkeyPatch, processor: MessageProcessor
+    order_1: OrderMessage,
+    fake_send_to_broker_negative: Callable[[str], Response],
+    monkeypatch: pytest.MonkeyPatch,
+    processor: MessageProcessor,
 ):
     # Simulate an invalid broker response.
     monkeypatch.setattr(processor, "send_to_broker", fake_send_to_broker_negative)
