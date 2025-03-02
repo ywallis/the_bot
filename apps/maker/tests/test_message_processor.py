@@ -3,7 +3,6 @@ from typing import Callable
 
 import pytest
 
-from apps.maker.src.enums import MessageType
 from apps.maker.src.errors import BrokerError
 from apps.maker.src.message_processor import (
     MessageProcessor,
@@ -39,17 +38,14 @@ def test_replace_queued_value(
 @pytest.mark.asyncio
 async def test_process_order_message_without_lock(
     order_1: OrderMessage,
-    order_response_positive: Callable,
+    fake_send_to_broker_positive: Callable[[str], Response],
     monkeypatch: pytest.MonkeyPatch,
     processor: MessageProcessor,
 ):
     strategy = order_1["strategy"]
 
     # Monkeypatch send_to_broker to simulate a valid broker response.
-    async def fake_send_to_broker(msg):
-        return order_response_positive(msg)
-
-    monkeypatch.setattr(processor, "send_to_broker", fake_send_to_broker)
+    monkeypatch.setattr(processor, "send_to_broker", fake_send_to_broker_positive)
 
     result = await processor.process_message(order_1)
     assert result is not None
@@ -84,17 +80,14 @@ async def test_process_cancellation_message_with_open_order(
 @pytest.mark.asyncio
 async def test_unique_order(
     order_unique_1: OrderMessage,
-    order_1_response_positive: Response,
+    fake_send_to_broker_positive: Callable[[str], Response],
     monkeypatch: pytest.MonkeyPatch,
     processor: MessageProcessor,
 ):
     strategy = order_unique_1["strategy"]
 
     # Monkeypatch send_to_broker to simulate a valid broker response.
-    async def fake_send_to_broker(_msg):
-        return order_1_response_positive
-
-    monkeypatch.setattr(processor, "send_to_broker", fake_send_to_broker)
+    monkeypatch.setattr(processor, "send_to_broker", fake_send_to_broker_positive)
 
     result = await processor.process_message(order_unique_1)
     assert result is not None
@@ -104,17 +97,14 @@ async def test_unique_order(
 @pytest.mark.asyncio
 async def test_order_batch(
     order_batch_1: OrderMessage,
-    order_1_response_positive: Response,
+    fake_send_to_broker_positive: Callable[[str], Response],
     monkeypatch: pytest.MonkeyPatch,
     processor: MessageProcessor,
 ):
     strategy = order_batch_1["strategy"]
 
     # Monkeypatch send_to_broker to simulate a valid broker response.
-    async def fake_send_to_broker(_msg):
-        return order_1_response_positive
-
-    monkeypatch.setattr(processor, "send_to_broker", fake_send_to_broker)
+    monkeypatch.setattr(processor, "send_to_broker", fake_send_to_broker_positive)
 
     result = await processor.process_message(order_batch_1)
     assert result is not None
@@ -142,26 +132,23 @@ async def test_process_message_queue(
 
 @pytest.mark.asyncio
 async def test_place_order_raises_broker_error(
-    order_1: OrderMessage, monkeypatch, processor
+    order_1: OrderMessage, fake_send_to_broker_negative: Callable[[str], Response], monkeypatch: pytest.MonkeyPatch, processor: MessageProcessor
 ):
     # Simulate an invalid broker response.
-    async def fake_send_to_broker(_msg):
-        return {"kind": MessageType.ERROR, "text": "error"}
-
-    monkeypatch.setattr(processor, "send_to_broker", fake_send_to_broker)
+    monkeypatch.setattr(processor, "send_to_broker", fake_send_to_broker_negative)
 
     with pytest.raises(BrokerError):
         await processor.place_order(order_1)
 
 
-# A dummy asynchronous task that completes quickly.
-async def dummy_task():
-    await asyncio.sleep(0.1)
-    return "dummy result"
+# # A dummy asynchronous task that completes quickly.
+# async def dummy_task():
+#     await asyncio.sleep(0.1)
+#     return "dummy result"
 
 
 @pytest.mark.asyncio
-async def test_collect_results_periodically(processor):
+async def test_collect_results_periodically(processor, dummy_task):
     # Add a dummy task that should complete quickly.
     processor.tasks.append(asyncio.create_task(dummy_task()))
 

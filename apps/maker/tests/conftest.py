@@ -1,8 +1,10 @@
+import asyncio
 import json
 from decimal import Decimal
-from typing import Callable
+from typing import Awaitable, Callable
 
 import pytest
+import pytest_asyncio
 from copy import deepcopy
 
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
@@ -32,12 +34,12 @@ def order_raw_item():
 
 
 @pytest.fixture
-def order_raw(order_raw_item):
+def order_raw(order_raw_item: dict[str, str]):
     return deepcopy(order_raw_item)
 
 
 @pytest.fixture
-def order_raw_string(order_raw_item):
+def order_raw_string(order_raw_item: dict[str, str]):
     order_raw_string = json.dumps(order_raw_item)
     return deepcopy(order_raw_string)
 
@@ -83,7 +85,7 @@ def order_unique_1():
         kind=MessageType.ORDER,
         strategy="ALPH_gate",
         exchange="gate",
-        id="gate_test_2",
+        id="gate_test_3",
         exchange_id="_",
         pair="ALPH/USDT",
         side=OrderSide.SELL,
@@ -95,7 +97,7 @@ def order_unique_1():
 
 
 @pytest.fixture
-def order_batch_1(order_1, order_2):
+def order_batch_1(order_1: OrderMessage, order_2: OrderMessage):
     order_batch_1: OrderBatchMessage = OrderBatchMessage(
         kind=MessageType.ORDERBATCH,
         strategy="ALPH_gate",
@@ -106,7 +108,7 @@ def order_batch_1(order_1, order_2):
 
 
 @pytest.fixture
-def order_batch_raw(order_raw_string):
+def order_batch_raw(order_raw_string: str):
     order_batch_1 = {
         "kind": "orderbatch",
         "strategy": "ALPH_gate",
@@ -129,20 +131,39 @@ def cancellation_1():
 
 
 @pytest.fixture
-def order_1_response_positive():
-    order_1_response_positive: Response = Response(
-        kind=MessageType.ORDER, text='{"id": "mock_response_1"}'
-    )
-    return deepcopy(order_1_response_positive)
-
-
-@pytest.fixture
-def order_response_positive() -> Callable[[str], Response]:
-    def _factory(msg):
+def order_response_positive() -> Callable[[OrderMessage | CancellationMessage], Response]:
+    def _factory(msg: OrderMessage | CancellationMessage):
         order_response_positive: Response = Response(
             kind=MessageType.ORDER, text=f'{{"id": "{msg["id"]}mock_response"}}'
         )
         return order_response_positive
+
     return _factory
 
-    # return deepcopy(order_response_positive)
+
+@pytest_asyncio.fixture
+async def fake_send_to_broker_positive(
+    order_response_positive: Callable[[OrderMessage | CancellationMessage], Awaitable[Response]],
+) -> Callable[[OrderMessage | CancellationMessage], Awaitable[Awaitable[Response]]]:
+    async def _fake_send_to_broker_positive(msg: OrderMessage | CancellationMessage):
+        return order_response_positive(msg)
+
+    return _fake_send_to_broker_positive
+
+
+@pytest_asyncio.fixture
+async def fake_send_to_broker_negative() -> Callable[[str], Awaitable[Response]]:
+    async def _fake_send_to_broker_positive(_msg):
+        return Response(kind=MessageType.ERROR, text="error")
+
+    return _fake_send_to_broker_positive
+
+
+# A dummy asynchronous task that completes quickly.
+@pytest_asyncio.fixture
+async def dummy_task() -> Callable[[], Awaitable[str]]:
+    async def _dummy_task():
+        await asyncio.sleep(0.1)
+        return "dummy result"
+
+    return _dummy_task
