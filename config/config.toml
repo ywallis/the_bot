@@ -1,3 +1,11 @@
+[[strategies]]
+type = "liquidity_arb"
+taker_exchange = "gate"
+maker_exchange = "mexc"
+spread = 1.002
+sizing = 0.8
+max_size_usdt = 80
+
 [[exchanges]]
 name = "Gate.io"
 id = "gate"
