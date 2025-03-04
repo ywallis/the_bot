@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 async def watch_balance(client: CustomExchange, redis: Redis):
     while True:
         balance = await client.watch_balance()
-        logger.debug(balance)
+        logger.debug(f"Balances on {client.name} are {balance}")
+        print(balance)
         await redis.set(f"balance-{client.name}", json.dumps(balance))
 
 

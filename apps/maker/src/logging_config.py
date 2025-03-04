@@ -2,13 +2,13 @@ import logging
 
 from pythonjsonlogger.json import JsonFormatter
 
-logger = logging.getLogger()
-
-logHandler = logging.StreamHandler()
-formatter = JsonFormatter("{filename}{asctime}{message}{exc_info}", style="{")
-logHandler.setFormatter(formatter)
-logger.addHandler(logHandler)
-logger.setLevel(logging.DEBUG)
+# logger = logging.getLogger()
+#
+# logHandler = logging.StreamHandler()
+# formatter = JsonFormatter("{filename}{asctime}{message}{exc_info}", style="{")
+# logHandler.setFormatter(formatter)
+# logger.addHandler(logHandler)
+# logger.setLevel(logging.DEBUG)
 
 
 def setup_logging():
@@ -27,4 +27,4 @@ def setup_logging():
 
     logHandler.setFormatter(formatter)
     logger.addHandler(logHandler)
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
