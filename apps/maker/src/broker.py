@@ -105,7 +105,7 @@ async def redis_subscriber(pubsub: PubSub, queues: dict[str, asyncio.Queue]):
     """Listens to Redis channel and routes messages to the correct queue."""
     await pubsub.subscribe(CHANNEL_NAME)
 
-    logger.debug("Subscribed to Redis channel:", CHANNEL_NAME)
+    logger.debug(f"Subscribed to Redis channel: {CHANNEL_NAME}")
 
     try:
         async for message in pubsub.listen():

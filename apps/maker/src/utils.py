@@ -22,10 +22,10 @@ def load_config():
 def parse_message(
     message_raw: str | dict,
 ) -> OrderMessage | CancellationMessage | OrderBatchMessage | None:
-    if isinstance(message_raw, str):
-        message = json.loads(message_raw)
-    else:
+    if isinstance(message_raw, dict):
         message = message_raw
+    else:
+        message = json.loads(message_raw)
 
     match message.get("kind"):
         case MessageType.ORDER.value:

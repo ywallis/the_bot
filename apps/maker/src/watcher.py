@@ -10,7 +10,7 @@ from apps.maker.src.exchange_clients import authenticated_clients
 from apps.maker.src.structs import CustomExchange
 
 # TODO:
-# - Check if ccxt pro includes all async functions
+
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 

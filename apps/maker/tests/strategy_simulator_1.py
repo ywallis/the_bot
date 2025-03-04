@@ -16,6 +16,7 @@ order_1: dict[str, str] = {
     "exchange_id": "_",
     "pair": "ALPH/USDT",
     "side": "sell",
+    "order_type": "replace",
     "price": "100",
     "amount": "10",
 }
