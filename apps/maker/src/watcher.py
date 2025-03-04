@@ -9,7 +9,7 @@ import apps.maker.src.logging_config as logging_config
 from apps.maker.src.exchange_clients import authenticated_clients
 from apps.maker.src.structs import CustomExchange
 
-# TODO: 
+# TODO:
 # - Check if ccxt pro includes all async functions
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
@@ -29,7 +29,10 @@ async def main(ticker: str, clients: dict[str, CustomExchange]):
     pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=20)
     redis = Redis(decode_responses=True, connection_pool=pool)
 
-    asyncio.gather(*[watch_ob(client, ticker, redis) for client in clients.values()])
+    await asyncio.gather(
+        *[watch_ob(client, ticker, redis) for client in clients.values()],
+    )
+
 
 if __name__ == "__main__":
     asyncio.run(main("ALPH/USDT", authenticated_clients))

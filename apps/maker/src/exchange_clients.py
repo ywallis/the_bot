@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 from apps.maker.src.utils import load_config
-import ccxt.async_support as ccxt
+import ccxt.pro as ccxt
 
 load_dotenv()
 # Load TOML file
