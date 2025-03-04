@@ -42,6 +42,7 @@ class CustomExchange(Protocol):
 
     async def watch_order_book(self, symbol: str) -> dict: ...
 
+    async def watch_balance(self) -> dict: ...
 
 class Response(TypedDict):
     kind: MessageType
