@@ -20,14 +20,11 @@ def test_parse_message(order_raw: dict[str, str]):
 
     assert type(parsed_order) is dict
 
+
 def test_parse_message_batch(order_batch_raw: dict[str, str | list]):
     parsed_order = parse_message(json.dumps(order_batch_raw))
 
     assert type(parsed_order) is dict
-# def test_parse_message_batch(order_batch_1: dict[str, str | list]):
-#     parsed_order = parse_message(json.dumps(order_batch_1))
-#
-#     assert type(parsed_order) is dict
 
 
 def test_cancellation_from_order(order_1: OrderMessage):
@@ -42,6 +39,18 @@ def test_is_cancellation_message(cancellation_1: CancellationMessage):
 
 def test_is_order_message(order_1: OrderMessage):
     assert is_order_message(order_1) is True
-    
+
+
 def test_is_orderbatch_message(order_batch_1: OrderBatchMessage):
     assert is_orderbatch_message(order_batch_1) is True
+
+
+def test_order_from_ccxt():
+    order_ccxt = {
+        "id": "1234",
+        "oid": "5678",
+        "pair": "ALPH/USDT",
+        "side": "sell",
+        "price": "10",
+        "amount": "20",
+    }

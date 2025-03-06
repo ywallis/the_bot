@@ -35,14 +35,15 @@ class CancellationMessage(TypedDict):
 class CustomExchange(Protocol):
     name: str
 
-    async def create_limit_order(
-        self, symbol: str, side: str, amount: float, price: float
+    async def create_order(
+        self, symbol: str, type: str, side: str, amount: float, price: float
     ) -> dict: ...
     async def cancel_order(self, id: str, symbol: str) -> dict: ...
 
     async def watch_order_book(self, symbol: str) -> dict: ...
 
     async def watch_balance(self) -> dict: ...
+
 
 class Response(TypedDict):
     kind: MessageType

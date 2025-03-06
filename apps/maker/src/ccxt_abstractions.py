@@ -4,6 +4,7 @@ import logging
 import apps.maker.src.logging_config as logging_config
 from apps.maker.src.errors import BadRequest, BrokerError, ExchangeError, RequestTimeout
 from apps.maker.src.structs import CancellationMessage, CustomExchange, OrderMessage
+from apps.maker.src.enums import OrderType
 
 # Initializing centralized logging
 logging_config.setup_logging()
@@ -53,10 +54,16 @@ async def cancel_order_return_confirmation(
 async def create_and_return_order(order: OrderMessage, client: CustomExchange):
     last_error: Exception = Exception()
 
+    if order.get('kind') == OrderType.MARKET:
+        order_type = "market"
+    else:
+        order_type = "limit"
+
     for attempt in range(5):
         try:
-            order_confirmation = await client.create_limit_order(
+            order_confirmation = await client.create_order(
                 symbol=order["pair"],
+                type=order_type,
                 side=order["side"].value,
                 amount=float(order["amount"]),
                 price=float(order["price"]),

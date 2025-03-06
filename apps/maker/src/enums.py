@@ -22,6 +22,7 @@ class OrderSide(Enum):
 class OrderType(Enum):
     REPLACE = "replace"
     UNIQUE = "unique"
+    MARKET = "market"
 
     def __str__(self):
         return self.value
