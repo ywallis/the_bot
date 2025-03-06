@@ -9,6 +9,8 @@ load_dotenv()
 config = load_config()
 # Extract exchange items
 exchanges = config.get("exchanges", [])
+strategies = config.get("strategies", [])
+symbols = [strategy["symbol"] for strategy in strategies]
 
 authenticated_clients = {}
 

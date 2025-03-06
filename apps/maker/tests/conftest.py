@@ -51,7 +51,7 @@ def order_1():
         kind=MessageType.ORDER,
         strategy="ALPH_gate",
         exchange="gate",
-        id="gate_test_1",
+        id="gate_test_1-ALPH_gate",
         exchange_id="_",
         pair="ALPH/USDT",
         side=OrderSide.SELL,
@@ -68,7 +68,7 @@ def order_2():
         kind=MessageType.ORDER,
         strategy="ALPH_gate",
         exchange="gate",
-        id="gate_test_2",
+        id="gate_test_2-ALPH_gate",
         exchange_id="_",
         pair="ALPH/USDT",
         side=OrderSide.SELL,
@@ -85,7 +85,7 @@ def order_unique_1():
         kind=MessageType.ORDER,
         strategy="ALPH_gate",
         exchange="gate",
-        id="gate_test_3",
+        id="gate_test_3-ALPH_gate",
         exchange_id="_",
         pair="ALPH/USDT",
         side=OrderSide.SELL,
@@ -101,7 +101,7 @@ def order_batch_1(order_1: OrderMessage, order_2: OrderMessage):
     order_batch_1: OrderBatchMessage = OrderBatchMessage(
         kind=MessageType.ORDERBATCH,
         strategy="ALPH_gate",
-        id="gate_test_batch",
+        id="gate_test_batch-ALPH_gate",
         orders=[order_1, order_2],
     )
     return deepcopy(order_batch_1)
@@ -112,7 +112,7 @@ def order_batch_raw(order_raw_string: str):
     order_batch_1 = {
         "kind": "orderbatch",
         "strategy": "ALPH_gate",
-        "id": "gate_test_batch",
+        "id": "gate_test_batch-ALPH_gate",
         "orders": [order_raw_string, order_raw_string],
     }
     return deepcopy(order_batch_1)
@@ -124,7 +124,7 @@ def cancellation_1():
         kind=MessageType.CANCELLATION,
         strategy="ALPH_gate",
         exchange="gate",
-        id="gate_test_2",
+        id="gate_test_2-ALPH_gate",
         pair="ALPH/USDT",
     )
     return deepcopy(cancellation_1)

@@ -148,11 +148,6 @@ async def test_place_order_raises_broker_error(
         await processor.place_order(order_1)
 
 
-# # A dummy asynchronous task that completes quickly.
-# async def dummy_task():
-#     await asyncio.sleep(0.1)
-#     return "dummy result"
-
 
 @pytest.mark.asyncio
 async def test_collect_results_periodically(processor, dummy_task):

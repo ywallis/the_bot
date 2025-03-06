@@ -1,4 +1,5 @@
 [[strategies]]
+symbol = "ALPH/USDT"
 type = "liquidity_arb"
 taker_exchange = "gate"
 maker_exchange = "mexc"

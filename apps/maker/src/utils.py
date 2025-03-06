@@ -100,16 +100,21 @@ def is_orderbatch_message(message: Any) -> TypeGuard[OrderBatchMessage]:
     return message.get("kind") == MessageType.ORDERBATCH
 
 def order_from_ccxt(order: dict[str, str], exchange_name: str) -> OrderMessage:
-    strategy = order["clientOrderId"].split("-")[-1]
+    strategy: str = order["clientOrderId"].split("-")[-1]
+    if strategy[-1] == "t":
+        order_type = OrderType.UNIQUE
+    else:
+        order_type = OrderType.REPLACE
+
     return OrderMessage(
         kind=MessageType.ORDER,
         strategy=strategy,
         exchange=exchange_name,
         id=order["clientOrderId"],
         exchange_id=order["id"],
-        pair=order["pair"],
+        pair=order["symbol"],
         side=OrderSide(order["side"]),
-        order_type=None,
+        order_type=order_type,
         price=Decimal(order["price"]),
         amount=Decimal(order["amount"]),
     )

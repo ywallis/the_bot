@@ -12,11 +12,17 @@ from apps.maker.src.ccxt_abstractions import (
 )
 from apps.maker.src.enums import MessageType
 from apps.maker.src.errors import BrokerError
-from apps.maker.src.exchange_clients import authenticated_clients
-from apps.maker.src.structs import CancellationMessage, CustomExchange, OrderMessage
+from apps.maker.src.exchange_clients import authenticated_clients, symbols
+from apps.maker.src.structs import (
+    CancellationMessage,
+    CustomExchange,
+    OrderBatchMessage,
+    OrderMessage,
+)
 from apps.maker.src.utils import (
     is_cancellation_message,
     is_order_message,
+    order_from_ccxt,
     parse_message,
 )
 
@@ -27,17 +33,34 @@ logger = logging.getLogger(__name__)
 redis_in = Redis(host="localhost", port=6379, decode_responses=True)
 redis_out = Redis(host="localhost", port=6379, decode_responses=True)
 
-CONFIG_FILE = "config.toml"
 CHANNEL_NAME = "broker"
 
+
+async def fetch_all_open(clients: dict[str, CustomExchange]) -> OrderBatchMessage:
+    all_orders: list[OrderMessage] = []
+
+    for name, client in clients.items():
+        for symbol in symbols:
+            orders = await client.fetch_open_orders(symbol)
+            for order in orders:
+                all_orders.append(order_from_ccxt(order, name))
+
+    return OrderBatchMessage(
+        kind=MessageType.ORDERBATCH,
+        strategy="recollection",
+        id="recollection",
+        orders=all_orders,
+    )
+
+
 async def process_message(
-    message: CancellationMessage | OrderMessage | Any, results_queue: asyncio.Queue, ccxt_client: CustomExchange
+    message: CancellationMessage | OrderMessage | Any,
+    results_queue: asyncio.Queue,
+    ccxt_client: CustomExchange,
 ):
-
     try:
-
         if is_order_message(message):
-        # if message.get("kind") == MessageType.ORDER:
+            # if message.get("kind") == MessageType.ORDER:
 
             logger.debug(
                 f"Message with id {message['id']} was identified as {message['kind']}"
@@ -45,7 +68,7 @@ async def process_message(
             confirmation = await create_and_return_order(message, ccxt_client)
 
         elif is_cancellation_message(message):
-        # elif message.get("kind") == MessageType.CANCELLATION:
+            # elif message.get("kind") == MessageType.CANCELLATION:
             logger.debug(
                 f"Message with id {message['id']} was identified as {message['kind']}"
             )
@@ -59,7 +82,6 @@ async def process_message(
         await results_queue.put((message["id"], message["kind"], confirmation))
 
     except BrokerError as e:
-
         # Sad flow
         await results_queue.put((message["id"], MessageType.ERROR, e))
 
@@ -76,7 +98,6 @@ async def worker(
             break
 
         else:
-
             logger.debug(
                 f"Worker [{ccxt_client.name}] processing {message['kind'].value}: {message} -> {ccxt_client.name}"
             )
@@ -115,7 +136,6 @@ async def redis_subscriber(pubsub: PubSub, queues: dict[str, asyncio.Queue]):
                 if data is None:
                     logger.error(f"Invalid parsing for message {data}")
                 else:
-
                     exchange = data.get("exchange")
 
                     if exchange in queues:
@@ -129,7 +149,6 @@ async def redis_subscriber(pubsub: PubSub, queues: dict[str, asyncio.Queue]):
 
 
 async def main():
-
     redis = await Redis(host="localhost", port=6379, decode_responses=True)
     pubsub: PubSub = redis.pubsub()
 
@@ -151,6 +170,7 @@ async def main():
     await asyncio.gather(subscriber_task, results_task, return_exceptions=True)
 
     await redis.close()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -11,6 +11,7 @@ from src.utils import (
     is_cancellation_message,
     is_order_message,
     is_orderbatch_message,
+    order_from_ccxt,
     parse_message,
 )
 
@@ -45,12 +46,14 @@ def test_is_orderbatch_message(order_batch_1: OrderBatchMessage):
     assert is_orderbatch_message(order_batch_1) is True
 
 
-def test_order_from_ccxt():
+def test_order_from_ccxt(order_1: OrderMessage):
+    exchange_name = "gate"
     order_ccxt = {
-        "id": "1234",
-        "oid": "5678",
-        "pair": "ALPH/USDT",
+        "id": "_",
+        "clientOrderId": "gate_test_1-ALPH_gate",
+        "symbol": "ALPH/USDT",
         "side": "sell",
-        "price": "10",
-        "amount": "20",
+        "price": "100",
+        "amount": "10",
     }
+    assert order_from_ccxt(order_ccxt, exchange_name) == order_1
