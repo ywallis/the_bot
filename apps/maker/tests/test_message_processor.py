@@ -1,13 +1,21 @@
 import asyncio
+import json
 from typing import Callable
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pytest_mock import MockerFixture
 
 from apps.maker.src.errors import BrokerError
 from apps.maker.src.message_processor import (
     MessageProcessor,
 )
-from apps.maker.src.structs import CancellationMessage, OrderMessage, Response
+from apps.maker.src.structs import (
+    CancellationMessage,
+    OrderBatchMessage,
+    OrderMessage,
+    Response,
+)
 
 
 @pytest.fixture
@@ -148,9 +156,10 @@ async def test_place_order_raises_broker_error(
         await processor.place_order(order_1)
 
 
-
 @pytest.mark.asyncio
-async def test_collect_results_periodically(processor, dummy_task):
+async def test_collect_results_periodically(
+    processor: MessageProcessor, dummy_task: Callable
+):
     # Add a dummy task that should complete quickly.
     processor.tasks.append(asyncio.create_task(dummy_task()))
 
@@ -169,3 +178,100 @@ async def test_collect_results_periodically(processor, dummy_task):
         await collector
     except asyncio.CancelledError:
         pass
+
+
+@pytest.mark.asyncio
+async def test_get_open_orders(
+    processor: MessageProcessor, order_batch_raw: str, mocker: MockerFixture
+):
+    # Create a fake Redis pool
+    mock_redis = MagicMock()
+    mock_pubsub = MagicMock()
+
+    # Mock Redis connection behavior
+    mock_redis.__aenter__.return_value = mock_redis
+    mock_pubsub.__aenter__.return_value = mock_pubsub
+
+    # Mock publish method (so it doesn't do anything)
+    mock_redis.publish = AsyncMock()
+
+    # Mock pubsub.subscribe() and unsubscribe()
+    mock_pubsub.subscribe = AsyncMock()
+    mock_pubsub.unsubscribe = AsyncMock()
+
+    # Define synthetic response
+    synthetic_message = {
+        "type": "message",
+        "data": json.dumps(order_batch_raw).encode("utf-8"),
+    }
+
+    # Mock listen() method to yield a synthetic response
+    async def mock_listen():
+        yield synthetic_message
+
+    mock_pubsub.listen = mock_listen
+
+    mock_redis.pubsub.return_value = mock_pubsub
+    # Mock `Redis` instance inside your function
+    mocker.patch("apps.maker.src.message_processor.Redis", return_value=mock_redis)
+
+    # Create instance of your class
+
+    # Call the function
+    processor.open_orders = await processor.get_open_orders()
+
+    # Validate response
+    assert "ALPH_gate" in processor.open_orders
+    # Ensure correct Redis calls
+    mock_redis.publish.assert_called_once()
+    mock_pubsub.subscribe.assert_called_once_with("INIT")
+    mock_pubsub.unsubscribe.assert_called_once_with("INIT")
+
+
+@pytest.mark.asyncio
+async def test_get_open_orders_empty(
+    processor: MessageProcessor, empty_open_orders: OrderBatchMessage, mocker
+):
+    # Create a fake Redis pool
+    mock_redis = MagicMock()
+    mock_pubsub = MagicMock()
+
+    # Mock Redis connection behavior
+    mock_redis.__aenter__.return_value = mock_redis
+    mock_pubsub.__aenter__.return_value = mock_pubsub
+
+    # Mock publish method (so it doesn't do anything)
+    mock_redis.publish = AsyncMock()
+
+    # Mock pubsub.subscribe() and unsubscribe()
+    mock_pubsub.subscribe = AsyncMock()
+    mock_pubsub.unsubscribe = AsyncMock()
+
+    # Define synthetic response
+    synthetic_message = {
+        "type": "message",
+        "data": json.dumps(dict(empty_open_orders), default=str).encode("utf-8"),
+    }
+
+    # Mock listen() method to yield a synthetic response
+    async def mock_listen():
+        yield synthetic_message
+
+    mock_pubsub.listen = mock_listen
+
+    mock_redis.pubsub.return_value = mock_pubsub
+    # Mock `Redis` instance inside your function
+    mocker.patch("apps.maker.src.message_processor.Redis", return_value=mock_redis)
+
+    # Create instance of your class
+
+    # Call the function
+    processor.open_orders = await processor.get_open_orders()
+
+    # Validate response
+    assert "ALPH_gate" not in processor.open_orders
+    assert processor.open_orders == {}
+    # Ensure correct Redis calls
+    mock_redis.publish.assert_called_once()
+    mock_pubsub.subscribe.assert_called_once_with("INIT")
+    mock_pubsub.unsubscribe.assert_called_once_with("INIT")

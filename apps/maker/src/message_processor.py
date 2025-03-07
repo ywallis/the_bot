@@ -4,12 +4,13 @@ import json
 import logging
 from copy import copy
 from datetime import datetime
+from decimal import Decimal
 from typing import Awaitable, cast
 
 from redis.asyncio import ConnectionPool, Redis
 
 import apps.maker.src.logging_config as logging_config
-from apps.maker.src.enums import MessageType, OrderType
+from apps.maker.src.enums import MessageType, OrderSide, OrderType
 from apps.maker.src.errors import BrokerError
 from apps.maker.src.structs import (
     CancellationMessage,
@@ -37,9 +38,46 @@ class MessageProcessor:
             connection_pool=self.pool, decode_responses=True
         ).pubsub()
         self.locks = {}  # Dictionary to store locks dynamically
-        self.message_queue = {}  # Dictionary to keep track of the next action to execute in case of a lock
-        self.open_orders = {}  # Keep track of last open order (could be cleaned up by the websocket watcher?)
+        self.message_queue = (
+            {}
+        )  # Dictionary to keep track of the next action to execute in case of a lock
+        self.open_orders = (
+            {}
+        )  # Keep track of last open order (could be cleaned up by the websocket watcher?)
         self.tasks = []
+
+    async def get_open_orders(self):
+        open_orders = {}
+        trigger = OrderMessage(
+            kind=MessageType.ORDER,
+            strategy="INIT",
+            exchange="INIT",
+            id="0",
+            exchange_id="",
+            pair="INIT",
+            side=OrderSide.SELL,
+            order_type=OrderType.UNIQUE,
+            price=Decimal(0),
+            amount=Decimal(0),
+        )
+        async with Redis(connection_pool=self.pool) as redis:
+            await redis.publish("broker", json.dumps(dict(trigger), default=str))
+
+            logger.info("Asking broker for all open orders.")
+            async with redis.pubsub() as pubsub:
+                logger.debug("Waiting for answer on channel INIT")
+                await pubsub.subscribe("INIT")
+                async for message in pubsub.listen():
+                    if message["type"] == "message":
+                        response = message["data"].decode()
+                        logger.debug(f"Received init reply from broker: {response}")
+                        order_batch = cast(OrderBatchMessage, parse_message(response))
+                        for order in order_batch["orders"]:
+                            open_orders[order["strategy"]] = order
+                        break
+                await pubsub.unsubscribe("INIT")
+
+        return open_orders
 
     def replace_queued_value(
         self, msg: OrderMessage | CancellationMessage | OrderBatchMessage
@@ -245,6 +283,8 @@ class MessageProcessor:
 async def main():
     logger.debug("Launching main loop")
     processor = MessageProcessor()
+    await asyncio.sleep(0.2)
+    processor.open_orders = await processor.get_open_orders()
 
     # Start message listener. Tasks are used so that no result is immediately expected.
     listener_task = asyncio.create_task(processor.listen_to_redis())

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from typing import Any
 
@@ -131,7 +132,7 @@ async def redis_subscriber(pubsub: PubSub, queues: dict[str, asyncio.Queue]):
     try:
         async for message in pubsub.listen():
             if message["type"] == "message":
-                print(message["data"])
+                logger.debug(message["data"])
                 data = parse_message(message["data"])
                 if data is None:
                     logger.error(f"Invalid parsing for message {data}")
@@ -140,6 +141,14 @@ async def redis_subscriber(pubsub: PubSub, queues: dict[str, asyncio.Queue]):
 
                     if exchange in queues:
                         await queues[exchange].put(data)
+                    # Should only check at message processor initialization
+                    elif exchange == "INIT":
+                        logger.debug("INIT condition triggered")
+                        all_open_orders = await fetch_all_open(authenticated_clients)
+                        await redis_out.publish(
+                            "INIT", json.dumps(dict(all_open_orders), default=str)
+                        )
+
                     else:
                         logger.error(
                             f"Warning: Received unknown message type '{exchange}', ignoring..."

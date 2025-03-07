@@ -51,9 +51,10 @@ def parse_message(
             )
         case MessageType.ORDERBATCH.value:
             order_list: list[OrderMessage] = []
-            for item in message["orders"]:
-                order = json.loads(item)
-                if order.get("kind") == MessageType.ORDER.value: #type: ignore
+            for order in message["orders"]:
+                if type(order) is not dict:
+                    order = json.loads(order)
+                if order.get("kind") == MessageType.ORDER.value:  # type: ignore
                     result = parse_message(order)
                     if result is not None:
                         order_list.append(cast(OrderMessage, result))
@@ -94,10 +95,12 @@ def is_cancellation_message(message: Any) -> TypeGuard[CancellationMessage]:
         return False
     return message.get("kind") == MessageType.CANCELLATION
 
+
 def is_orderbatch_message(message: Any) -> TypeGuard[OrderBatchMessage]:
     if not isinstance(message, dict):
         return False
     return message.get("kind") == MessageType.ORDERBATCH
+
 
 def order_from_ccxt(order: dict[str, str], exchange_name: str) -> OrderMessage:
     strategy: str = order["clientOrderId"].split("-")[-1]

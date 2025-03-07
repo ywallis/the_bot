@@ -108,6 +108,17 @@ def order_batch_1(order_1: OrderMessage, order_2: OrderMessage):
 
 
 @pytest.fixture
+def empty_open_orders():
+    order_batch_empty: OrderBatchMessage = OrderBatchMessage(
+        kind=MessageType.ORDERBATCH,
+        strategy="INIT",
+        id="INIT",
+        orders=[],
+    )
+    return deepcopy(order_batch_empty)
+
+
+@pytest.fixture
 def order_batch_raw(order_raw_string: str):
     order_batch_1 = {
         "kind": "orderbatch",
@@ -131,9 +142,9 @@ def cancellation_1():
 
 
 @pytest.fixture
-def order_response_positive() -> Callable[
-    [OrderMessage | CancellationMessage], Response
-]:
+def order_response_positive() -> (
+    Callable[[OrderMessage | CancellationMessage], Response]
+):
     def _factory(msg: OrderMessage | CancellationMessage):
         order_response_positive: Response = Response(
             kind=MessageType.ORDER, text=f'{{"id": "{msg["id"]}mock_response"}}'
