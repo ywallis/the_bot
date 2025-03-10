@@ -281,12 +281,14 @@ class MessageProcessor:
 
 
 async def main():
-    logger.debug("Launching main loop")
+    logger.debug("Message processor starting")
     processor = MessageProcessor()
-    await asyncio.sleep(0.2)
+    
+    # Let broker boot and check for open orders
+
+    await asyncio.sleep(0.1)
     processor.open_orders = await processor.get_open_orders()
     if processor.open_orders:
-        
         logger.info(f"Pre-existing open order were found: {processor.open_orders}")
 
     # Start message listener. Tasks are used so that no result is immediately expected.
