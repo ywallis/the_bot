@@ -1,13 +1,13 @@
-import apps.maker.src.logging_config as logging_config
-from apps.maker.src.utils import load_config
-from apps.maker.src.strategies.utils import maker_order_sizer 
-import logging
-from datetime import datetime, timedelta, UTC
-import json
-from apps.maker.src.enums import OrderSide
-
 import asyncio
+import logging
+from datetime import UTC, datetime, timedelta
+
 from redis.asyncio import ConnectionPool, Redis
+
+import apps.maker.src.logging_config as logging_config
+from apps.maker.src.enums import OrderSide
+from apps.maker.src.strategies.utils import maker_order_sizer, retrieve_ob_redis
+from apps.maker.src.utils import load_config
 
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
@@ -18,20 +18,10 @@ logger = logging.getLogger(__name__)
 # - A separation between strategy launcher and strategy itself?
 # - Consider which throttling systems still make sense
 # - Init triggers cancellation messages
-# - Convertion function to go from USDT max size to token equiv 
-
-
-async def retrieve_ob_redis(redis_instance: Redis, key: str):
-    # Get the JSON string from Redis
-    serialized_ob = await redis_instance.get(key)
-    if serialized_ob is None:
-        return None  # Key not found
-    # Deserialize the JSON string back to a CCXT ob
-    return json.loads(serialized_ob)
+# - Convertion function to go from USDT max size to token equiv
 
 
 async def maker(redis: Redis, strategy: dict[str, str]):
-    
     # Defining state
 
     watching: bool = True
@@ -70,16 +60,16 @@ async def maker(redis: Redis, strategy: dict[str, str]):
         maker_order_book_time = datetime.fromtimestamp(
             maker_order_book["timestamp"] / 1000, UTC
         )
-        logger.info(f"Taker from redis is \n {taker_order_book}")
-        logger.info(f"Maker from redis is \n {maker_order_book}")
+        logger.info(f"Taker ({taker}) order book is \n {taker_order_book}")
+        logger.info(f"Maker ({maker}) order book is \n {maker_order_book}")
+
+        # Do I really need this if take-take is not involved?
 
         if current_time - taker_order_book_time > timedelta(seconds=5):
-            print("Taker order book is stale, waiting for update")
             logger.info("Taker order book is stale, waiting for update")
             continue
-
+        
         if current_time - maker_order_book_time > timedelta(seconds=5):
-            print("Maker order book is stale, waiting for update")
             logger.info("Maker order book is stale, waiting for update")
             continue
 
@@ -128,7 +118,7 @@ async def maker(redis: Redis, strategy: dict[str, str]):
                 #     returned_sell_order = await create_and_return_order_abstraction(
                 #         maker_client, best_ask_maker, optimal_sell_size, pair, "sell"
                 #     )
-                    # sell_exists = True
+                # sell_exists = True
 
 
 async def main():
