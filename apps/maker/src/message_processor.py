@@ -285,6 +285,9 @@ async def main():
     processor = MessageProcessor()
     await asyncio.sleep(0.2)
     processor.open_orders = await processor.get_open_orders()
+    if processor.open_orders:
+        
+        logger.info(f"Pre-existing open order were found: {processor.open_orders}")
 
     # Start message listener. Tasks are used so that no result is immediately expected.
     listener_task = asyncio.create_task(processor.listen_to_redis())
