@@ -6,7 +6,7 @@ from redis.asyncio import ConnectionPool, Redis
 
 import apps.maker.src.logging_config as logging_config
 from apps.maker.src.enums import OrderSide
-from apps.maker.src.strategies.utils import maker_order_sizer, retrieve_ob_redis
+from apps.maker.src.strategies.utils import maker_order_sizer, retrieve_ob_redis, min_max_usd_converter
 from apps.maker.src.utils import load_config
 
 logging_config.setup_logging()
@@ -18,8 +18,6 @@ logger = logging.getLogger(__name__)
 # - A separation between strategy launcher and strategy itself?
 # - Consider which throttling systems still make sense
 # - Init triggers cancellation messages
-# - Convertion function to go from USDT max size to token equiv
-
 
 async def maker(redis: Redis, strategy: dict[str, str]):
     # Defining state
@@ -35,7 +33,10 @@ async def maker(redis: Redis, strategy: dict[str, str]):
     taker: str = strategy["taker_exchange"]
     spread: float = float(strategy["spread"])
     sizing: float = float(strategy["sizing"])
+    min_size_usdt: float = float(strategy["min_size_usdt"])
     max_size_usdt: float = float(strategy["max_size_usdt"])
+    min_size: float
+    max_size: float
 
     while watching:
         batch = asyncio.gather(
@@ -44,12 +45,12 @@ async def maker(redis: Redis, strategy: dict[str, str]):
         )
         maker_order_book, taker_order_book = await batch
         if maker_order_book is None:
-            logger.debug(f"Could not fetch order book book for {maker}")
+            logger.debug(f"Could not fetch order book for {maker}")
             await asyncio.sleep(1)
             continue
 
         if taker_order_book is None:
-            logger.debug(f"Could not fetch order book book for {taker}")
+            logger.debug(f"Could not fetch order book for {taker}")
             await asyncio.sleep(1)
             continue
 
@@ -83,6 +84,7 @@ async def maker(redis: Redis, strategy: dict[str, str]):
         best_bid_maker: float = maker_client_bids[0][0]
         best_ask_maker: float = maker_client_asks[0][0]
 
+        min_size, max_size = min_max_usd_converter(best_bid_taker, min_size_usdt, max_size_usdt)
         # Sell side arbitrage
 
         if best_ask_maker >= best_ask_taker * spread:

@@ -10,6 +10,17 @@ from apps.maker.src.enums import OrderSide
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
+def min_max_usd_converter(price: float, min_size_usdt: float, max_size_usdt: float) -> tuple[float, float]:
+
+    min_size = round(min_size_usdt / price, 4)
+    max_size = round(max_size_usdt / price, 4)
+
+    logger.debug(f'Using best taker bid as price: {price}.')
+    logger.debug(f'Min size is {min_size}.')
+    logger.debug(f'Max size is {max_size}.')
+
+    return min_size, max_size 
+
 async def check_if_solvent(buy_client: str, sell_client: str, price: float, quantity: float,
                            pair: str) -> bool:
     """This function checks if two exchanges have the necessary balances to place
@@ -25,10 +36,10 @@ async def check_if_solvent(buy_client: str, sell_client: str, price: float, quan
 
         if (quantity * price * 2 < buy_client_balance[quote_asset]['free']
                 and quantity * 2 < sell_client_balance[base_asset]['free']):
-            logger.info(f'Check if solvent success.')
+            logger.info('Check if solvent success.')
             return True
         else:
-            logger.info(f'Insufficient funds!')
+            logger.info('Insufficient funds!')
             return False
 
     except KeyError:

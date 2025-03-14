@@ -5,6 +5,7 @@ taker_exchange = "gate"
 maker_exchange = "mexc"
 spread = 1.002
 sizing = 0.8
+min_size_usdt = 10
 max_size_usdt = 80
 
 [[exchanges]]

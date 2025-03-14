@@ -21,7 +21,7 @@ async def watch_ob(client: CustomExchange, ticker: str, redis: Redis):
         logger.debug(
             f"{datetime.now()} Bid {order_book['bids'][0][0]} and ask {order_book['asks'][0][0]} on {client.name}"
         )
-        await redis.set(f"{ticker}-{client.name}", json.dumps(order_book))
+        await redis.set(f"{ticker}-{client.id}", json.dumps(order_book))
 
 
 async def main(ticker: str, clients: dict[str, CustomExchange]):
