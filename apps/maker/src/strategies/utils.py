@@ -44,6 +44,8 @@ async def check_if_solvent(
     base_asset = pair.split("/")[0]
     quote_asset = pair.split("/")[1]
 
+    logger.debug(f"Buy client balance is {buy_client_balance}")
+    logger.debug(f"Sell client balance is {sell_client_balance}")
     if buy_client_balance is None or sell_client_balance is None:
         logger.error("Error retrieving balance from Redis")
         raise Exception("Error retrieving balance")

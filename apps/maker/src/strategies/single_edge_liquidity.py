@@ -41,7 +41,6 @@ async def maker(redis: Redis, strategy: dict[str, str]):
     maker: str = strategy["maker_exchange"]
     taker: str = strategy["taker_exchange"]
     spread: float = float(strategy["spread"])
-    sizing: float = float(strategy["sizing"])
     min_size_usdt: float = float(strategy["min_size_usdt"])
     max_size_usdt: float = float(strategy["max_size_usdt"])
     min_size: float
@@ -70,8 +69,8 @@ async def maker(redis: Redis, strategy: dict[str, str]):
         maker_order_book_time = datetime.fromtimestamp(
             maker_order_book["timestamp"] / 1000, UTC
         )
-        logger.info(f"Taker ({taker}) order book is \n {taker_order_book}")
-        logger.info(f"Maker ({maker}) order book is \n {maker_order_book}")
+        logger.debug(f"Taker ({taker}) order book is \n {taker_order_book}")
+        logger.debug(f"Maker ({maker}) order book is \n {maker_order_book}")
 
         # Do I really need this if take-take is not involved?
 
@@ -98,7 +97,7 @@ async def maker(redis: Redis, strategy: dict[str, str]):
         )
         # Sell side arbitrage
 
-        if best_ask_maker >= best_ask_taker * spread:
+        if best_ask_maker <= best_ask_taker * spread:
             # Introducing parameter for speed control
 
             sell_arbitrage = True
@@ -147,7 +146,6 @@ async def maker(redis: Redis, strategy: dict[str, str]):
 
 
 async def main():
-    print("Hi from main.")
 
     pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=20)
     redis = Redis(decode_responses=True, connection_pool=pool)
