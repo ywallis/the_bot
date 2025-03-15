@@ -1,6 +1,7 @@
 [[strategies]]
 symbol = "ALPH/USDT"
 type = "liquidity_arb"
+identifier = "la"
 taker_exchange = "gate"
 maker_exchange = "mexc"
 spread = 1.002

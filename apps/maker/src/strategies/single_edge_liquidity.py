@@ -1,12 +1,19 @@
 import asyncio
+from decimal import Decimal
 import logging
 from datetime import UTC, datetime, timedelta
 
 from redis.asyncio import ConnectionPool, Redis
 
 import apps.maker.src.logging_config as logging_config
-from apps.maker.src.enums import OrderSide
-from apps.maker.src.strategies.utils import maker_order_sizer, retrieve_ob_redis, min_max_usd_converter
+from apps.maker.src.enums import MessageType, OrderSide, OrderType
+from apps.maker.src.strategies.utils import (
+    maker_order_sizer,
+    retrieve_ob_redis,
+    min_max_usd_converter,
+    check_if_solvent
+)
+from apps.maker.src.structs import OrderMessage
 from apps.maker.src.utils import load_config
 
 logging_config.setup_logging()
@@ -19,6 +26,7 @@ logger = logging.getLogger(__name__)
 # - Consider which throttling systems still make sense
 # - Init triggers cancellation messages
 
+
 async def maker(redis: Redis, strategy: dict[str, str]):
     # Defining state
 
@@ -29,6 +37,7 @@ async def maker(redis: Redis, strategy: dict[str, str]):
     sell_arbitrage: bool = True
 
     symbol: str = strategy["symbol"]
+    strategy_identifier: str = strategy["identifier"]
     maker: str = strategy["maker_exchange"]
     taker: str = strategy["taker_exchange"]
     spread: float = float(strategy["spread"])
@@ -66,13 +75,13 @@ async def maker(redis: Redis, strategy: dict[str, str]):
 
         # Do I really need this if take-take is not involved?
 
-        if current_time - taker_order_book_time > timedelta(seconds=5):
-            logger.info("Taker order book is stale, waiting for update")
-            continue
-        
-        if current_time - maker_order_book_time > timedelta(seconds=5):
-            logger.info("Maker order book is stale, waiting for update")
-            continue
+        # if current_time - taker_order_book_time > timedelta(seconds=5):
+        #     logger.info("Taker order book is stale, waiting for update")
+        #     continue
+        #
+        # if current_time - maker_order_book_time > timedelta(seconds=5):
+        #     logger.info("Maker order book is stale, waiting for update")
+        #     continue
 
         taker_client_bids: list[list] = taker_order_book["bids"]
         taker_client_asks: list[list] = taker_order_book["asks"]
@@ -84,7 +93,9 @@ async def maker(redis: Redis, strategy: dict[str, str]):
         best_bid_maker: float = maker_client_bids[0][0]
         best_ask_maker: float = maker_client_asks[0][0]
 
-        min_size, max_size = min_max_usd_converter(best_bid_taker, min_size_usdt, max_size_usdt)
+        min_size, max_size = min_max_usd_converter(
+            best_bid_taker, min_size_usdt, max_size_usdt
+        )
         # Sell side arbitrage
 
         if best_ask_maker >= best_ask_taker * spread:
@@ -102,25 +113,37 @@ async def maker(redis: Redis, strategy: dict[str, str]):
                 max_size_usdt,
             )
 
-            # logger.info(f"Optimal order size currently {optimal_sell_size}")
+            logger.debug(f"Optimal order size currently {optimal_sell_size}")
 
             # If the flag for an existing sell doesn't exist yet, create a sell order at the bottom ask.
-            # Includes a custom clientOrderId to differentiate these orders from hanging taker order.
 
             if not sell_exists:
-                logger.info("Sell does not exist yet.")
+                logger.debug("Sell does not exist yet.")
 
-                # if await check_if_solvent(
-                #     taker_client,
-                #     maker_client,
-                #     best_ask_maker,
-                #     optimal_sell_size,
-                #     pair=pair,
-                # ):
-                #     returned_sell_order = await create_and_return_order_abstraction(
-                #         maker_client, best_ask_maker, optimal_sell_size, pair, "sell"
-                #     )
-                # sell_exists = True
+                if await check_if_solvent(
+                    redis,
+                    taker,
+                    maker,
+                    best_ask_maker,
+                    optimal_sell_size,
+                    pair=symbol,
+                ):
+                    sell_order = OrderMessage(
+                        kind=MessageType.ORDER,
+                        strategy=f"{strategy_identifier}es",
+                        exchange=maker,
+                        id="",
+                        exchange_id="_",
+                        pair=symbol,
+                        side=OrderSide.SELL,
+                        order_type=OrderType.REPLACE,
+                        price=Decimal(best_ask_maker),
+                        amount=Decimal(optimal_sell_size),
+                    )
+
+                    sell_exists = True
+                    logger.debug(f"Sell order was generated: {sell_order}")
+                    break
 
 
 async def main():

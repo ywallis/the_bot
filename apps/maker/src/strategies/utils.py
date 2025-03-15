@@ -10,45 +10,61 @@ from apps.maker.src.enums import OrderSide
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
-def min_max_usd_converter(price: float, min_size_usdt: float, max_size_usdt: float) -> tuple[float, float]:
 
+def min_max_usd_converter(
+    price: float, min_size_usdt: float, max_size_usdt: float
+) -> tuple[float, float]:
     min_size = round(min_size_usdt / price, 4)
     max_size = round(max_size_usdt / price, 4)
 
-    logger.debug(f'Using best taker bid as price: {price}.')
-    logger.debug(f'Min size is {min_size}.')
-    logger.debug(f'Max size is {max_size}.')
+    logger.debug(f"Using best taker bid as price: {price}.")
+    logger.debug(f"Min size is {min_size}.")
+    logger.debug(f"Max size is {max_size}.")
 
-    return min_size, max_size 
+    return min_size, max_size
 
-async def check_if_solvent(buy_client: str, sell_client: str, price: float, quantity: float,
-                           pair: str) -> bool:
+
+async def check_if_solvent(
+    redis_instance: Redis,
+    buy_client_id: str,
+    sell_client_id: str,
+    price: float,
+    quantity: float,
+    pair: str,
+) -> bool:
     """This function checks if two exchanges have the necessary balances to place
     two arbitrage orders in their relevant assets."""
 
-    batch = asyncio.gather()
+    batch = asyncio.gather(
+        retrieve_balances_redis(redis_instance, f"balance-{buy_client_id}"),
+        retrieve_balances_redis(redis_instance, f"balance-{sell_client_id}"),
+    )
     buy_client_balance, sell_client_balance = await batch
 
-    base_asset = pair.split('/')[0]
-    quote_asset = pair.split('/')[1]
+    base_asset = pair.split("/")[0]
+    quote_asset = pair.split("/")[1]
+
+    if buy_client_balance is None or sell_client_balance is None:
+        logger.error("Error retrieving balance from Redis")
+        raise Exception("Error retrieving balance")
 
     try:
-
-        if (quantity * price * 2 < buy_client_balance[quote_asset]['free']
-                and quantity * 2 < sell_client_balance[base_asset]['free']):
-            logger.info('Check if solvent success.')
+        if (
+            quantity * price * 2 < buy_client_balance[quote_asset]["free"]
+            and quantity * 2 < sell_client_balance[base_asset]["free"]
+        ):
+            logger.debug("Solvency check sucessful")
             return True
         else:
-            logger.info('Insufficient funds!')
+            logger.debug("Insufficient funds!")
             return False
 
     except KeyError:
-
         # Error can occur if the subaccount never had an asset balance.
 
-        print('Insufficient funds! Are you sure the right pair is selected?')
-        logger.info('Insufficient funds! Are you sure the right pair is selected?')
+        logger.debug("Insufficient funds! Are you sure the right pair is selected?")
         return False
+
 
 async def retrieve_balances_redis(redis_instance: Redis, key: str):
     # Get the JSON string from Redis
@@ -57,6 +73,7 @@ async def retrieve_balances_redis(redis_instance: Redis, key: str):
         return None  # Key not found
     # Deserialize the JSON string back to a CCXT ob
     return json.loads(serialized_balances)
+
 
 async def retrieve_ob_redis(redis_instance: Redis, key: str):
     # Get the JSON string from Redis
