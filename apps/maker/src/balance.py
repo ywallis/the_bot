@@ -33,6 +33,7 @@ async def main(clients: dict[str, CustomExchange]):
     pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=20)
     redis = Redis(decode_responses=True, connection_pool=pool)
 
+    # Since watch only shows updates, I first pull data with fetch
     await asyncio.gather(
         *[fetch_balance(client, redis) for client in clients.values()],
     )
