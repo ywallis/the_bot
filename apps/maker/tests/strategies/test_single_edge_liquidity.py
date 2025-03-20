@@ -4,6 +4,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 from apps.maker.src.strategies.single_edge_liquidity import single_edge_liquidity
 
+# TODO 
+# - Create queue for order message to be placed in
+# - Define test objects on actual CCXT values
 
 @pytest.mark.asyncio
 async def test_single_edge_liquidity_sell_order():
@@ -31,10 +34,10 @@ async def test_single_edge_liquidity_sell_order():
             return {"bids": [[49900, 1], [49899, 1]], "asks": [[50000, 1], [50001, 1]]}
         return None
 
-    async def check_if_solvent(*args, **kwargs):
+    async def check_if_solvent(*_args, **_kwargs):
         return True
 
-    def min_max_converter(*args, **kwargs):
+    def min_max_converter(*_args, **_kwargs):
         return 0.01, 1.0
 
     retrieve_ob_redis_mock = AsyncMock(side_effect=retrieve_ob_redis_side_effect)

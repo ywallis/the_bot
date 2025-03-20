@@ -43,7 +43,6 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
     max_size_usdt: float = float(strategy["max_size_usdt"])
     min_size: float
     max_size: float
-    print("root")
 
     while watching:
         batch = asyncio.gather(
@@ -51,7 +50,6 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
             retrieve_ob_redis(redis, f"{symbol}-{taker}"),
         )
         maker_order_book, taker_order_book = await batch
-        print("TEST")
         if maker_order_book is None:
             logger.debug(f"Could not fetch order book for {maker}")
             await asyncio.sleep(1)
@@ -101,7 +99,6 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
 
             # Calculate the current optimal order size
 
-            print("ARB")
             optimal_sell_size = maker_order_sizer(
                 best_ask_maker,
                 taker_client_asks,
