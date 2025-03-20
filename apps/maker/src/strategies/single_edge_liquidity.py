@@ -13,7 +13,7 @@ from apps.maker.src.strategies.utils import (
     min_max_usd_converter,
     check_if_solvent
 )
-from apps.maker.src.structs import OrderMessage
+from apps.maker.src.structs import CancellationMessage, OrderMessage
 from apps.maker.src.utils import load_config
 
 logging_config.setup_logging()
@@ -27,14 +27,12 @@ logger = logging.getLogger(__name__)
 # - Init triggers cancellation messages
 
 
-async def maker(redis: Redis, strategy: dict[str, str]):
+async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
     # Defining state
 
     watching: bool = True
     buy_exists: bool = False
     sell_exists: bool = False
-    buy_arbitrage: bool = True
-    sell_arbitrage: bool = True
 
     symbol: str = strategy["symbol"]
     strategy_identifier: str = strategy["identifier"]
@@ -45,6 +43,7 @@ async def maker(redis: Redis, strategy: dict[str, str]):
     max_size_usdt: float = float(strategy["max_size_usdt"])
     min_size: float
     max_size: float
+    print("root")
 
     while watching:
         batch = asyncio.gather(
@@ -52,6 +51,7 @@ async def maker(redis: Redis, strategy: dict[str, str]):
             retrieve_ob_redis(redis, f"{symbol}-{taker}"),
         )
         maker_order_book, taker_order_book = await batch
+        print("TEST")
         if maker_order_book is None:
             logger.debug(f"Could not fetch order book for {maker}")
             await asyncio.sleep(1)
@@ -62,13 +62,13 @@ async def maker(redis: Redis, strategy: dict[str, str]):
             await asyncio.sleep(1)
             continue
 
-        current_time = datetime.now(UTC)
-        taker_order_book_time = datetime.fromtimestamp(
-            taker_order_book["timestamp"] / 1000, UTC
-        )
-        maker_order_book_time = datetime.fromtimestamp(
-            maker_order_book["timestamp"] / 1000, UTC
-        )
+        # current_time = datetime.now(UTC)
+        # taker_order_book_time = datetime.fromtimestamp(
+        #     taker_order_book["timestamp"] / 1000, UTC
+        # )
+        # maker_order_book_time = datetime.fromtimestamp(
+        #     maker_order_book["timestamp"] / 1000, UTC
+        # )
         logger.debug(f"Taker ({taker}) order book is \n {taker_order_book}")
         logger.debug(f"Maker ({maker}) order book is \n {maker_order_book}")
 
@@ -97,13 +97,11 @@ async def maker(redis: Redis, strategy: dict[str, str]):
         )
         # Sell side arbitrage
 
-        if best_ask_maker <= best_ask_taker * spread:
-            # Introducing parameter for speed control
-
-            sell_arbitrage = True
+        if best_ask_maker >= best_ask_taker * spread:
 
             # Calculate the current optimal order size
 
+            print("ARB")
             optimal_sell_size = maker_order_sizer(
                 best_ask_maker,
                 taker_client_asks,
@@ -112,9 +110,9 @@ async def maker(redis: Redis, strategy: dict[str, str]):
                 max_size_usdt,
             )
 
-            logger.debug(f"Optimal order size currently {optimal_sell_size}")
+            logger.debug(f"Optimal sell size currently {optimal_sell_size}")
 
-            # If the flag for an existing sell doesn't exist yet, create a sell order at the bottom ask.
+            # If the flag for an existing sell is false, create a sell order at the bottom ask.
 
             if not sell_exists:
                 logger.debug("Sell does not exist yet.")
@@ -142,7 +140,19 @@ async def maker(redis: Redis, strategy: dict[str, str]):
 
                     sell_exists = True
                     logger.debug(f"Sell order was generated: {sell_order}")
-                    break
+            
+        else:
+
+            if sell_exists:
+                cancellation: CancellationMessage = CancellationMessage(
+                    kind=MessageType.CANCELLATION,
+                    strategy=f"{strategy_identifier}es",
+                    exchange=maker,
+                    id="",
+                    pair=symbol,
+                )
+                logger.debug(f"Cancellation was generated: {cancellation}")
+                sell_exists = False
 
 
 async def main():
@@ -155,7 +165,7 @@ async def main():
     if not strategies:
         raise Exception("Could not find any valid strategy")
 
-    await maker(redis, strategies[0])
+    await single_edge_liquidity(redis, strategies[0])
 
 
 if __name__ == "__main__":
