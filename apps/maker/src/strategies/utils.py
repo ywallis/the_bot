@@ -4,11 +4,27 @@ import asyncio
 
 from redis.asyncio import Redis
 
+from apps.maker.src.structs import CancellationMessage
+from apps.maker.src.constants import MESSAGE_PROCESSOR_CHANNEL 
+from apps.maker.src.enums import MessageType
+
 import apps.maker.src.logging_config as logging_config
 from apps.maker.src.enums import OrderSide
 
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
+
+
+async def send_processor_cancellation(redis: Redis, strategy: dict[str, str]):
+    cancellation = CancellationMessage(
+        kind=MessageType.CANCELLATION,
+        strategy=strategy["identifier"],
+        exchange=strategy["maker_exchange"],
+        id="",
+        pair=strategy["symbol"],
+    )
+    flattened = json.dumps(dict(cancellation), default=str)
+    await redis.publish(MESSAGE_PROCESSOR_CHANNEL, flattened)
 
 
 def min_max_usd_converter(

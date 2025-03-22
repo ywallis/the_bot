@@ -11,7 +11,8 @@ from apps.maker.src.strategies.utils import (
     maker_order_sizer,
     retrieve_ob_redis,
     min_max_usd_converter,
-    check_if_solvent
+    check_if_solvent,
+    send_processor_cancellation
 )
 from apps.maker.src.structs import CancellationMessage, OrderMessage
 from apps.maker.src.utils import load_config
@@ -43,6 +44,10 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
     max_size_usdt: float = float(strategy["max_size_usdt"])
     min_size: float
     max_size: float
+
+    # Cancels any open orders in case process has to restart
+
+    await send_processor_cancellation(redis, strategy)
 
     while watching:
         batch = asyncio.gather(
