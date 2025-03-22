@@ -22,11 +22,6 @@ async def test_single_edge_liquidity_sell_order():
         "max_size_usdt": "1000",
     }
 
-    # Mock order book data
-    redis_mock.get.side_effect = None
-    redis_mock.set.side_effect = None
-    redis_mock.hgetall.side_effect = None
-
     async def retrieve_ob_redis_side_effect(_redis, symbol):
         print(f"retrieve_ob_redis called with: {symbol}")  # Debug print
         if "maker" in symbol:
@@ -38,12 +33,9 @@ async def test_single_edge_liquidity_sell_order():
     async def check_if_solvent(*_args, **_kwargs):
         return True
 
-    def min_max_converter(*_args, **_kwargs):
-        return 0.01, 1.0
 
     retrieve_ob_redis_mock = AsyncMock(side_effect=retrieve_ob_redis_side_effect)
     check_if_solvent_mock = AsyncMock(side_effect=check_if_solvent)
-    min_max_mock = MagicMock(side_effect=min_max_converter)
 
     # Patch functions
     with pytest.MonkeyPatch.context() as mp:
@@ -59,10 +51,6 @@ async def test_single_edge_liquidity_sell_order():
             "apps.maker.src.strategies.single_edge_liquidity.maker_order_sizer",
             MagicMock(return_value=0.01),
         )
-        mp.setattr(
-            "apps.maker.src.strategies.single_edge_liquidity.min_max_usd_converter",
-            min_max_mock,
-        )
 
         # Run function in a background task
         task = asyncio.create_task(single_edge_liquidity(redis_mock, strategy))
@@ -74,5 +62,4 @@ async def test_single_edge_liquidity_sell_order():
         assert retrieve_ob_redis_mock.call_count > 0, (
             "retrieve_ob_redis should be called"
         )
-        assert min_max_mock.call_count > 0, "min_max should be called"
         assert check_if_solvent_mock.call_count > 0, "check_if_solvent should be called"
