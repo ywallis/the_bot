@@ -5,8 +5,9 @@ from unittest.mock import AsyncMock, MagicMock
 from apps.maker.src.strategies.single_edge_liquidity import single_edge_liquidity
 
 # TODO 
-# - Create queue for order message to be placed in
 # - Define test objects on actual CCXT values
+# - Check if redis publish is called with the right values
+# - Does min/max converter really need to be mocked?
 
 @pytest.mark.asyncio
 async def test_single_edge_liquidity_sell_order():
