@@ -55,6 +55,19 @@ async def test_single_edge_liquidity_sell_order():
         amount=Decimal(2),
     )
 
+    expected_buy_order = OrderMessage(
+        kind=MessageType.ORDER,
+        strategy=f"{strategy['identifier']}eb",
+        exchange=strategy["maker_exchange"],
+        id="",
+        exchange_id="_",
+        pair=strategy["symbol"],
+        side=OrderSide.BUY,
+        order_type=OrderType.REPLACE,
+        price=Decimal(40000),
+        amount=Decimal(2),
+    )
+
     async def retrieve_balance_redis_side_effect(_redis, symbol):
         if "maker" in symbol:
             return {"BTC": {"free": 50000}, "USDT": {"free": 500000}}
@@ -104,6 +117,10 @@ async def test_single_edge_liquidity_sell_order():
                 call(
                     MESSAGE_PROCESSOR_CHANNEL,
                     json.dumps(dict(expected_sell_order), default=str),
+                ),
+                call(
+                    MESSAGE_PROCESSOR_CHANNEL,
+                    json.dumps(dict(expected_buy_order), default=str),
                 ),
             ]
         )

@@ -1,7 +1,7 @@
 import asyncio
 from decimal import Decimal
 import logging
-from datetime import UTC, datetime, timedelta
+# from datetime import UTC, datetime, timedelta
 
 from redis.asyncio import ConnectionPool, Redis
 
@@ -99,6 +99,7 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
         min_size, max_size = min_max_usd_converter(
             best_bid_taker, min_size_usdt, max_size_usdt
         )
+
         # Sell side arbitrage
 
         if best_ask_maker >= best_ask_taker * spread:
@@ -113,7 +114,6 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                 max_size,
                 min_size
             )
-            # optimal_sell_size = round(optimal_sell_size, 5)
 
             logger.debug(f"Optimal sell size currently {optimal_sell_size}")
 
@@ -150,14 +150,74 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
         else:
 
             if sell_exists:
-                cancellation: CancellationMessage = CancellationMessage(
+                sell_cancellation: CancellationMessage = CancellationMessage(
                     kind=MessageType.CANCELLATION,
                     strategy=f"{strategy_identifier}es",
                     exchange=maker,
                     id="",
                     pair=symbol,
                 )
-                logger.debug(f"Cancellation was generated: {cancellation}")
+                logger.debug(f"Cancellation was generated: {sell_cancellation}")
+                sell_exists = False
+
+        # Buy side arbitrage
+
+        if best_bid_taker >= best_bid_maker * spread:
+
+            # Calculate the current optimal order size
+
+            optimal_buy_size = maker_order_sizer(
+                best_bid_maker,
+                taker_client_bids,
+                OrderSide.BUY,
+                spread,
+                max_size,
+                min_size
+            )
+
+            logger.debug(f"Optimal buy size currently {optimal_buy_size}")
+
+            # If the flag for an existing sell is false, create a sell order at the bottom ask.
+
+            if not buy_exists:
+                logger.debug("Buy does not exist yet.")
+
+                if await check_if_solvent(
+                    redis,
+                    maker,
+                    taker,
+                    best_bid_maker,
+                    optimal_buy_size,
+                    pair=symbol,
+                ):
+                    buy_order = OrderMessage(
+                        kind=MessageType.ORDER,
+                        strategy=f"{strategy_identifier}eb",
+                        exchange=maker,
+                        id="",
+                        exchange_id="_",
+                        pair=symbol,
+                        side=OrderSide.BUY,
+                        order_type=OrderType.REPLACE,
+                        price=Decimal(best_bid_maker),
+                        amount=Decimal(optimal_buy_size),
+                    )
+
+                    await send_processor_order(redis, buy_order)
+                    sell_exists = True
+                    logger.debug(f"Sell order was generated: {buy_order}")
+            
+        else:
+
+            if sell_exists:
+                buy_cancellation: CancellationMessage = CancellationMessage(
+                    kind=MessageType.CANCELLATION,
+                    strategy=f"{strategy_identifier}es",
+                    exchange=maker,
+                    id="",
+                    pair=symbol,
+                )
+                logger.debug(f"Cancellation was generated: {buy_cancellation}")
                 sell_exists = False
 
 
