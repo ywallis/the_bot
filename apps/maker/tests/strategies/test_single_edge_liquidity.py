@@ -1,6 +1,7 @@
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
+from apps.maker.src.constants import MESSAGE_PROCESSOR_CHANNEL
 
 from apps.maker.src.strategies.single_edge_liquidity import single_edge_liquidity
 
@@ -11,7 +12,10 @@ from apps.maker.src.strategies.single_edge_liquidity import single_edge_liquidit
 
 @pytest.mark.asyncio
 async def test_single_edge_liquidity_sell_order():
-    redis_mock = AsyncMock()
+    mock_redis = AsyncMock()
+    mocked_publish = AsyncMock()
+    mock_redis.publish = mocked_publish 
+
     strategy = {
         "symbol": "BTC/USDT",
         "identifier": "test_strategy",
@@ -23,7 +27,6 @@ async def test_single_edge_liquidity_sell_order():
     }
 
     async def retrieve_ob_redis_side_effect(_redis, symbol):
-        print(f"retrieve_ob_redis called with: {symbol}")  # Debug print
         if "maker" in symbol:
             return {"bids": [[40000, 1], [39999, 1]], "asks": [[60000, 1], [60001, 1]]}
         if "taker" in symbol:
@@ -53,7 +56,7 @@ async def test_single_edge_liquidity_sell_order():
         )
 
         # Run function in a background task
-        task = asyncio.create_task(single_edge_liquidity(redis_mock, strategy))
+        task = asyncio.create_task(single_edge_liquidity(mock_redis, strategy))
         await asyncio.sleep(1)  # Allow enough time for the function to run
         task.cancel()
 
@@ -63,3 +66,6 @@ async def test_single_edge_liquidity_sell_order():
             "retrieve_ob_redis should be called"
         )
         assert check_if_solvent_mock.call_count > 0, "check_if_solvent should be called"
+        # assert mock_redis.publish.call_count > 2, "publish should be called"
+        # mock_redis.publish.l
+        mocked_publish.assert_awaited_with(MESSAGE_PROCESSOR_CHANNEL, '{"kind": "cancellation", "strategy": "test_strategy", "exchange": "maker", "id": "", "pair": "BTC/USDT"}')

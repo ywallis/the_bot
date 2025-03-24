@@ -142,9 +142,9 @@ def cancellation_1():
 
 
 @pytest.fixture
-def order_response_positive() -> (
-    Callable[[OrderMessage | CancellationMessage], Response]
-):
+def order_response_positive() -> Callable[
+    [OrderMessage | CancellationMessage], Response
+]:
     def _factory(msg: OrderMessage | CancellationMessage):
         order_response_positive: Response = Response(
             kind=MessageType.ORDER, text=f'{{"id": "{msg["id"]}mock_response"}}'
