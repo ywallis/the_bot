@@ -4,7 +4,7 @@ import asyncio
 
 from redis.asyncio import Redis
 
-from apps.maker.src.structs import CancellationMessage
+from apps.maker.src.structs import CancellationMessage, OrderMessage
 from apps.maker.src.constants import MESSAGE_PROCESSOR_CHANNEL 
 from apps.maker.src.enums import MessageType
 
@@ -15,7 +15,7 @@ logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
 
-async def send_processor_cancellation(redis: Redis, strategy: dict[str, str]):
+async def send_processor_init_cancellation(redis: Redis, strategy: dict[str, str]):
     cancellation = CancellationMessage(
         kind=MessageType.CANCELLATION,
         strategy=strategy["identifier"],
@@ -24,6 +24,10 @@ async def send_processor_cancellation(redis: Redis, strategy: dict[str, str]):
         pair=strategy["symbol"],
     )
     flattened = json.dumps(dict(cancellation), default=str)
+    await redis.publish(MESSAGE_PROCESSOR_CHANNEL, flattened)
+
+async def send_processor_order(redis: Redis, order: OrderMessage):
+    flattened = json.dumps(dict(order), default=str)
     await redis.publish(MESSAGE_PROCESSOR_CHANNEL, flattened)
 
 

@@ -12,7 +12,8 @@ from apps.maker.src.strategies.utils import (
     retrieve_ob_redis,
     min_max_usd_converter,
     check_if_solvent,
-    send_processor_cancellation
+    send_processor_init_cancellation,
+    send_processor_order
 )
 from apps.maker.src.structs import CancellationMessage, OrderMessage
 from apps.maker.src.utils import load_config
@@ -47,7 +48,7 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
 
     # Cancels any open orders in case process has to restart
 
-    await send_processor_cancellation(redis, strategy)
+    await send_processor_init_cancellation(redis, strategy)
 
     while watching:
         batch = asyncio.gather(
@@ -109,8 +110,10 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                 taker_client_asks,
                 OrderSide.SELL,
                 spread,
-                max_size_usdt,
+                max_size,
+                min_size
             )
+            # optimal_sell_size = round(optimal_sell_size, 5)
 
             logger.debug(f"Optimal sell size currently {optimal_sell_size}")
 
@@ -140,6 +143,7 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                         amount=Decimal(optimal_sell_size),
                     )
 
+                    await send_processor_order(redis, sell_order)
                     sell_exists = True
                     logger.debug(f"Sell order was generated: {sell_order}")
             
