@@ -32,9 +32,6 @@ from apps.maker.src.utils import (
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
-redis_in = Redis(host=REDIS_HOSTNAME, port=REDIS_PORT, decode_responses=True)
-redis_out = Redis(host=REDIS_HOSTNAME, port=REDIS_PORT, decode_responses=True)
-
 
 async def fetch_all_open(clients: dict[str, CustomExchange]) -> OrderBatchMessage:
     all_orders: list[OrderMessage] = []
@@ -107,7 +104,7 @@ async def worker(
             queue.task_done()
 
 
-async def results_worker(results_queue: asyncio.Queue):
+async def results_worker(redis: Redis, results_queue: asyncio.Queue):
     """Processes the results queue and publishes responses via Redis."""
 
     while True:
@@ -117,12 +114,12 @@ async def results_worker(results_queue: asyncio.Queue):
             break
 
         logger.debug(f"Publishing result to Redis: {message}")
-        await redis_out.publish(order_id, f"{msg_type}|{message}")
+        await redis.publish(order_id, f"{msg_type}|{message}")
 
         results_queue.task_done()
 
 
-async def redis_subscriber(pubsub: PubSub, queues: dict[str, asyncio.Queue]):
+async def redis_subscriber(redis: Redis, pubsub: PubSub, queues: dict[str, asyncio.Queue]):
     """Listens to Redis channel and routes messages to the correct queue."""
     await pubsub.subscribe(BROKER_CHANNEL)
 
@@ -144,7 +141,7 @@ async def redis_subscriber(pubsub: PubSub, queues: dict[str, asyncio.Queue]):
                     elif exchange == "INIT":
                         logger.debug("INIT condition triggered")
                         all_open_orders = await fetch_all_open(authenticated_clients)
-                        await redis_out.publish(
+                        await redis.publish(
                             "INIT", json.dumps(dict(all_open_orders), default=str)
                         )
 
@@ -157,7 +154,7 @@ async def redis_subscriber(pubsub: PubSub, queues: dict[str, asyncio.Queue]):
 
 
 async def main():
-    redis = await Redis(host="localhost", port=6379, decode_responses=True)
+    redis = await Redis(host=REDIS_HOSTNAME, port=REDIS_PORT, decode_responses=True)
     pubsub: PubSub = redis.pubsub()
 
     worker_queues = {
@@ -165,8 +162,8 @@ async def main():
     }
 
     results_queue = asyncio.Queue()
-    results_task = asyncio.create_task(results_worker(results_queue))
-    subscriber_task = asyncio.create_task(redis_subscriber(pubsub, worker_queues))
+    results_task = asyncio.create_task(results_worker(redis, results_queue))
+    subscriber_task = asyncio.create_task(redis_subscriber(redis, pubsub, worker_queues))
 
     for exchange in authenticated_clients.keys():
         asyncio.create_task(

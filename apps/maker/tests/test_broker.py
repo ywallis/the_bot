@@ -83,33 +83,33 @@ async def test_worker(order_1):
 
 
 @pytest.mark.asyncio
-async def test_results_worker_order(mocker):
+async def test_results_worker_order():
     results_queue = asyncio.Queue()
-    mock_redis_publish = mocker.patch(
-        "apps.maker.src.broker.redis_out.publish", new_callable=AsyncMock
-    )
+    mock_redis = AsyncMock()
+    mocked_publish = AsyncMock()
+    mock_redis.publish = mocked_publish
 
     await results_queue.put(("123", MessageType.ORDER, "success"))
     await results_queue.put((None, None, None))  # Stop signal
 
-    await results_worker(results_queue)
+    await results_worker(mock_redis, results_queue)
 
-    mock_redis_publish.assert_called_once_with("123", f"{MessageType.ORDER}|success")
+    mocked_publish.assert_called_once_with("123", f"{MessageType.ORDER}|success")
 
 
 @pytest.mark.asyncio
-async def test_results_worker_cancellation(mocker):
+async def test_results_worker_cancellation():
     results_queue = asyncio.Queue()
-    mock_redis_publish = mocker.patch(
-        "apps.maker.src.broker.redis_out.publish", new_callable=AsyncMock
-    )
+    mock_redis = AsyncMock()
+    mocked_publish = AsyncMock()
+    mock_redis.publish = mocked_publish
 
     await results_queue.put(("234", MessageType.CANCELLATION, "success"))
     await results_queue.put((None, None, None))  # Stop signal
 
-    await results_worker(results_queue)
+    await results_worker(mock_redis, results_queue)
 
-    mock_redis_publish.assert_called_once_with(
+    mocked_publish.assert_called_once_with(
         "234", f"{MessageType.CANCELLATION}|success"
     )
 
@@ -118,6 +118,7 @@ async def test_results_worker_cancellation(mocker):
 async def test_redis_subscriber_valid_message(order_1, order_raw_string):
     # Create a queue for the "binance" exchange.
     queue = asyncio.Queue()
+    redis_mock = AsyncMock()
     queues = {order_1["exchange"]: queue}
 
     # Define a valid message payload.
@@ -138,7 +139,7 @@ async def test_redis_subscriber_valid_message(order_1, order_raw_string):
 
     # Patch the parse_message function to return a valid dictionary.
     with patch("apps.maker.src.broker.parse_message", return_value=order_1):
-        await redis_subscriber(pubsub, queues)
+        await redis_subscriber(redis_mock, pubsub, queues)
 
     # Verify that the parsed message was put into the "binance" queue.
     result = await queue.get()

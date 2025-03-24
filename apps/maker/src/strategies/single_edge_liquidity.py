@@ -23,11 +23,11 @@ logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
 # TODO:
+# - Include actual unique OOIDs
 # - Look into how connection pools should be re-use between modules
 # - Some kind of parser / strategy selector
 # - A separation between strategy launcher and strategy itself?
 # - Consider which throttling systems still make sense
-# - Init triggers cancellation messages
 
 
 async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):

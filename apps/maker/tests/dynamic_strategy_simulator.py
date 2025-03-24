@@ -4,6 +4,8 @@ import time
 import json
 from datetime import datetime
 
+from apps.maker.src.constants import MESSAGE_PROCESSOR_CHANNEL, REDIS_HOSTNAME, REDIS_PORT
+
 def fake_order(strategy:str, exchange: str) -> dict[str, str]:
 
     order: dict[str, str] = {
@@ -28,9 +30,9 @@ def loop(order:int = 0):
         time.sleep(randint(0,4))
         order += 1
 
-r: Redis = Redis(host='localhost', port=6379, decode_responses=True)
+r: Redis = Redis(host=REDIS_HOSTNAME, port=REDIS_PORT, decode_responses=True)
 
-channel: str = "testing_ps"
+channel: str = MESSAGE_PROCESSOR_CHANNEL 
 
 order_no: int = 0
 

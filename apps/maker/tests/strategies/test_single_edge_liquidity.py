@@ -13,6 +13,7 @@ from apps.maker.src.structs import CancellationMessage, OrderMessage
 # TODO
 # - Clean this shit, make fixtures you can re-use
 # - Make tests for all util functions
+# - Add synthetic OOID
 
 
 @pytest.mark.asyncio

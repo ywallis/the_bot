@@ -2,9 +2,11 @@ from redis import Redis
 import json
 from datetime import datetime
 
-r: Redis = Redis(host="localhost", port=6379, decode_responses=True)
+from apps.maker.src.constants import MESSAGE_PROCESSOR_CHANNEL, REDIS_HOSTNAME, REDIS_PORT
 
-channel: str = "testing_ps"
+r: Redis = Redis(host=REDIS_HOSTNAME, port=REDIS_PORT, decode_responses=True)
+
+channel: str = MESSAGE_PROCESSOR_CHANNEL 
 
 order_no: int = 0
 
