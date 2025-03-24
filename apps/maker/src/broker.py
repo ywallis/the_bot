@@ -6,6 +6,7 @@ from typing import Any
 from redis.asyncio import Redis
 from redis.asyncio.client import PubSub
 
+from apps.maker.src.constants import REDIS_HOSTNAME, REDIS_PORT, BROKER_CHANNEL
 import apps.maker.src.logging_config as logging_config
 from apps.maker.src.ccxt_abstractions import (
     cancel_order_return_confirmation,
@@ -31,10 +32,8 @@ from apps.maker.src.utils import (
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
-redis_in = Redis(host="localhost", port=6379, decode_responses=True)
-redis_out = Redis(host="localhost", port=6379, decode_responses=True)
-
-CHANNEL_NAME = "broker"
+redis_in = Redis(host=REDIS_HOSTNAME, port=REDIS_PORT, decode_responses=True)
+redis_out = Redis(host=REDIS_HOSTNAME, port=REDIS_PORT, decode_responses=True)
 
 
 async def fetch_all_open(clients: dict[str, CustomExchange]) -> OrderBatchMessage:
@@ -125,9 +124,9 @@ async def results_worker(results_queue: asyncio.Queue):
 
 async def redis_subscriber(pubsub: PubSub, queues: dict[str, asyncio.Queue]):
     """Listens to Redis channel and routes messages to the correct queue."""
-    await pubsub.subscribe(CHANNEL_NAME)
+    await pubsub.subscribe(BROKER_CHANNEL)
 
-    logger.debug(f"Subscribed to Redis channel: {CHANNEL_NAME}")
+    logger.debug(f"Subscribed to Redis channel: {BROKER_CHANNEL}")
 
     try:
         async for message in pubsub.listen():
@@ -154,7 +153,7 @@ async def redis_subscriber(pubsub: PubSub, queues: dict[str, asyncio.Queue]):
                             f"Warning: Received unknown message type '{exchange}', ignoring..."
                         )
     finally:
-        await pubsub.unsubscribe(CHANNEL_NAME)
+        await pubsub.unsubscribe(BROKER_CHANNEL)
 
 
 async def main():

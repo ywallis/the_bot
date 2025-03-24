@@ -1,19 +1,20 @@
 import asyncio
-from decimal import Decimal
 import logging
-# from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
+# from datetime import UTC, datetime, timedelta
 from redis.asyncio import ConnectionPool, Redis
 
 import apps.maker.src.logging_config as logging_config
+from apps.maker.src.constants import REDIS_HOSTNAME, REDIS_PORT
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
 from apps.maker.src.strategies.utils import (
-    maker_order_sizer,
-    retrieve_ob_redis,
-    min_max_usd_converter,
     check_if_solvent,
+    maker_order_sizer,
+    min_max_usd_converter,
+    retrieve_ob_redis,
     send_processor_init_cancellation,
-    send_processor_order
+    send_processor_order,
 )
 from apps.maker.src.structs import CancellationMessage, OrderMessage
 from apps.maker.src.utils import load_config
@@ -103,7 +104,6 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
         # Sell side arbitrage
 
         if best_ask_maker >= best_ask_taker * spread:
-
             # Calculate the current optimal order size
 
             optimal_sell_size = maker_order_sizer(
@@ -112,7 +112,7 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                 OrderSide.SELL,
                 spread,
                 max_size,
-                min_size
+                min_size,
             )
 
             logger.debug(f"Optimal sell size currently {optimal_sell_size}")
@@ -146,9 +146,8 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                     await send_processor_order(redis, sell_order)
                     sell_exists = True
                     logger.debug(f"Sell order was generated: {sell_order}")
-            
-        else:
 
+        else:
             if sell_exists:
                 sell_cancellation: CancellationMessage = CancellationMessage(
                     kind=MessageType.CANCELLATION,
@@ -157,13 +156,14 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                     id="",
                     pair=symbol,
                 )
-                logger.debug(f"Cancellation was generated: {sell_cancellation}")
+                logger.debug(
+                    f"No more arb, cancellation was generated: {sell_cancellation}"
+                )
                 sell_exists = False
 
         # Buy side arbitrage
 
         if best_bid_taker >= best_bid_maker * spread:
-
             # Calculate the current optimal order size
 
             optimal_buy_size = maker_order_sizer(
@@ -172,7 +172,7 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                 OrderSide.BUY,
                 spread,
                 max_size,
-                min_size
+                min_size,
             )
 
             logger.debug(f"Optimal buy size currently {optimal_buy_size}")
@@ -206,9 +206,8 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                     await send_processor_order(redis, buy_order)
                     sell_exists = True
                     logger.debug(f"Sell order was generated: {buy_order}")
-            
-        else:
 
+        else:
             if sell_exists:
                 buy_cancellation: CancellationMessage = CancellationMessage(
                     kind=MessageType.CANCELLATION,
@@ -217,13 +216,16 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                     id="",
                     pair=symbol,
                 )
-                logger.debug(f"Cancellation was generated: {buy_cancellation}")
+                logger.debug(
+                    f"No more arb, cancellation was generated: {buy_cancellation}"
+                )
                 sell_exists = False
 
 
 async def main():
-
-    pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=20)
+    pool = ConnectionPool(
+        host=REDIS_HOSTNAME, port=REDIS_PORT, db=0, max_connections=20
+    )
     redis = Redis(decode_responses=True, connection_pool=pool)
     config = load_config()
     strategies = config.get("strategies")

@@ -10,6 +10,12 @@ from typing import Awaitable, cast
 from redis.asyncio import ConnectionPool, Redis
 
 import apps.maker.src.logging_config as logging_config
+from apps.maker.src.constants import (
+    BROKER_CHANNEL,
+    MESSAGE_PROCESSOR_CHANNEL,
+    REDIS_HOSTNAME,
+    REDIS_PORT,
+)
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
 from apps.maker.src.errors import BrokerError
 from apps.maker.src.structs import (
@@ -31,19 +37,15 @@ logger = logging.getLogger(__name__)
 class MessageProcessor:
     def __init__(self):
         self.pool = ConnectionPool(
-            host="localhost", port=6379, db=0, max_connections=20
+            host=REDIS_HOSTNAME, port=REDIS_PORT, db=0, max_connections=20
         )
         self.redis = Redis(decode_responses=True, connection_pool=self.pool)
         self.redis_pubsub = Redis(
             connection_pool=self.pool, decode_responses=True
         ).pubsub()
         self.locks = {}  # Dictionary to store locks dynamically
-        self.message_queue = (
-            {}
-        )  # Dictionary to keep track of the next action to execute in case of a lock
-        self.open_orders = (
-            {}
-        )  # Keep track of last open order (could be cleaned up by the websocket watcher?)
+        self.message_queue = {}  # Dictionary to keep track of the next action to execute in case of a lock
+        self.open_orders = {}  # Keep track of last open order (could be cleaned up by the websocket watcher?)
         self.tasks = []
 
     async def get_open_orders(self):
@@ -61,7 +63,7 @@ class MessageProcessor:
             amount=Decimal(0),
         )
         async with Redis(connection_pool=self.pool) as redis:
-            await redis.publish("broker", json.dumps(dict(trigger), default=str))
+            await redis.publish(BROKER_CHANNEL, json.dumps(dict(trigger), default=str))
 
             logger.info("Asking broker for all open orders.")
             async with redis.pubsub() as pubsub:
@@ -103,7 +105,7 @@ class MessageProcessor:
         response: str = ""
 
         async with Redis(connection_pool=self.pool) as redis:
-            await redis.publish("broker", flattened)
+            await redis.publish(BROKER_CHANNEL, flattened)
 
             logger.info(
                 f"Sending message with id {msg['id']} and type {msg['kind']} to broker."
@@ -249,7 +251,9 @@ class MessageProcessor:
         """Subscribe to Redis and process messages."""
 
         pubsub = self.redis.pubsub()
-        await pubsub.subscribe("testing_ps")  # Subscribe to a Redis channel
+        await pubsub.subscribe(
+            MESSAGE_PROCESSOR_CHANNEL
+        )  # Subscribe to a Redis channel
 
         async for message in pubsub.listen():
             if message["type"] == "message":
@@ -283,7 +287,7 @@ class MessageProcessor:
 async def main():
     logger.debug("Message processor starting")
     processor = MessageProcessor()
-    
+
     # Let broker boot and check for open orders
 
     await asyncio.sleep(0.1)

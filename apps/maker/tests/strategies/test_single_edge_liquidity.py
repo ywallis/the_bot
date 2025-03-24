@@ -8,11 +8,11 @@ import pytest
 from apps.maker.src.constants import MESSAGE_PROCESSOR_CHANNEL
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
 from apps.maker.src.strategies.single_edge_liquidity import single_edge_liquidity
-from apps.maker.src.strategies.utils import min_max_usd_converter
 from apps.maker.src.structs import CancellationMessage, OrderMessage
 
 # TODO
-# - Define test objects on actual CCXT values
+# - Clean this shit, make fixtures you can re-use
+# - Make tests for all util functions
 
 
 @pytest.mark.asyncio
@@ -26,14 +26,11 @@ async def test_single_edge_liquidity_sell_order():
         "identifier": "test_strategy",
         "maker_exchange": "maker",
         "taker_exchange": "taker",
-        "spread": 1.005,
-        "min_size_usdt": 10,
-        "max_size_usdt": 100000,
+        "spread": "1.005",
+        "min_size_usdt": "10",
+        "max_size_usdt": "100000",
     }
 
-    min_size, max_size = min_max_usd_converter(
-        49900, strategy["min_size_usdt"], strategy["max_size_usdt"]
-    )
     expected_cancellation = CancellationMessage(
         kind=MessageType.CANCELLATION,
         strategy=strategy["identifier"],
