@@ -25,7 +25,6 @@ async def watch_ob(client: CustomExchange, ticker: str, redis: Redis):
 
 
 async def main(ticker: str, clients: dict[str, CustomExchange]):
-    print("Hi from main!")
     pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=20)
     redis = Redis(decode_responses=True, connection_pool=pool)
 

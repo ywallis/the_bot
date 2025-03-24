@@ -1,8 +1,19 @@
+import logging
 import os
 import signal
 import subprocess
 import sys
 import time
+
+from dotenv import load_dotenv
+
+import apps.maker.src.logging_config as logging_config
+
+logging_config.setup_logging()
+logger = logging.getLogger(__name__)
+load_dotenv()
+# Check production status from env
+production = os.getenv("PRODUCTION", False)
 
 PROCESS_LIST = [
     ["uv", "run", "-m", "apps.maker.src.watcher"],
@@ -13,33 +24,44 @@ PROCESS_LIST = [
 
 processes = []
 
+
 def launch_process(cmd):
     """Launch a process in its own process group."""
     return subprocess.Popen(cmd, preexec_fn=os.setpgrp)
 
-def cleanup_and_exit(_signum, _frame):
-    """Terminate all processes properly."""
-    print("Terminating all processes...")
 
+def cleanup_and_exit(exit_code=1):
+    """Terminate all running processes and exit."""
+    print("Cleaning up processes...")
     for _, proc in processes:
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)  # Kill process group
-            proc.wait(timeout=3)  # Give it time to exit
-        except Exception:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)  # Force kill
+        if proc.poll() is None:  # Only kill if the process is still running
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)  # Graceful termination
+                proc.wait(timeout=3)  # Wait for process to exit
+            except ProcessLookupError:
+                pass  # Process already exited, nothing to do
+            except Exception:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)  # Force kill if needed
+    sys.exit(exit_code)
 
-    sys.exit(0)
+# Register signal handlers for manual termination (Ctrl+C)
+def handle_exit(_sig, _frame):
+    cleanup_and_exit(0)  # Normal exit on SIGINT/SIGTERM
 
-# Register signal handlers for graceful shutdown
-signal.signal(signal.SIGINT, cleanup_and_exit)
-signal.signal(signal.SIGTERM, cleanup_and_exit)
+
+signal.signal(signal.SIGINT, handle_exit)
+signal.signal(signal.SIGTERM, handle_exit)
 
 if __name__ == "__main__":
     processes = [(cmd, launch_process(cmd)) for cmd in PROCESS_LIST]
     while True:
         for i, (cmd, proc) in enumerate(processes):
             if proc.poll() is not None:  # Process exited
-                # This will work once we are confident and tested. Process failure should be general for now.
-                print(f"Process {cmd} crashed. Restarting...")
-                processes[i] = (cmd, launch_process(cmd))
+                if production:
+                    # This will work once we are confident and tested. Process failure should be general for now.
+                    print(f"Process {cmd} crashed. Restarting...")
+                    processes[i] = (cmd, launch_process(cmd))
+                else:
+                    logger.error(f"Process {proc} crashed unexpectedly, winding down.")
+                    cleanup_and_exit(1)
         time.sleep(2)

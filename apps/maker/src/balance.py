@@ -29,7 +29,6 @@ async def watch_balance(client: CustomExchange, redis: Redis):
 
 
 async def main(clients: dict[str, CustomExchange]):
-    print("Hi from main!")
     pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=20)
     redis = Redis(decode_responses=True, connection_pool=pool)
 
