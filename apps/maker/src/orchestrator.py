@@ -5,6 +5,8 @@ import sys
 import time
 
 PROCESS_LIST = [
+    ["uv", "run", "-m", "apps.maker.src.watcher"],
+    ["uv", "run", "-m", "apps.maker.src.balance"],
     ["uv", "run", "-m", "apps.maker.src.broker"],
     ["uv", "run", "-m", "apps.maker.src.message_processor"],
 ]
