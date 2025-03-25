@@ -1,15 +1,14 @@
+import asyncio
 import json
 import logging
-import asyncio
+from datetime import datetime
 
 from redis.asyncio import Redis
 
-from apps.maker.src.structs import CancellationMessage, OrderMessage
-from apps.maker.src.constants import MESSAGE_PROCESSOR_CHANNEL 
-from apps.maker.src.enums import MessageType
-
 import apps.maker.src.logging_config as logging_config
-from apps.maker.src.enums import OrderSide
+from apps.maker.src.constants import MESSAGE_PROCESSOR_CHANNEL
+from apps.maker.src.enums import MessageType, OrderSide
+from apps.maker.src.structs import CancellationMessage, OrderMessage
 
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
@@ -25,6 +24,7 @@ async def send_processor_init_cancellation(redis: Redis, strategy: dict[str, str
     )
     flattened = json.dumps(dict(cancellation), default=str)
     await redis.publish(MESSAGE_PROCESSOR_CHANNEL, flattened)
+
 
 async def send_processor_order(redis: Redis, order: OrderMessage):
     flattened = json.dumps(dict(order), default=str)
@@ -104,6 +104,12 @@ async def retrieve_ob_redis(redis_instance: Redis, key: str):
         return None  # Key not found
     # Deserialize the JSON string back to a CCXT ob
     return json.loads(serialized_ob)
+
+
+def order_time() -> str:
+    """Creates a datetime-based stamp to make unique and custom order numbers."""
+
+    return datetime.now().strftime("%y%m%d_%H%M%S_%f")
 
 
 def maker_order_sizer(

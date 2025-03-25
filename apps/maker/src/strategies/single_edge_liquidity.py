@@ -12,6 +12,7 @@ from apps.maker.src.strategies.utils import (
     check_if_solvent,
     maker_order_sizer,
     min_max_usd_converter,
+    order_time,
     retrieve_ob_redis,
     send_processor_init_cancellation,
     send_processor_order,
@@ -23,7 +24,6 @@ logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
 # TODO:
-# - Include actual unique OOIDs
 # - Look into how connection pools should be re-use between modules
 # - Some kind of parser / strategy selector
 # - A separation between strategy launcher and strategy itself?
@@ -134,7 +134,7 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                         kind=MessageType.ORDER,
                         strategy=f"{strategy_identifier}es",
                         exchange=maker,
-                        id="",
+                        id=f"t-{order_time()}_{strategy_identifier}es",
                         exchange_id="_",
                         pair=symbol,
                         side=OrderSide.SELL,
@@ -194,7 +194,7 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                         kind=MessageType.ORDER,
                         strategy=f"{strategy_identifier}eb",
                         exchange=maker,
-                        id="",
+                        id=f"t-{order_time()}_{strategy_identifier}eb",
                         exchange_id="_",
                         pair=symbol,
                         side=OrderSide.BUY,

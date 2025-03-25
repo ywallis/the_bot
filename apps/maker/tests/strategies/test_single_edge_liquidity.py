@@ -13,7 +13,6 @@ from apps.maker.src.structs import CancellationMessage, OrderMessage
 # TODO
 # - Clean this shit, make fixtures you can re-use
 # - Make tests for all util functions
-# - Add synthetic OOID
 
 
 @pytest.mark.asyncio
@@ -44,7 +43,7 @@ async def test_single_edge_liquidity_sell_order():
         kind=MessageType.ORDER,
         strategy=f"{strategy['identifier']}es",
         exchange=strategy["maker_exchange"],
-        id="",
+        id=f"t-0_{strategy['identifier']}es",
         exchange_id="_",
         pair=strategy["symbol"],
         side=OrderSide.SELL,
@@ -57,7 +56,7 @@ async def test_single_edge_liquidity_sell_order():
         kind=MessageType.ORDER,
         strategy=f"{strategy['identifier']}eb",
         exchange=strategy["maker_exchange"],
-        id="",
+        id=f"t-0_{strategy['identifier']}eb",
         exchange_id="_",
         pair=strategy["symbol"],
         side=OrderSide.BUY,
@@ -80,6 +79,9 @@ async def test_single_edge_liquidity_sell_order():
             return {"bids": [[49900, 1], [49899, 1]], "asks": [[50000, 1], [50001, 1]]}
         return None
 
+    def order_time_mock():
+        return "0"
+
     retrieve_ob_redis_mock = AsyncMock(side_effect=retrieve_ob_redis_side_effect)
     retrieve_balance_redis_mock = AsyncMock(
         side_effect=retrieve_balance_redis_side_effect
@@ -94,6 +96,10 @@ async def test_single_edge_liquidity_sell_order():
         mp.setattr(
             "apps.maker.src.strategies.utils.retrieve_balances_redis",
             retrieve_balance_redis_mock,
+        )
+        mp.setattr(
+            "apps.maker.src.strategies.single_edge_liquidity.order_time",
+            order_time_mock,
         )
 
         # Run function in a background task
