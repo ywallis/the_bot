@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 # - Some kind of parser / strategy selector
 # - A separation between strategy launcher and strategy itself?
 # - Consider which throttling systems still make sense
+# - Change to logic of replacing values in dict
+
 
 
 async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
@@ -46,6 +48,18 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
     min_size: float
     max_size: float
 
+    sell_order = OrderMessage(
+        kind=MessageType.ORDER,
+        strategy=f"{strategy_identifier}es",
+        exchange=maker,
+        id=f"t-{order_time()}_{strategy_identifier}es",
+        exchange_id="_",
+        pair=symbol,
+        side=OrderSide.SELL,
+        order_type=OrderType.REPLACE,
+        price=Decimal(0),
+        amount=Decimal(0),
+    )
     # Cancels any open orders in case process has to restart
 
     await send_processor_cancellation(redis, strategy)
