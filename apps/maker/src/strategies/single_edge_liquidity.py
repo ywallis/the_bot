@@ -14,7 +14,7 @@ from apps.maker.src.strategies.utils import (
     min_max_usd_converter,
     order_time,
     retrieve_ob_redis,
-    send_processor_init_cancellation,
+    send_processor_cancellation,
     send_processor_order,
 )
 from apps.maker.src.structs import CancellationMessage, OrderMessage
@@ -35,7 +35,6 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
     watching: bool = True
     buy_exists: bool = False
     sell_exists: bool = False
-    sell_order: OrderMessage = OrderMessage()
 
     symbol: str = strategy["symbol"]
     strategy_identifier: str = strategy["identifier"]
@@ -49,7 +48,7 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
 
     # Cancels any open orders in case process has to restart
 
-    await send_processor_init_cancellation(redis, strategy)
+    await send_processor_cancellation(redis, strategy)
 
     while watching:
         batch = asyncio.gather(
@@ -147,17 +146,45 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                     sell_exists = True
                     logger.debug(f"Sell order was generated: {sell_order}")
 
+            elif sell_order["price"] != best_ask_maker:
+                logger.debug("Order no longer at bottom of asks, replacing.")
+
+                if await check_if_solvent(
+                    redis,
+                    taker,
+                    maker,
+                    best_ask_maker,
+                    optimal_sell_size,
+                    symbol,
+                ):
+                    sell_order = OrderMessage(
+                        kind=MessageType.ORDER,
+                        strategy=f"{strategy_identifier}es",
+                        exchange=maker,
+                        id=f"t-{order_time()}_{strategy_identifier}es",
+                        exchange_id="_",
+                        pair=symbol,
+                        side=OrderSide.SELL,
+                        order_type=OrderType.REPLACE,
+                        price=Decimal(best_ask_maker),
+                        amount=Decimal(optimal_sell_size),
+                    )
+
+                    await send_processor_order(redis, sell_order)
+                    sell_exists = True
+                    logger.debug(f"Sell order was generated: {sell_order}")
+                
+                else:
+                    logger.debug("Client may not be solvent, cancelling.")
+
+                    await send_processor_cancellation(redis, strategy)
+                    sell_exists = False
+
         else:
             if sell_exists:
-                sell_cancellation: CancellationMessage = CancellationMessage(
-                    kind=MessageType.CANCELLATION,
-                    strategy=f"{strategy_identifier}es",
-                    exchange=maker,
-                    id="",
-                    pair=symbol,
-                )
+                await send_processor_cancellation(redis, strategy)
                 logger.debug(
-                    f"No more arb, cancellation was generated: {sell_cancellation}"
+                    "No more arb, cancellation was generated"
                 )
                 sell_exists = False
 

@@ -14,7 +14,7 @@ logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
 
-async def send_processor_init_cancellation(redis: Redis, strategy: dict[str, str]):
+async def send_processor_cancellation(redis: Redis, strategy: dict[str, str]):
     cancellation = CancellationMessage(
         kind=MessageType.CANCELLATION,
         strategy=strategy["identifier"],
