@@ -24,7 +24,6 @@ logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
 # TODO:
-# - Look into how connection pools should be re-use between modules
 # - Some kind of parser / strategy selector
 # - A separation between strategy launcher and strategy itself?
 # - Consider which throttling systems still make sense
@@ -36,6 +35,7 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
     watching: bool = True
     buy_exists: bool = False
     sell_exists: bool = False
+    sell_order: OrderMessage = OrderMessage()
 
     symbol: str = strategy["symbol"]
     strategy_identifier: str = strategy["identifier"]

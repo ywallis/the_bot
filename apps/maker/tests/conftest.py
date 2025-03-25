@@ -182,3 +182,15 @@ async def dummy_task() -> Callable[[], Awaitable[str]]:
         return "dummy result"
 
     return _dummy_task
+
+@pytest.fixture
+def base_strategy():
+    return {
+        "symbol": "BTC/USDT",
+        "identifier": "test_strategy",
+        "maker_exchange": "maker",
+        "taker_exchange": "taker",
+        "spread": "1.005",
+        "min_size_usdt": "10",
+        "max_size_usdt": "100000",
+    }
