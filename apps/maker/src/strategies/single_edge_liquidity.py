@@ -27,6 +27,10 @@ logger = logging.getLogger(__name__)
 # - A separation between strategy launcher and strategy itself?
 # - Consider which throttling systems still make sense
 # - Change to logic of replacing values in dict
+# - Make sure all values put into redis follow the format I want
+# - Make type union for order messages with | None
+# - Flatten if statement with loop continue
+# - Arb gone flow not tested or properly implemented
 
 
 async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
