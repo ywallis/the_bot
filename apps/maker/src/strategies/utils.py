@@ -1,4 +1,5 @@
 import asyncio
+from decimal import Decimal
 import json
 import logging
 from datetime import datetime
@@ -110,6 +111,16 @@ def order_time() -> str:
     """Creates a datetime-based stamp to make unique and custom order numbers."""
 
     return datetime.now().strftime("%y%m%d_%H%M%S_%f")
+
+
+async def update_and_send_order_values(
+    redis: Redis, order: OrderMessage, amount: float, price: float
+):
+        order["amount"] = Decimal(amount)
+        order["price"] = Decimal(price)
+        order["id"] = f"t-{order_time()}_{order['strategy']}"
+        await send_processor_order(redis, order)
+        logger.debug(f"Order was updated and sent: {order}")
 
 
 def maker_order_sizer(

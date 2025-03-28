@@ -12,7 +12,7 @@ from apps.maker.src.strategies.utils import (
     maker_order_sizer,
     min_max_usd_converter,
     order_time,
-    send_processor_init_cancellation,
+    send_processor_cancellation,
     send_processor_order,
 )
 from apps.maker.src.structs import CancellationMessage, OrderMessage
@@ -28,7 +28,7 @@ async def test_send_processor_init_cancellation():
         "symbol": "BTC/USDT",
     }
 
-    await send_processor_init_cancellation(redis_mock, strategy)
+    await send_processor_cancellation(redis_mock, strategy)
     expected_message = json.dumps(
         dict(
             CancellationMessage(
