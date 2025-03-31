@@ -15,6 +15,7 @@ from apps.maker.src.strategies.utils import (
     retrieve_ob_redis,
     send_processor_cancellation,
     update_and_send_order_values,
+    generate_order_replace,
 )
 from apps.maker.src.structs import CancellationMessage, OrderMessage
 from apps.maker.src.utils import load_config
@@ -37,8 +38,6 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
     # Defining state
 
     watching: bool = True
-    buy_exists: bool = False
-    sell_exists: bool = False
 
     symbol: str = strategy["symbol"]
     strategy_identifier: str = strategy["identifier"]
@@ -49,31 +48,10 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
     max_size_usdt: float = float(strategy["max_size_usdt"])
     min_size: float
     max_size: float
+    order_side: OrderSide | None = None
+    sell_order: OrderMessage | None = None
+    buy_order: OrderMessage | None = None
 
-    sell_order = OrderMessage(
-        kind=MessageType.ORDER,
-        strategy=f"{strategy_identifier}es",
-        exchange=maker,
-        id="",
-        exchange_id="_",
-        pair=symbol,
-        side=OrderSide.SELL,
-        order_type=OrderType.REPLACE,
-        price=Decimal(0),
-        amount=Decimal(0),
-    )
-    buy_order = OrderMessage(
-        kind=MessageType.ORDER,
-        strategy=f"{strategy_identifier}eb",
-        exchange=maker,
-        id="",
-        exchange_id="_",
-        pair=symbol,
-        side=OrderSide.BUY,
-        order_type=OrderType.REPLACE,
-        price=Decimal(0),
-        amount=Decimal(0),
-    )
     # Cancels any open orders in case process has to restart
 
     await send_processor_cancellation(redis, strategy)
@@ -131,6 +109,7 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
         # Sell side arbitrage
 
         if best_ask_maker >= best_ask_taker * spread:
+            order_side = OrderSide.SELL
             # Calculate the current optimal order size
 
             optimal_sell_size = maker_order_sizer(
@@ -146,46 +125,38 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
 
             # If the flag for an existing sell is false, create a sell order at the bottom ask.
 
-            if not sell_exists:
+            if not sell_order:
                 logger.debug("Sell does not exist yet.")
 
-                if await check_if_solvent(
+                sell_order = await generate_order_replace(
                     redis,
-                    taker,
                     maker,
+                    taker,
                     best_ask_maker,
                     optimal_sell_size,
-                    pair=symbol,
-                ):
-                    await update_and_send_order_values(
-                        redis, sell_order, optimal_sell_size, best_ask_maker
-                    )
-                    sell_exists = True
+                    symbol,
+                    order_side,
+                    strategy,
+                    "es",
+                )
 
             elif sell_order["price"] != best_ask_maker:
                 logger.debug("Order no longer at bottom of asks, replacing.")
 
-                if await check_if_solvent(
+                sell_order = await generate_order_replace(
                     redis,
-                    taker,
                     maker,
+                    taker,
                     best_ask_maker,
                     optimal_sell_size,
                     symbol,
-                ):
-                    await update_and_send_order_values(
-                        redis, sell_order, optimal_sell_size, best_ask_maker
-                    )
-                    sell_exists = True
-
-                else:
-                    logger.debug("Client may not be solvent, cancelling.")
-
-                    await send_processor_cancellation(redis, strategy)
-                    sell_exists = False
+                    order_side,
+                    strategy,
+                    "es",
+                )
 
         else:
-            if sell_exists:
+            if sell_order:
                 await send_processor_cancellation(redis, strategy)
                 logger.debug("No more arb, cancellation was generated")
                 sell_exists = False
@@ -193,6 +164,7 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
         # Buy side arbitrage
 
         if best_bid_taker >= best_bid_maker * spread:
+            order_side = OrderSide.BUY
             # Calculate the current optimal order size
 
             optimal_buy_size = maker_order_sizer(
@@ -208,47 +180,39 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
 
             # If the flag for an existing sell is false, create a sell order at the bottom ask.
 
-            if not buy_exists:
+            if not buy_order:
                 logger.debug("Buy does not exist yet.")
 
-                if await check_if_solvent(
+                buy_order = await generate_order_replace(
                     redis,
                     maker,
                     taker,
                     best_bid_maker,
                     optimal_buy_size,
-                    pair=symbol,
-                ):
-                    await update_and_send_order_values(
-                        redis, buy_order, optimal_buy_size, best_bid_maker
-                    )
-                    buy_exists = True
+                    symbol,
+                    order_side,
+                    strategy,
+                    "eb",
+                )
 
             elif buy_order["price"] != best_bid_maker:
                 logger.debug("Order no longer at top of bids, replacing.")
 
-                if await check_if_solvent(
+                buy_order = await generate_order_replace(
                     redis,
                     maker,
                     taker,
                     best_bid_maker,
                     optimal_buy_size,
-                    pair=symbol,
-                ):
-                    await update_and_send_order_values(
-                        redis, buy_order, optimal_buy_size,best_bid_maker 
-                    )
-                    buy_exists = True
-
-                else:
-                    logger.debug("Client may not be solvent, cancelling.")
-
-                    await send_processor_cancellation(redis, strategy)
-                    sell_exists = False
+                    symbol,
+                    order_side,
+                    strategy,
+                    "eb",
+                )
 
         # Arb conditions are gone
         else:
-            if sell_exists:
+            if sell_order:
                 buy_cancellation: CancellationMessage = CancellationMessage(
                     kind=MessageType.CANCELLATION,
                     strategy=f"{strategy_identifier}es",
@@ -259,8 +223,7 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                 logger.debug(
                     f"No more arb, cancellation was generated: {buy_cancellation}"
                 )
-                sell_exists = False
-
+                sell_order = None
 
 async def main():
     pool = ConnectionPool(

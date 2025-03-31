@@ -8,7 +8,7 @@ from redis.asyncio import Redis
 
 import apps.maker.src.logging_config as logging_config
 from apps.maker.src.constants import MESSAGE_PROCESSOR_CHANNEL
-from apps.maker.src.enums import MessageType, OrderSide
+from apps.maker.src.enums import MessageType, OrderSide, OrderType
 from apps.maker.src.structs import CancellationMessage, OrderMessage
 
 logging_config.setup_logging()
@@ -113,14 +113,57 @@ def order_time() -> str:
     return datetime.now().strftime("%y%m%d_%H%M%S_%f")
 
 
+async def generate_order_replace(
+    redis: Redis,
+    maker_id: str,
+    taker_id: str,
+    price: float,
+    amount: float,
+    pair: str,
+    side: OrderSide,
+    strategy: dict[str, str],
+    identifier: str,
+) -> OrderMessage | None:
+    if side == OrderSide.SELL:
+        sell_client_id = maker_id
+        buy_client_id = taker_id
+    else:
+        sell_client_id = taker_id
+        buy_client_id = maker_id
+
+    if await check_if_solvent(redis, buy_client_id, sell_client_id, price, amount, pair):
+        order = OrderMessage(
+            kind=MessageType.ORDER,
+            strategy=f"{strategy["identifier"]}{identifier}",
+            exchange=maker_id,
+            id=f"t-{order_time()}_{strategy["identifier"]}{identifier}",
+            exchange_id="_",
+            pair=pair,
+            side=side,
+            order_type=OrderType.REPLACE,
+            price=Decimal(price),
+            amount=Decimal(amount),
+        )
+
+        await send_processor_order(redis, order)
+        logger.debug(f"Order was created and sent: {order}")
+        return order
+
+    else:
+        logger.debug("Client may not be solvent, cancelling.")
+
+        await send_processor_cancellation(redis, strategy)
+        return None
+
+
 async def update_and_send_order_values(
     redis: Redis, order: OrderMessage, amount: float, price: float
 ):
-        order["amount"] = Decimal(amount)
-        order["price"] = Decimal(price)
-        order["id"] = f"t-{order_time()}_{order['strategy']}"
-        await send_processor_order(redis, order)
-        logger.debug(f"Order was updated and sent: {order}")
+    order["amount"] = Decimal(amount)
+    order["price"] = Decimal(price)
+    order["id"] = f"t-{order_time()}_{order['strategy']}"
+    await send_processor_order(redis, order)
+    logger.debug(f"Order was updated and sent: {order}")
 
 
 def maker_order_sizer(
