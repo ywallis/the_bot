@@ -1,21 +1,18 @@
 import asyncio
 import logging
-from decimal import Decimal
 
 # from datetime import UTC, datetime, timedelta
 from redis.asyncio import ConnectionPool, Redis
 
 import apps.maker.src.logging_config as logging_config
 from apps.maker.src.constants import REDIS_HOSTNAME, REDIS_PORT
-from apps.maker.src.enums import MessageType, OrderSide, OrderType
+from apps.maker.src.enums import MessageType, OrderSide
 from apps.maker.src.strategies.utils import (
-    check_if_solvent,
+    generate_order_replace,
     maker_order_sizer,
     min_max_usd_converter,
     retrieve_ob_redis,
     send_processor_cancellation,
-    update_and_send_order_values,
-    generate_order_replace,
 )
 from apps.maker.src.structs import CancellationMessage, OrderMessage
 from apps.maker.src.utils import load_config
@@ -51,10 +48,13 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
     order_side: OrderSide | None = None
     sell_order: OrderMessage | None = None
     buy_order: OrderMessage | None = None
+    sell_order_identifier: str = "es"
+    buy_order_identifier: str = "eb"
 
     # Cancels any open orders in case process has to restart
 
-    await send_processor_cancellation(redis, strategy)
+    await send_processor_cancellation(redis, strategy, sell_order_identifier)
+    await send_processor_cancellation(redis, strategy, buy_order_identifier)
 
     while watching:
         batch = asyncio.gather(
@@ -137,10 +137,11 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                     symbol,
                     order_side,
                     strategy,
-                    "es",
+                    sell_order_identifier,
                 )
+                continue
 
-            elif sell_order["price"] != best_ask_maker:
+            if sell_order["price"] != best_ask_maker:
                 logger.debug("Order no longer at bottom of asks, replacing.")
 
                 sell_order = await generate_order_replace(
@@ -152,14 +153,14 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                     symbol,
                     order_side,
                     strategy,
-                    "es",
+                    sell_order_identifier,
                 )
 
         else:
             if sell_order:
-                await send_processor_cancellation(redis, strategy)
+                await send_processor_cancellation(redis, strategy, sell_order_identifier)
                 logger.debug("No more arb, cancellation was generated")
-                sell_exists = False
+                sell_order = None
 
         # Buy side arbitrage
 
@@ -192,10 +193,11 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                     symbol,
                     order_side,
                     strategy,
-                    "eb",
+                    buy_order_identifier,
                 )
+                continue
 
-            elif buy_order["price"] != best_bid_maker:
+            if buy_order["price"] != best_bid_maker:
                 logger.debug("Order no longer at top of bids, replacing.")
 
                 buy_order = await generate_order_replace(
@@ -207,23 +209,31 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                     symbol,
                     order_side,
                     strategy,
-                    "eb",
+                    buy_order_identifier,
                 )
 
         # Arb conditions are gone
         else:
             if sell_order:
-                buy_cancellation: CancellationMessage = CancellationMessage(
+                await send_processor_cancellation(redis, strategy, sell_order_identifier)
+                logger.debug(
+                    "No more arb"
+                )
+                sell_order = None
+
+            if buy_order:
+                cancellation: CancellationMessage = CancellationMessage(
                     kind=MessageType.CANCELLATION,
-                    strategy=f"{strategy_identifier}es",
+                    strategy=f"{strategy_identifier}{sell_order_identifier}",
                     exchange=maker,
                     id="",
                     pair=symbol,
                 )
                 logger.debug(
-                    f"No more arb, cancellation was generated: {buy_cancellation}"
+                    f"No more arb, cancellation was generated: {cancellation}"
                 )
-                sell_order = None
+                buy_order = None
+
 
 async def main():
     pool = ConnectionPool(

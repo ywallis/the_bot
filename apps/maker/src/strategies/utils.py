@@ -15,10 +15,10 @@ logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
 
-async def send_processor_cancellation(redis: Redis, strategy: dict[str, str]):
+async def send_processor_cancellation(redis: Redis, strategy: dict[str, str], identifier: str):
     cancellation = CancellationMessage(
         kind=MessageType.CANCELLATION,
-        strategy=strategy["identifier"],
+        strategy=f"{strategy["identifier"]}{identifier}",
         exchange=strategy["maker_exchange"],
         id="",
         pair=strategy["symbol"],
@@ -152,7 +152,7 @@ async def generate_order_replace(
     else:
         logger.debug("Client may not be solvent, cancelling.")
 
-        await send_processor_cancellation(redis, strategy)
+        await send_processor_cancellation(redis, strategy, identifier)
         return None
 
 

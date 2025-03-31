@@ -22,9 +22,17 @@ async def test_single_edge_liquidity_order_no_replace(base_strategy: dict[str, s
     mocked_publish = AsyncMock()
     mock_redis.publish = mocked_publish
 
-    expected_cancellation = CancellationMessage(
+    expected_cancellation_1 = CancellationMessage(
         kind=MessageType.CANCELLATION,
-        strategy=base_strategy["identifier"],
+        strategy=f"{base_strategy["identifier"]}es",
+        exchange=base_strategy["maker_exchange"],
+        id="",
+        pair=base_strategy["symbol"],
+    )
+
+    expected_cancellation_2 = CancellationMessage(
+        kind=MessageType.CANCELLATION,
+        strategy=f"{base_strategy["identifier"]}eb",
         exchange=base_strategy["maker_exchange"],
         id="",
         pair=base_strategy["symbol"],
@@ -107,7 +115,11 @@ async def test_single_edge_liquidity_order_no_replace(base_strategy: dict[str, s
             [
                 call(
                     MESSAGE_PROCESSOR_CHANNEL,
-                    json.dumps(dict(expected_cancellation), default=str),
+                    json.dumps(dict(expected_cancellation_1), default=str),
+                ),
+                call(
+                    MESSAGE_PROCESSOR_CHANNEL,
+                    json.dumps(dict(expected_cancellation_2), default=str),
                 ),
                 call(
                     MESSAGE_PROCESSOR_CHANNEL,
@@ -127,9 +139,17 @@ async def test_single_edge_liquidity_order_replace_sell(base_strategy: dict[str,
     mocked_publish = AsyncMock()
     mock_redis.publish = mocked_publish
 
-    expected_cancellation = CancellationMessage(
+    expected_cancellation_1 = CancellationMessage(
         kind=MessageType.CANCELLATION,
-        strategy=base_strategy["identifier"],
+        strategy=f"{base_strategy["identifier"]}es",
+        exchange=base_strategy["maker_exchange"],
+        id="",
+        pair=base_strategy["symbol"],
+    )
+
+    expected_cancellation_2 = CancellationMessage(
+        kind=MessageType.CANCELLATION,
+        strategy=f"{base_strategy["identifier"]}eb",
         exchange=base_strategy["maker_exchange"],
         id="",
         pair=base_strategy["symbol"],
@@ -221,7 +241,11 @@ async def test_single_edge_liquidity_order_replace_sell(base_strategy: dict[str,
             [
                 call(
                     MESSAGE_PROCESSOR_CHANNEL,
-                    json.dumps(dict(expected_cancellation), default=str),
+                    json.dumps(dict(expected_cancellation_1), default=str),
+                ),
+                call(
+                    MESSAGE_PROCESSOR_CHANNEL,
+                    json.dumps(dict(expected_cancellation_2), default=str),
                 ),
                 call(
                     MESSAGE_PROCESSOR_CHANNEL,
@@ -240,9 +264,17 @@ async def test_single_edge_liquidity_order_replace_buy(base_strategy: dict[str, 
     mocked_publish = AsyncMock()
     mock_redis.publish = mocked_publish
 
-    expected_cancellation = CancellationMessage(
+    expected_cancellation_1 = CancellationMessage(
         kind=MessageType.CANCELLATION,
-        strategy=base_strategy["identifier"],
+        strategy=f"{base_strategy["identifier"]}es",
+        exchange=base_strategy["maker_exchange"],
+        id="",
+        pair=base_strategy["symbol"],
+    )
+
+    expected_cancellation_2 = CancellationMessage(
+        kind=MessageType.CANCELLATION,
+        strategy=f"{base_strategy["identifier"]}eb",
         exchange=base_strategy["maker_exchange"],
         id="",
         pair=base_strategy["symbol"],
@@ -334,7 +366,11 @@ async def test_single_edge_liquidity_order_replace_buy(base_strategy: dict[str, 
             [
                 call(
                     MESSAGE_PROCESSOR_CHANNEL,
-                    json.dumps(dict(expected_cancellation), default=str),
+                    json.dumps(dict(expected_cancellation_1), default=str),
+                ),
+                call(
+                    MESSAGE_PROCESSOR_CHANNEL,
+                    json.dumps(dict(expected_cancellation_2), default=str),
                 ),
                 call(
                     MESSAGE_PROCESSOR_CHANNEL,

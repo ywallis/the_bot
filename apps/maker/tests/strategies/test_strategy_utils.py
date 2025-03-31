@@ -27,13 +27,14 @@ async def test_send_processor_init_cancellation():
         "maker_exchange": "binance",
         "symbol": "BTC/USDT",
     }
+    order_identifier = "es"
 
-    await send_processor_cancellation(redis_mock, strategy)
+    await send_processor_cancellation(redis_mock, strategy, order_identifier)
     expected_message = json.dumps(
         dict(
             CancellationMessage(
                 kind=MessageType.CANCELLATION,
-                strategy=strategy["identifier"],
+                strategy=f"{strategy["identifier"]}{order_identifier}",
                 exchange=strategy["maker_exchange"],
                 id="",
                 pair=strategy["symbol"],
