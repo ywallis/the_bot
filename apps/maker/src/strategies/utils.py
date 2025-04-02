@@ -199,3 +199,15 @@ def maker_order_sizer(
         return max_maker_size
     else:
         return cumulative
+
+def within_percentage_range(x: float | Decimal, y: float | Decimal, percentage: float) -> bool:
+    """Function checks whether x is within a definable percentage range from y."""
+
+    if type(x) is not float:
+        x = float(x)
+    if type(y) is not float:
+        y = float(y)
+    lower_bound = y * (1 - percentage / 100)
+    upper_bound = y * (1 + percentage / 100)
+
+    return lower_bound <= x <= upper_bound

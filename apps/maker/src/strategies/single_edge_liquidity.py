@@ -13,6 +13,7 @@ from apps.maker.src.strategies.utils import (
     min_max_usd_converter,
     retrieve_ob_redis,
     send_processor_cancellation,
+    within_percentage_range,
 )
 from apps.maker.src.structs import OrderMessage
 from apps.maker.src.utils import load_config
@@ -154,14 +155,24 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                     sell_order_identifier,
                 )
 
+            elif not within_percentage_range(
+                sell_order["amount"], optimal_sell_size, 20
+            ):
+                logger.debug(
+                    "Order no longer within acceptable size range, cancelling."
+                )
+
+                sell_order = await send_processor_cancellation(
+                    redis, strategy, sell_order_identifier
+                )
+
         else:
             # Arb conditions are gone
             if sell_order:
-                await send_processor_cancellation(
+                sell_order = await send_processor_cancellation(
                     redis, strategy, sell_order_identifier
                 )
                 logger.debug("No more arb, cancellation was generated")
-                sell_order = None
 
         # Buy side arbitrage
 
@@ -212,14 +223,23 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                     buy_order_identifier,
                 )
 
+            elif not within_percentage_range(
+                buy_order["amount"], optimal_buy_size, 20
+            ):
+                logger.debug(
+                    "Order no longer within acceptable size range, cancelling."
+                )
+
+                buy_order = await send_processor_cancellation(
+                    redis, strategy, buy_order_identifier 
+                )
         else:
             # Arb conditions are gone
             if buy_order:
-                await send_processor_cancellation(
-                    redis, strategy, buy_order_identifier 
+                buy_order = await send_processor_cancellation(
+                    redis, strategy, buy_order_identifier
                 )
                 logger.debug("No more arb, cancellation was generated")
-                buy_order = None
 
 
 async def main():
