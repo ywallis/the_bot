@@ -171,7 +171,8 @@ from apps.maker.src.structs import CancellationMessage, OrderMessage
                 ),
             ],
         ),
-        # Test case 4: Two cancellations, one buy orders, a cancellation because of size variance
+        # Test case 4: Two cancellations, one buy orders, a cancellation 
+        # because of size variance
         (
             [
                 {"bids": [[39900, 1], [39899, 1]], "asks": [[60000, 1], [60001, 1]]},
@@ -179,7 +180,10 @@ from apps.maker.src.structs import CancellationMessage, OrderMessage
             ],  # maker OB
             [
                 {"bids": [[49900, 1], [49899, 1]], "asks": [[50000, 1], [50001, 1]]},
-                {"bids": [[49900, 0.01], [49899, 1]], "asks": [[50000, 0.01], [50001, 1]]},
+                {
+                    "bids": [[49900, 0.01], [49899, 1]],
+                    "asks": [[50000, 0.01], [50001, 1]],
+                },
             ],  # taker OB
             [
                 CancellationMessage(
@@ -233,6 +237,101 @@ from apps.maker.src.structs import CancellationMessage, OrderMessage
                     exchange="maker",
                     id="",
                     pair="BTC/USDT",
+                ),
+            ],
+        ),
+        # Test case 5: Two cancellations, one buy/sell order, cancellations 
+        # because of size variance and a new set of order
+        (
+            [
+                {"bids": [[39900, 1], [39899, 1]], "asks": [[60000, 1], [60001, 1]]},
+                {"bids": [[39900, 1], [39899, 1]], "asks": [[60000, 1], [60001, 1]]},
+                {"bids": [[39900, 1], [39899, 1]], "asks": [[60000, 1], [60001, 1]]},
+            ],  # maker OB
+            [
+                {"bids": [[49900, 1], [49899, 1]], "asks": [[50000, 1], [50001, 1]]},
+                {
+                    "bids": [[49900, 0.1], [49899, 1]],
+                    "asks": [[50000, 0.1], [50001, 1]],
+                },
+                {"bids": [[49900, 1], [49899, 1]], "asks": [[50000, 1], [50001, 1]]},
+            ],  # taker OB
+            [
+                CancellationMessage(
+                    kind=MessageType.CANCELLATION,
+                    strategy="test_strategyes",
+                    exchange="maker",
+                    id="",
+                    pair="BTC/USDT",
+                ),
+                CancellationMessage(
+                    kind=MessageType.CANCELLATION,
+                    strategy="test_strategyeb",
+                    exchange="maker",
+                    id="",
+                    pair="BTC/USDT",
+                ),
+                OrderMessage(
+                    kind=MessageType.ORDER,
+                    strategy="test_strategyes",
+                    exchange="maker",
+                    id="t-0_test_strategyes",
+                    exchange_id="_",
+                    pair="BTC/USDT",
+                    side=OrderSide.SELL,
+                    order_type=OrderType.REPLACE,
+                    price=Decimal(60000),
+                    amount=Decimal(2),
+                ),
+                OrderMessage(
+                    kind=MessageType.ORDER,
+                    strategy="test_strategyeb",
+                    exchange="maker",
+                    id="t-0_test_strategyeb",
+                    exchange_id="_",
+                    pair="BTC/USDT",
+                    side=OrderSide.BUY,
+                    order_type=OrderType.REPLACE,
+                    price=Decimal(39900),
+                    amount=Decimal(2),
+                ),
+                CancellationMessage(
+                    kind=MessageType.CANCELLATION,
+                    strategy="test_strategyes",
+                    exchange="maker",
+                    id="",
+                    pair="BTC/USDT",
+                ),
+                CancellationMessage(
+                    kind=MessageType.CANCELLATION,
+                    strategy="test_strategyeb",
+                    exchange="maker",
+                    id="",
+                    pair="BTC/USDT",
+                ),
+                OrderMessage(
+                    kind=MessageType.ORDER,
+                    strategy="test_strategyes",
+                    exchange="maker",
+                    id="t-0_test_strategyes",
+                    exchange_id="_",
+                    pair="BTC/USDT",
+                    side=OrderSide.SELL,
+                    order_type=OrderType.REPLACE,
+                    price=Decimal(60000),
+                    amount=Decimal(2),
+                ),
+                OrderMessage(
+                    kind=MessageType.ORDER,
+                    strategy="test_strategyeb",
+                    exchange="maker",
+                    id="t-0_test_strategyeb",
+                    exchange_id="_",
+                    pair="BTC/USDT",
+                    side=OrderSide.BUY,
+                    order_type=OrderType.REPLACE,
+                    price=Decimal(39900),
+                    amount=Decimal(2),
                 ),
             ],
         ),
