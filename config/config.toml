@@ -1,6 +1,6 @@
 [[strategies]]
 symbol = "ALPH/USDT"
-type = "liquidity_arb"
+type = "single_edge_liquidity"
 identifier = "la"
 taker_exchange = "gate"
 maker_exchange = "mexc"

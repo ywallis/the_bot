@@ -2,10 +2,9 @@ import asyncio
 import logging
 
 # from datetime import UTC, datetime, timedelta
-from redis.asyncio import ConnectionPool, Redis
+from redis.asyncio import Redis
 
 import apps.maker.src.logging_config as logging_config
-from apps.maker.src.constants import REDIS_HOSTNAME, REDIS_PORT
 from apps.maker.src.enums import OrderSide
 from apps.maker.src.strategies.utils import (
     generate_order_replace,
@@ -16,14 +15,11 @@ from apps.maker.src.strategies.utils import (
     within_percentage_range,
 )
 from apps.maker.src.structs import OrderMessage
-from apps.maker.src.utils import load_config
 
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
 # TODO:
-# - Some kind of parser / strategy selector
-# - A separation between strategy launcher and strategy itself?
 # - Consider which throttling systems still make sense
 # - Make sure all values put into redis follow the format I want
 
@@ -219,15 +215,13 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                     buy_order_identifier,
                 )
 
-            elif not within_percentage_range(
-                buy_order["amount"], optimal_buy_size, 20
-            ):
+            elif not within_percentage_range(buy_order["amount"], optimal_buy_size, 20):
                 logger.debug(
                     "Order no longer within acceptable size range, cancelling."
                 )
 
                 buy_order = await send_processor_cancellation(
-                    redis, strategy, buy_order_identifier 
+                    redis, strategy, buy_order_identifier
                 )
         else:
             # Arb conditions are gone
@@ -236,21 +230,3 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                     redis, strategy, buy_order_identifier
                 )
                 logger.debug("No more arb, cancellation was generated")
-
-
-async def main():
-    pool = ConnectionPool(
-        host=REDIS_HOSTNAME, port=REDIS_PORT, db=0, max_connections=20
-    )
-    redis = Redis(decode_responses=True, connection_pool=pool)
-    config = load_config()
-    strategies = config.get("strategies")
-
-    if not strategies:
-        raise Exception("Could not find any valid strategy")
-
-    await single_edge_liquidity(redis, strategies[0])
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
