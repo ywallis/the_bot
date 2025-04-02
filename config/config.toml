@@ -6,7 +6,7 @@ taker_exchange = "gate"
 maker_exchange = "mexc"
 spread = 1.002
 min_size_usdt = 10
-max_size_usdt = 80
+max_size_usdt = 11
 
 [[exchanges]]
 name = "Gate.io"

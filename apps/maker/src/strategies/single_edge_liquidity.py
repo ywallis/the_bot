@@ -117,7 +117,7 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
 
             # If the flag for an existing sell is false, create a sell order at the bottom ask.
 
-            if not sell_order:
+            if sell_order is None:
                 logger.debug("Sell does not exist yet.")
 
                 sell_order = await generate_order_replace(
@@ -185,7 +185,7 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
 
             # If the flag for an existing sell is false, create a sell order at the bottom ask.
 
-            if not buy_order:
+            if buy_order is None:
                 logger.debug("Buy does not exist yet.")
 
                 buy_order = await generate_order_replace(
