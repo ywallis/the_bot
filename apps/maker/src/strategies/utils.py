@@ -25,11 +25,13 @@ async def send_processor_cancellation(redis: Redis, strategy: dict[str, str], id
     )
     flattened = json.dumps(dict(cancellation), default=str)
     await redis.publish(MESSAGE_PROCESSOR_CHANNEL, flattened)
+    logger.info(f"Cancelation was sent: {cancellation}")
 
 
 async def send_processor_order(redis: Redis, order: OrderMessage):
     flattened = json.dumps(dict(order), default=str)
     await redis.publish(MESSAGE_PROCESSOR_CHANNEL, flattened)
+    logger.info(f"Order was sent: {order}")
 
 
 def min_max_usd_converter(
