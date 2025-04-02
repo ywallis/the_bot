@@ -335,6 +335,71 @@ from apps.maker.src.structs import CancellationMessage, OrderMessage
                 ),
             ],
         ),
+        # Test case 6: Arb disappears after one iteration 
+        (
+            [
+                {"bids": [[39900, 1], [39899, 1]], "asks": [[60000, 1], [60001, 1]]},
+                {"bids": [[49900, 1], [49899, 1]], "asks": [[50000, 1], [50001, 1]]},
+            ],  # maker OB
+            [
+                {"bids": [[49900, 1], [49899, 1]], "asks": [[50000, 1], [50001, 1]]},
+                {"bids": [[49900, 1], [49899, 1]], "asks": [[50000, 1], [50001, 1]]},
+            ],  # taker OB
+            [
+                CancellationMessage(
+                    kind=MessageType.CANCELLATION,
+                    strategy="test_strategyes",
+                    exchange="maker",
+                    id="",
+                    pair="BTC/USDT",
+                ),
+                CancellationMessage(
+                    kind=MessageType.CANCELLATION,
+                    strategy="test_strategyeb",
+                    exchange="maker",
+                    id="",
+                    pair="BTC/USDT",
+                ),
+                OrderMessage(
+                    kind=MessageType.ORDER,
+                    strategy="test_strategyes",
+                    exchange="maker",
+                    id="t-0_test_strategyes",
+                    exchange_id="_",
+                    pair="BTC/USDT",
+                    side=OrderSide.SELL,
+                    order_type=OrderType.REPLACE,
+                    price=Decimal(60000),
+                    amount=Decimal(2),
+                ),
+                OrderMessage(
+                    kind=MessageType.ORDER,
+                    strategy="test_strategyeb",
+                    exchange="maker",
+                    id="t-0_test_strategyeb",
+                    exchange_id="_",
+                    pair="BTC/USDT",
+                    side=OrderSide.BUY,
+                    order_type=OrderType.REPLACE,
+                    price=Decimal(39900),
+                    amount=Decimal(2),
+                ),
+                CancellationMessage(
+                    kind=MessageType.CANCELLATION,
+                    strategy="test_strategyes",
+                    exchange="maker",
+                    id="",
+                    pair="BTC/USDT",
+                ),
+                CancellationMessage(
+                    kind=MessageType.CANCELLATION,
+                    strategy="test_strategyeb",
+                    exchange="maker",
+                    id="",
+                    pair="BTC/USDT",
+                ),
+            ],
+        ),
     ],
 )
 async def test_single_edge_liquidity_order(
