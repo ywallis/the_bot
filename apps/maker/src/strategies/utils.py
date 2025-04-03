@@ -26,6 +26,7 @@ async def send_processor_cancellation(redis: Redis, strategy: dict[str, str], id
     flattened = json.dumps(dict(cancellation), default=str)
     await redis.publish(MESSAGE_PROCESSOR_CHANNEL, flattened)
     logger.info(f"Cancelation was sent: {cancellation}")
+    return None
 
 
 async def send_processor_order(redis: Redis, order: OrderMessage):

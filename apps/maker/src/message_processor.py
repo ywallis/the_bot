@@ -259,6 +259,7 @@ class MessageProcessor:
             if message["type"] == "message":
                 data = parse_message(message["data"])
 
+                logger.info(f"Received {data} via redis")
                 task = asyncio.create_task(self.process_message(data))
                 self.tasks.append(task)
 
