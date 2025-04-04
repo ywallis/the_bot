@@ -34,7 +34,7 @@ async def test_send_processor_init_cancellation():
         dict(
             CancellationMessage(
                 kind=MessageType.CANCELLATION,
-                strategy=f"{strategy["identifier"]}{order_identifier}",
+                strategy=f"{strategy["identifier"]}_{order_identifier}",
                 exchange=strategy["maker_exchange"],
                 id="",
                 pair=strategy["symbol"],

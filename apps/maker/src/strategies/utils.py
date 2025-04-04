@@ -15,10 +15,12 @@ logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
 
-async def send_processor_cancellation(redis: Redis, strategy: dict[str, str], identifier: str):
+async def send_processor_cancellation(
+    redis: Redis, strategy: dict[str, str], identifier: str
+):
     cancellation = CancellationMessage(
         kind=MessageType.CANCELLATION,
-        strategy=f"{strategy["identifier"]}{identifier}",
+        strategy=f"{strategy['identifier']}_{identifier}",
         exchange=strategy["maker_exchange"],
         id="",
         pair=strategy["symbol"],
@@ -134,12 +136,14 @@ async def generate_order_replace(
         sell_client_id = taker_id
         buy_client_id = maker_id
 
-    if await check_if_solvent(redis, buy_client_id, sell_client_id, price, amount, pair):
+    if await check_if_solvent(
+        redis, buy_client_id, sell_client_id, price, amount, pair
+    ):
         order = OrderMessage(
             kind=MessageType.ORDER,
-            strategy=f"{strategy["identifier"]}{identifier}",
+            strategy=f"{strategy['identifier']}_{identifier}",
             exchange=maker_id,
-            id=f"t-{order_time()}_{strategy["identifier"]}{identifier}",
+            id=f"t-{order_time()}_{strategy['identifier']}_{identifier}",
             exchange_id="_",
             pair=pair,
             side=side,
@@ -157,16 +161,6 @@ async def generate_order_replace(
 
         await send_processor_cancellation(redis, strategy, identifier)
         return None
-
-
-async def update_and_send_order_values(
-    redis: Redis, order: OrderMessage, amount: float, price: float
-):
-    order["amount"] = Decimal(amount)
-    order["price"] = Decimal(price)
-    order["id"] = f"t-{order_time()}_{order['strategy']}"
-    await send_processor_order(redis, order)
-    logger.debug(f"Order was updated and sent: {order}")
 
 
 def maker_order_sizer(
@@ -203,7 +197,10 @@ def maker_order_sizer(
     else:
         return cumulative
 
-def within_percentage_range(x: float | Decimal, y: float | Decimal, percentage: float) -> bool:
+
+def within_percentage_range(
+    x: float | Decimal, y: float | Decimal, percentage: float
+) -> bool:
     """Function checks whether x is within a definable percentage range from y."""
 
     if type(x) is not float:

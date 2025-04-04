@@ -35,11 +35,12 @@ async def watch_orders(client: CustomExchange, ticker: str):
     while True:
         try:
             orders = await client.watch_orders(ticker, since=timestamp)
-            orders_copy = copy.deepcopy(orders)
+            # orders_copy = copy.deepcopy(orders)
 
-            for order in orders_copy:
-                logger.info(f"Processing orders from {client.name}")
-                logger.info(order)
+            # for order in orders_copy:
+            for order in orders:
+                logger.debug(f"Processing orders from {client.name}")
+                logger.debug(order)
 
                 order_copy = copy.deepcopy(order)
 
