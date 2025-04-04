@@ -115,7 +115,34 @@ async def retrieve_ob_redis(redis_instance: Redis, key: str):
 def order_time() -> str:
     """Creates a datetime-based stamp to make unique and custom order numbers."""
 
-    return datetime.now().strftime("%y%m%d_%H%M%S_%f")
+    return datetime.now().strftime("%y%m%d%H%M%S%f")
+
+def generate_oid(strategy_identifier: str, order_identifier: str) -> str:
+    
+    return f"t-{order_time()}_{strategy_identifier}_{order_identifier}"
+
+def generate_order(
+    maker_id: str,
+    price: float,
+    amount: float,
+    pair: str,
+    side: OrderSide,
+    strategy: dict[str, str],
+    identifier: str,
+) -> OrderMessage:
+    order = OrderMessage(
+        kind=MessageType.ORDER,
+        strategy=f"{strategy['identifier']}_{identifier}",
+        exchange=maker_id,
+        id=generate_oid(strategy["identifier"], identifier),
+        exchange_id="_",
+        pair=pair,
+        side=side,
+        order_type=OrderType.REPLACE,
+        price=Decimal(price),
+        amount=Decimal(amount),
+    )
+    return order
 
 
 async def generate_order_replace(
@@ -139,17 +166,8 @@ async def generate_order_replace(
     if await check_if_solvent(
         redis, buy_client_id, sell_client_id, price, amount, pair
     ):
-        order = OrderMessage(
-            kind=MessageType.ORDER,
-            strategy=f"{strategy['identifier']}_{identifier}",
-            exchange=maker_id,
-            id=f"t-{order_time()}_{strategy['identifier']}_{identifier}",
-            exchange_id="_",
-            pair=pair,
-            side=side,
-            order_type=OrderType.REPLACE,
-            price=Decimal(price),
-            amount=Decimal(amount),
+        order = generate_order(
+            maker_id, price, amount, pair, side, strategy, identifier
         )
 
         await send_processor_order(redis, order)

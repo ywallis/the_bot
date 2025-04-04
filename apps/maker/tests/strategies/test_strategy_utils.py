@@ -6,9 +6,10 @@ import pytest
 from redis.asyncio import Redis
 
 from apps.maker.src.constants import MESSAGE_PROCESSOR_CHANNEL
-from apps.maker.src.enums import MessageType, OrderSide, OrderType
+from apps.maker.src.enums import MessageType, OidComponent, OrderSide, OrderType
 from apps.maker.src.strategies.utils import (
     check_if_solvent,
+    generate_oid,
     maker_order_sizer,
     min_max_usd_converter,
     order_time,
@@ -16,7 +17,16 @@ from apps.maker.src.strategies.utils import (
     send_processor_order,
 )
 from apps.maker.src.structs import CancellationMessage, OrderMessage
+from apps.maker.src.utils import info_from_oid
 
+
+def test_info_from_oid():
+
+    oid = generate_oid("la", "es") 
+    
+    assert info_from_oid(oid, OidComponent.TIME).startswith("2")
+    assert info_from_oid(oid, OidComponent.STRATEGY) == "la"
+    assert info_from_oid(oid, OidComponent.ORDER) == "es"
 
 @pytest.mark.asyncio
 async def test_send_processor_init_cancellation():

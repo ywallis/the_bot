@@ -26,3 +26,11 @@ class OrderType(Enum):
 
     def __str__(self):
         return self.value
+
+class OidComponent(Enum):
+    TIME = "time"
+    STRATEGY = "strategy"
+    ORDER = "order"
+
+    def __str__(self):
+        return self.value
