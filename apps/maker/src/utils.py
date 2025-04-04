@@ -15,6 +15,9 @@ import json
 def info_from_oid(oid: str, desired_component: OidComponent) -> str:
     components = oid.split("-")[1].split("_")
 
+    if len(components) != 3:
+        raise Exception("Invalid OID!")
+
     match desired_component:
         case OidComponent.TIME:
             return components[0]
