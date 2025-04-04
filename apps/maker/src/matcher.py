@@ -65,10 +65,10 @@ async def watch_orders(client: CustomExchange, ticker: str):
                 # asyncio.create_task(
                 #     process_order_update(taker_client, order_copy)
                 # )
-            else:
-                logger.warning(
-                    f"The order no {order_copy['id']} tried getting matched multiple times."
-                )
+                else:
+                    logger.warning(
+                        f"The order no {order_copy['id']} tried getting matched multiple times."
+                    )
 
         except Exception as e:
             logger.error(f"Error in client loop {e}")

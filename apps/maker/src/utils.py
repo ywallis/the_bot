@@ -11,18 +11,17 @@ from apps.maker.src.structs import (
 from decimal import Decimal
 import json
 
+
 def info_from_oid(oid: str, desired_component: OidComponent) -> str:
-    
     components = oid.split("-")[1].split("_")
 
     match desired_component:
         case OidComponent.TIME:
-           return components[0] 
+            return components[0]
         case OidComponent.STRATEGY:
-           return components[1] 
+            return components[1]
         case OidComponent.ORDER:
-           return components[2] 
-    
+            return components[2]
 
 
 def load_config():

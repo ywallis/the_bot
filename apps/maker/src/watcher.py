@@ -16,14 +16,15 @@ logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
 config = load_config()
-pairs = set()
+exchange_and_pair: set[tuple[str, str]] = set()
 
 strategies = config.get("strategies")
 if strategies is None:
     raise Exception("No strategy found")
 for strategy in strategies:
 
-    pairs.add(strategy["symbol"])
+    exchange_and_pair.add((strategy["taker_exchange"], strategy["symbol"]))
+    exchange_and_pair.add((strategy["maker_exchange"], strategy["symbol"]))
 
 
 async def watch_ob(client: CustomExchange, ticker: str, redis: Redis):
@@ -35,14 +36,14 @@ async def watch_ob(client: CustomExchange, ticker: str, redis: Redis):
         await redis.set(f"{ticker}-{client.id}", json.dumps(order_book))
 
 
-async def main(tickers: set[str], clients: dict[str, CustomExchange]):
+async def main(config_tuples: set[tuple[str, str]], clients: dict[str, CustomExchange]):
     pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=20)
     redis = Redis(decode_responses=True, connection_pool=pool)
 
     await asyncio.gather(
-        *[watch_ob(client, ticker, redis) for client in clients.values() for ticker in tickers],
+            *[watch_ob(clients[tup[0]], tup[1], redis) for tup in config_tuples]
     )
 
 
 if __name__ == "__main__":
-    asyncio.run(main(pairs, authenticated_clients))
+    asyncio.run(main(exchange_and_pair, authenticated_clients))
