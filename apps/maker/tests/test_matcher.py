@@ -1,59 +1,116 @@
-import pytest
 import asyncio
-from unittest.mock import AsyncMock, patch, MagicMock
+from decimal import Decimal
+import json
+from unittest.mock import AsyncMock
+
+import pytest
+
+from apps.maker.src.constants import MESSAGE_PROCESSOR_CHANNEL
+from apps.maker.src.enums import MessageType, OrderSide, OrderType
 from apps.maker.src.matcher import watch_orders
-from apps.maker.src.structs import CustomExchange
+from apps.maker.src.structs import CustomExchange, OrderMessage
 
 
 @pytest.mark.asyncio
-async def test_watch_orders_processes_and_skips_orders():
-    mock_client = MagicMock(spec=CustomExchange)
-    mock_client.name = "binance"
-    ticker = "BTC/USDT"
-    should_match = {"strategy123": "coinbase"}
+async def test_watch_orders_various_order_states():
+    # AsyncMock for redis
+    redis = AsyncMock()
 
-    valid_order = {
-        "id": "123",
-        "status": "closed",
-        "filled": 1,
-        "clientOrderId": "t-some_strategy123_oid",
+    # Create a mock CustomExchange client
+    client = AsyncMock(spec=CustomExchange)
+    client.name = "binance"
+
+    expected_matching_order = OrderMessage(
+        kind=MessageType.ORDER,
+        strategy="matching",
+        exchange="coinbase",
+        id="t-prefix_strategy123_suffix",
+        exchange_id="_",
+        pair="BTC/USDT",
+        side=OrderSide.SELL,
+        order_type=OrderType.MARKET,
+        price=Decimal(50000),
+        amount=Decimal("0.01"),
+    )
+    # Configure the mock's watch_orders method to return a mix of orders
+    client.watch_orders.side_effect = [
+        [
+            # ✅ Valid order
+            {
+                "id": "order-1",
+                "clientOrderId": "t-prefix_strategy123_suffix",
+                "symbol": "BTC/USDT",
+                "price": "50000",
+                "amount": "0.01",
+                "filled": "0.01",
+                "side": "buy",
+                "status": "closed",
+            },
+            #  Unfilled order
+            {
+                "id": "order-2",
+                "clientOrderId": "t-prefix_strategy123_suffix",
+                "symbol": "BTC/USDT",
+                "price": "50000",
+                "amount": "0.01",
+                "filled": "0.0",
+                "side": "buy",
+                "status": "closed",
+            },
+            #  Status is open
+            {
+                "id": "order-3",
+                "clientOrderId": "t-prefix_strategy123_suffix",
+                "symbol": "BTC/USDT",
+                "price": "50000",
+                "amount": "0.01",
+                "filled": "0.01",
+                "side": "buy",
+                "status": "open",
+            },
+            #  Unknown strategy
+            {
+                "id": "order-4",
+                "clientOrderId": "t-prefix_unknownStrategy_suffix",
+                "symbol": "BTC/USDT",
+                "price": "50000",
+                "amount": "0.01",
+                "filled": "0.01",
+                "side": "buy",
+                "status": "closed",
+            },
+            #  Duplicate valid order
+            {
+                "id": "order-1",
+                "clientOrderId": "t-prefix_strategy123_suffix",
+                "symbol": "BTC/USDT",
+                "price": "50000",
+                "amount": "0.01",
+                "filled": "0.01",
+                "side": "buy",
+                "status": "closed",
+            },
+        ],
+        asyncio.CancelledError("stop test loop"),  # force loop exit
+    ]
+
+    should_match = {
+        "strategy123": "coinbase"
     }
-    unfilled_order = {
-        "id": "124",
-        "status": "open",
-        "filled": 0,
-        "clientOrderId": "t-time_unrelated_oid",
-    }
-    unknown_strategy_order = {
-        "id": "125",
-        "status": "closed",
-        "filled": 1,
-        "clientOrderId": "t-unknown_strategy_oid",
-    }
 
-    # Mock the watch_orders call to return our list, then raise CancelledError to stop the loop
-    call_count = 0
+    # Launch the watcher
+    task = asyncio.create_task(watch_orders(redis, client, "BTC/USDT", should_match))
 
-    async def fake_watch_orders_once(*_args, **_kwargs):
-        nonlocal call_count
-        if call_count == 0:
-            call_count += 1
-            return [valid_order, unfilled_order, unknown_strategy_order]
-        else:
-            raise asyncio.CancelledError()
+    # Let the watcher run briefly
+    await asyncio.sleep(0.1)
+    task.cancel()
 
-    mock_client.watch_orders = AsyncMock(side_effect=fake_watch_orders_once)
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
-    with patch(
-        "apps.maker.src.matcher.process_order_update", new_callable=AsyncMock
-    ) as mock_process:
-        with pytest.raises(asyncio.CancelledError):
-            await watch_orders(mock_client, ticker, should_match)
-
-        await asyncio.sleep(0.1)
-        # ✅ Ensure only valid order triggered the update
-        mock_process.assert_awaited_once()
-        args, kwargs = mock_process.call_args
-        assert args[0] == "coinbase"
-        assert args[1]["id"] == "123"
-        assert args[1] == valid_order 
+    # Check publish was only called for the valid, non-duplicate order
+    redis.publish.assert_called_once()
+    channel, message = redis.publish.call_args[0]
+    assert channel == MESSAGE_PROCESSOR_CHANNEL
+    assert '"exchange": "coinbase"' in message
+    assert message == json.dumps(dict(expected_matching_order), default=str)
