@@ -102,6 +102,9 @@ async def watch_orders(
             if strategy_identifier not in should_match:
                 logger.debug(f"Order did not meet match conditions: {order_copy}")
                 continue
+            if should_match[strategy_identifier] == client.id:
+                logger.debug("Cannot match self.")
+                continue
             if order_copy.get("clientOrderId") not in recently_processed_orders:
                 recently_processed_orders.add(order_copy.get("clientOrderId"))
                 asyncio.create_task(
