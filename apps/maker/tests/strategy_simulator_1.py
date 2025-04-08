@@ -61,9 +61,9 @@ cancellation_2: dict[str, str] = {
 
 order_3 = OrderMessage(
     kind=MessageType.ORDER,
-    strategy="ALPH_eb",
+    strategy="ALPH_es",
     exchange="bitget",
-    id=f"bitget_{datetime.now()::%M:%S:%f}",
+    id=f"t-{datetime.now()::%M:%S:%f}_ALPH_es",
     exchange_id="_",
     pair="ALPH/USDT",
     side=OrderSide.SELL,
@@ -82,9 +82,9 @@ cancellation_3 = CancellationMessage(
 
 order_4 = OrderMessage(
     kind=MessageType.ORDER,
-    strategy="ALPH_eb",
+    strategy="ALPH_es",
     exchange="bitget",
-    id=f"bitget_{datetime.now()::%M:%S:%f}",
+    id=f"t-{datetime.now()::%M:%S:%f}_ALPH_es",
     exchange_id="_",
     pair="ALPH/USDT",
     side=OrderSide.SELL,

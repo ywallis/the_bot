@@ -38,7 +38,7 @@ class CustomExchange(Protocol):
     id: str
 
     async def create_order(
-        self, symbol: str, type: str, side: str, amount: float, price: float
+        self, symbol: str, type: str, side: str, amount: float, price: float, params={}
     ) -> dict: ...
     async def cancel_order(self, id: str, symbol: str) -> dict: ...
 

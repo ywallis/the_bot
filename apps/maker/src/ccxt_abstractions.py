@@ -67,6 +67,7 @@ async def create_and_return_order(order: OrderMessage, client: CustomExchange):
                 side=order["side"].value,
                 amount=float(order["amount"]),
                 price=float(order["price"]),
+                params={"clientOrderId": order["id"]}
             )
 
         except RequestTimeout as e:

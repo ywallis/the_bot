@@ -5,7 +5,7 @@ identifier = "lab"
 taker_exchange = "gate"
 maker_exchange = "bitget"
 should_match = true
-spread = 1.002
+spread = 1.0025
 min_size_usdt = 10
 max_size_usdt = 11
 
