@@ -37,19 +37,21 @@ async def process_order_update(
     if price * quantity <= 3:
         quantity = 3.1 / float(order["price"])
 
-    if side == OrderSide.SELL:
+    # if side == OrderSide.SELL:
+    if side == "sell":
         if matching_client_id == "gate":
             fee_ratio = 1 / (1 - gate_fee)
 
-            quantity = round(quantity * fee_ratio, 2)
+            quantity = round(quantity * fee_ratio, 3)
+            print("QQQQ", quantity)
 
-    await send_match_order(redis, matching_client_id, order)
+    await send_match_order(redis, matching_client_id, order, quantity)
 
 
 async def send_match_order(
-    redis: Redis, matching_client_id: str, order: dict[str, str]
+    redis: Redis, matching_client_id: str, order: dict[str, str], adjusted_quantity: float
 ):
-    if order["side"] == OrderSide.SELL:
+    if order["side"] == "sell":
         side = OrderSide.BUY
     else:
         side = OrderSide.SELL
@@ -64,7 +66,7 @@ async def send_match_order(
         side=side,
         order_type=OrderType.MARKET,
         price=Decimal(order["price"]),
-        amount=Decimal(order["amount"]),
+        amount=Decimal(adjusted_quantity).quantize(Decimal("0.0000")),
     )
 
     flattened = json.dumps(dict(matching_order), default=str)
