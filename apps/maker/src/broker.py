@@ -41,6 +41,7 @@ async def fetch_all_open(clients: dict[str, CustomExchange]) -> OrderBatchMessag
             orders = await client.fetch_open_orders(symbol)
             for order in orders:
                 all_orders.append(order_from_ccxt(order, name))
+    logger.debug(f"Orders were retrieved from exchanges: {all_orders}")
 
     return OrderBatchMessage(
         kind=MessageType.ORDERBATCH,

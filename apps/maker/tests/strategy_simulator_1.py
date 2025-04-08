@@ -12,8 +12,8 @@ order_no: int = 0
 
 order_1: dict[str, str] = {
     "kind": "order",
-    "strategy": "ALPH_gate",
-    "exchange": "gate",
+    "strategy": "ALPH",
+    "exchange": "bitget",
     "id": f"gate_{datetime.now():%M:%S:%f}",
     "exchange_id": "_",
     "pair": "ALPH/USDT",
@@ -25,8 +25,8 @@ order_1: dict[str, str] = {
 
 cancellation_1: dict[str, str] = {
     "kind": "cancellation",
-    "strategy": "ALPH_gate",
-    "exchange": "gate",
+    "strategy": "ALPH",
+    "exchange": "bitget",
     "id": order_1['id'],
     "pair": "ALPH/USDT",
 }
