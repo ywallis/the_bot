@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 
 # from datetime import UTC, datetime, timedelta
 from redis.asyncio import Redis
@@ -49,6 +50,11 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
     await send_processor_cancellation(redis, strategy, buy_order_identifier)
 
     while watching:
+        
+        # Simple throttle
+
+        time.sleep(0.01)
+
         batch = asyncio.gather(
             retrieve_ob_redis(redis, f"{symbol}-{maker}"),
             retrieve_ob_redis(redis, f"{symbol}-{taker}"),
