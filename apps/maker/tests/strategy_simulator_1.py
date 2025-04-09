@@ -95,7 +95,7 @@ order_4 = OrderMessage(
 
 cancellation_4 = CancellationMessage(
     kind=MessageType.CANCELLATION,
-    strategy="ALPH_eb",
+    strategy="ALPH_es",
     exchange="bitget",
     id=order_3["id"],
     pair="ALPH/USDT",

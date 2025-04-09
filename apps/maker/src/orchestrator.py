@@ -63,8 +63,8 @@ if __name__ == "__main__":
     # Start unique processes immediately
     processes = [(cmd, launch_process(cmd)) for cmd in PROCESS_LIST]
 
-    # Wait 10 seconds before launching strategy processes
-    time.sleep(30)
+    # Wait 1 min before launching strategy processes
+    time.sleep(60)
     logger.info("Starting strategy processes after delay...")
 
     # Start strategy processes after delay
