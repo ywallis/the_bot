@@ -17,15 +17,17 @@ logger = logging.getLogger(__name__)
 async def fetch_balance(client: CustomExchange, redis: Redis):
     balance = await client.fetch_balance()
     logger.debug(f"Balances on {client.name} are {balance}")
-    print(balance)
     await redis.set(f"balance-{client.id}", json.dumps(balance))
 
 async def watch_balance(client: CustomExchange, redis: Redis):
     while True:
-        balance = await client.watch_balance()
-        logger.debug(f"Balances on {client.name} are {balance}")
-        print(balance)
-        await redis.set(f"balance-{client.id}", json.dumps(balance))
+        try:
+            balance = await client.watch_balance()
+            logger.debug(f"Balances on {client.name} are {balance}")
+            await redis.set(f"balance-{client.id}", json.dumps(balance))
+        except Exception as e:
+            logger.error(f"Error in watch_balance for client {client.id}: {e}")
+            raise
 
 
 async def main(clients: dict[str, CustomExchange]):
@@ -36,10 +38,13 @@ async def main(clients: dict[str, CustomExchange]):
     await asyncio.gather(
         *[fetch_balance(client, redis) for client in clients.values()],
     )
-
-    await asyncio.gather(
-        *[watch_balance(client, redis) for client in clients.values()],
-    )
+    try:
+        await asyncio.gather(
+            *[watch_balance(client, redis) for client in clients.values()],
+        )
+    finally:
+        for client in clients.values():
+            await client.close()
 
 
 if __name__ == "__main__":

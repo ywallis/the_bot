@@ -1,5 +1,4 @@
 from decimal import Decimal
-import time
 from redis import Redis
 import json
 from datetime import datetime
@@ -10,7 +9,7 @@ from apps.maker.src.constants import (
     REDIS_PORT,
 )
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
-from apps.maker.src.structs import CancellationMessage, OrderMessage
+from apps.maker.src.structs import OrderMessage
 
 r: Redis = Redis(host=REDIS_HOSTNAME, port=REDIS_PORT, decode_responses=True)
 
