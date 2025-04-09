@@ -7,6 +7,7 @@ from redis.asyncio import ConnectionPool, Redis
 
 import apps.maker.src.logging_config as logging_config
 from apps.maker.src.exchange_clients import authenticated_clients
+from apps.maker.src.errors import NetworkError
 from apps.maker.src.structs import CustomExchange
 from apps.maker.src.utils import load_config
 
@@ -22,27 +23,39 @@ strategies = config.get("strategies")
 if strategies is None:
     raise Exception("No strategy found")
 for strategy in strategies:
-
     exchange_and_pair.add((strategy["taker_exchange"], strategy["symbol"]))
     exchange_and_pair.add((strategy["maker_exchange"], strategy["symbol"]))
 
 
 async def watch_ob(client: CustomExchange, ticker: str, redis: Redis):
     while True:
-        order_book = await client.watch_order_book(ticker)
-        logger.debug(
-            f"{datetime.now()} Bid {order_book['bids'][0][0]} and ask {order_book['asks'][0][0]} on {client.name}"
-        )
-        await redis.set(f"{ticker}-{client.id}", json.dumps(order_book))
+        try:
+            order_book = await client.watch_order_book(ticker)
+            logger.debug(
+                f"{datetime.now()} Bid {order_book['bids'][0][0]} and ask {order_book['asks'][0][0]} on {client.name}"
+            )
+            await redis.set(f"{ticker}-{client.id}", json.dumps(order_book))
+        except NetworkError as e:
+            logger.error(
+                f" Ignoring NetworkError in watch_balance for client {client.id}: {e}"
+            )
+        except Exception as e:
+            logger.error(f"Error in watch_balance for client {client.id}: {e}")
+            raise
 
 
 async def main(config_tuples: set[tuple[str, str]], clients: dict[str, CustomExchange]):
     pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=20)
     redis = Redis(decode_responses=True, connection_pool=pool)
 
-    await asyncio.gather(
+    try:
+        await asyncio.gather(
             *[watch_ob(clients[tup[0]], tup[1], redis) for tup in config_tuples]
-    )
+        )
+
+    finally:
+        for client in clients.values():
+            await client.close()
 
 
 if __name__ == "__main__":
