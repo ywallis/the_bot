@@ -312,7 +312,3 @@ async def test_watch_sell_orders_match_self():
 
     # Check publish was only called for the valid, non-duplicate order
     redis.publish.assert_not_called()
-    # channel, message = redis.publish.call_args[0]
-    # assert channel == MESSAGE_PROCESSOR_CHANNEL
-    # assert '"exchange": "gate"' in message
-    # assert message == json.dumps(dict(expected_matching_order), default=str)

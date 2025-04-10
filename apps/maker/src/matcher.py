@@ -21,6 +21,7 @@ from apps.maker.src.utils import info_from_oid, load_config
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
+logger.setLevel(logging.DEBUG)
 
 # TODO:
 # - Make fee fetching dynamic
@@ -132,6 +133,8 @@ async def main(clients: dict[str, CustomExchange]):
         if strategy.get("should_match"):
             should_match[strategy["identifier"]] = strategy["taker_exchange"]
             exchange_and_pair.add((strategy["maker_exchange"], strategy["symbol"]))
+    logger.debug(f"Should match: {should_match}")
+    logger.debug(f"Exchange and symbol: {exchange_and_pair}")
     # Init Redis
     pool = ConnectionPool(
         host=REDIS_HOSTNAME, port=REDIS_PORT, db=0, max_connections=20
