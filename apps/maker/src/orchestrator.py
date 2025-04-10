@@ -64,7 +64,7 @@ if __name__ == "__main__":
     processes = [(cmd, launch_process(cmd)) for cmd in PROCESS_LIST]
 
     # Wait 1 min before launching strategy processes
-    time.sleep(60)
+    time.sleep(30)
     logger.info("Starting strategy processes after delay...")
 
     # Start strategy processes after delay

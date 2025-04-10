@@ -136,6 +136,7 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                     order_side,
                     strategy,
                     sell_order_identifier,
+                    bool(sell_order),
                 )
 
             elif sell_order["price"] != best_ask_maker:
@@ -151,6 +152,7 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                     order_side,
                     strategy,
                     sell_order_identifier,
+                    bool(sell_order),
                 )
 
             elif not within_percentage_range(
@@ -204,6 +206,7 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                     order_side,
                     strategy,
                     buy_order_identifier,
+                    bool(buy_order),
                 )
 
             elif buy_order["price"] != best_bid_maker:
@@ -219,6 +222,7 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
                     order_side,
                     strategy,
                     buy_order_identifier,
+                    bool(buy_order),
                 )
 
             elif not within_percentage_range(buy_order["amount"], optimal_buy_size, 20):

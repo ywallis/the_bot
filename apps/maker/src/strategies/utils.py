@@ -117,9 +117,10 @@ def order_time() -> str:
 
     return datetime.now().strftime("%y%m%d%H%M%S%f")
 
+
 def generate_oid(strategy_identifier: str, order_identifier: str) -> str:
-    
     return f"t-{order_time()}_{strategy_identifier}_{order_identifier}"
+
 
 def generate_order(
     maker_id: str,
@@ -155,6 +156,7 @@ async def generate_order_replace(
     side: OrderSide,
     strategy: dict[str, str],
     identifier: str,
+    refresh: bool,
 ) -> OrderMessage | None:
     if side == OrderSide.SELL:
         sell_client_id = maker_id
@@ -175,9 +177,10 @@ async def generate_order_replace(
         return order
 
     else:
-        logger.debug("Client may not be solvent, cancelling.")
-
-        await send_processor_cancellation(redis, strategy, identifier)
+        logger.debug("Client not solvent.")
+        if refresh:
+            logger.debug("Cancelling previous orders")
+            await send_processor_cancellation(redis, strategy, identifier)
         return None
 
 
