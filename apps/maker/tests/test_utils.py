@@ -50,7 +50,7 @@ def test_order_from_ccxt(order_1: OrderMessage):
     exchange_name = "gate"
     order_ccxt = {
         "id": "_",
-        "clientOrderId": "gate_test_1-ALPH_gate",
+        "clientOrderId": "t-2025_lab_eb",
         "symbol": "ALPH/USDT",
         "side": "sell",
         "price": "100",

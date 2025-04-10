@@ -49,9 +49,9 @@ def order_1():
     """This fixture returns a deepcopy of an OrderMessage"""
     order_1: OrderMessage = OrderMessage(
         kind=MessageType.ORDER,
-        strategy="ALPH_gate",
+        strategy="lab_eb",
         exchange="gate",
-        id="gate_test_1-ALPH_gate",
+        id="t-2025_lab_eb",
         exchange_id="_",
         pair="ALPH/USDT",
         side=OrderSide.SELL,
@@ -66,9 +66,9 @@ def order_1():
 def order_2():
     order_2: OrderMessage = OrderMessage(
         kind=MessageType.ORDER,
-        strategy="ALPH_gate",
+        strategy="lab_eb",
         exchange="gate",
-        id="gate_test_2-ALPH_gate",
+        id="t-2026_lab_eb",
         exchange_id="_",
         pair="ALPH/USDT",
         side=OrderSide.SELL,
@@ -133,7 +133,7 @@ def order_batch_raw(order_raw_string: str):
 def cancellation_1():
     cancellation_1: CancellationMessage = CancellationMessage(
         kind=MessageType.CANCELLATION,
-        strategy="ALPH_gate",
+        strategy="lab_eb",
         exchange="gate",
         id="gate_test_2-ALPH_gate",
         pair="ALPH/USDT",
