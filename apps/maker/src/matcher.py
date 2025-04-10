@@ -14,6 +14,7 @@ from apps.maker.src.constants import (
     REDIS_PORT,
 )
 from apps.maker.src.enums import MessageType, OidComponent, OrderSide, OrderType
+from apps.maker.src.errors import NetworkError
 from apps.maker.src.exchange_clients import authenticated_clients
 from apps.maker.src.structs import CustomExchange, LimitedSet, OrderMessage
 from apps.maker.src.utils import info_from_oid, load_config
@@ -50,7 +51,10 @@ async def process_order_update(
 
 
 async def send_match_order(
-    redis: Redis, matching_client_id: str, order: dict[str, str], adjusted_quantity: float
+    redis: Redis,
+    matching_client_id: str,
+    order: dict[str, str],
+    adjusted_quantity: float,
 ):
     if order["side"] == "sell":
         side = OrderSide.BUY
@@ -82,41 +86,51 @@ async def watch_orders(
     timestamp = int(since.timestamp() * 1000)
     recently_processed_orders = LimitedSet(100)
     while True:
-        orders: list[dict[str, str]] = await client.watch_orders(
-            ticker, since=timestamp
-        )
-        orders_copy = copy.deepcopy(orders)
-
-        for order in orders_copy:
-            logger.debug(f"Processing orders from {client.name}")
-            logger.debug(order)
-
-            order_copy = copy.deepcopy(order)
-
-            if order_copy["status"] == "open" or order_copy["filled"] == 0:
-                logger.debug(f"Order did not meet fill conditions: {order_copy}")
-                continue
-
-            strategy_identifier = info_from_oid(
-                order_copy["clientOrderId"], OidComponent.STRATEGY
+        try:
+            orders: list[dict[str, str]] = await client.watch_orders(
+                ticker, since=timestamp
             )
-            if strategy_identifier not in should_match:
-                logger.debug(f"Order did not meet match conditions: {order_copy}")
-                continue
-            if should_match[strategy_identifier] == client.id:
-                logger.debug("Cannot match self.")
-                continue
-            if order_copy.get("clientOrderId") not in recently_processed_orders:
-                recently_processed_orders.add(order_copy.get("clientOrderId"))
-                asyncio.create_task(
-                    process_order_update(
-                        redis, should_match[strategy_identifier], order_copy
+            orders_copy = copy.deepcopy(orders)
+
+        except NetworkError as e:
+            logger.error(
+                f" Ignoring NetworkError in watch_balance for client {client.id}: {e}"
+            )
+        except Exception as e:
+            logger.error(f"Error in watch_balance for client {client.id}: {e}")
+            raise
+
+        else:
+            for order in orders_copy:
+                logger.debug(f"Processing orders from {client.name}")
+                logger.debug(order)
+
+                order_copy = copy.deepcopy(order)
+
+                if order_copy["status"] == "open" or order_copy["filled"] == 0:
+                    logger.debug(f"Order did not meet fill conditions: {order_copy}")
+                    continue
+
+                strategy_identifier = info_from_oid(
+                    order_copy["clientOrderId"], OidComponent.STRATEGY
+                )
+                if strategy_identifier not in should_match:
+                    logger.debug(f"Order did not meet match conditions: {order_copy}")
+                    continue
+                if should_match[strategy_identifier] == client.id:
+                    logger.debug("Cannot match self.")
+                    continue
+                if order_copy.get("clientOrderId") not in recently_processed_orders:
+                    recently_processed_orders.add(order_copy.get("clientOrderId"))
+                    asyncio.create_task(
+                        process_order_update(
+                            redis, should_match[strategy_identifier], order_copy
+                        )
                     )
-                )
-            else:
-                logger.warning(
-                    f"The order no {order_copy['clientOrderId']} tried getting matched multiple times."
-                )
+                else:
+                    logger.warning(
+                        f"The order no {order_copy['clientOrderId']} tried getting matched multiple times."
+                    )
 
 
 async def main(clients: dict[str, CustomExchange]):
@@ -141,12 +155,16 @@ async def main(clients: dict[str, CustomExchange]):
     )
     redis = Redis(decode_responses=True, connection_pool=pool)
     while True:
-        await asyncio.gather(
-            *[
-                watch_orders(redis, clients[tup[0]], tup[1], should_match)
-                for tup in exchange_and_pair
-            ]
-        )
+        try:
+            await asyncio.gather(
+                *[
+                    watch_orders(redis, clients[tup[0]], tup[1], should_match)
+                    for tup in exchange_and_pair
+                ]
+            )
+        finally:
+            for client in clients.values():
+                await client.close()
 
 
 if __name__ == "__main__":

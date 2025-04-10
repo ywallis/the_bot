@@ -2,7 +2,13 @@ import asyncio
 import logging
 
 import apps.maker.src.logging_config as logging_config
-from apps.maker.src.errors import BadRequest, BrokerError, ExchangeError, RequestTimeout
+from apps.maker.src.errors import (
+    BadRequest,
+    BrokerError,
+    ExchangeError,
+    RequestTimeout,
+    InvalidOrder,
+)
 from apps.maker.src.structs import CancellationMessage, CustomExchange, OrderMessage
 from apps.maker.src.enums import OrderType
 
@@ -24,7 +30,12 @@ async def cancel_order_return_confirmation(
 
         except BadRequest as e:
             logger.info(e)
-            logger.info("Order was likely fully filled.")
+            logger.info("Bad Request, order was likely fully filled.")
+            return cancellation
+
+        except InvalidOrder as e:
+            logger.info(e)
+            logger.info("Invalid order, order was likely fully filled.")
             return cancellation
 
         except RequestTimeout as e:
@@ -54,7 +65,7 @@ async def cancel_order_return_confirmation(
 async def create_and_return_order(order: OrderMessage, client: CustomExchange):
     last_error: Exception = Exception()
 
-    if order.get('kind') == OrderType.MARKET:
+    if order.get("kind") == OrderType.MARKET:
         order_type = "market"
     else:
         order_type = "limit"
@@ -67,7 +78,7 @@ async def create_and_return_order(order: OrderMessage, client: CustomExchange):
                 side=order["side"].value,
                 amount=float(order["amount"]),
                 price=float(order["price"]),
-                params={"clientOrderId": order["id"]}
+                params={"clientOrderId": order["id"]},
             )
 
         except RequestTimeout as e:
