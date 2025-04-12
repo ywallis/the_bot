@@ -142,8 +142,15 @@ async def redis_subscriber(
                         await queues[exchange].put(data)
                     # Should only check at message processor initialization
                     elif exchange == "INIT":
-                        logger.debug("INIT condition triggered")
-                        all_open_orders = await fetch_all_open(authenticated_clients)
+                        logger.info("INIT message received")
+                        await load_clients()
+                        try:
+                            all_open_orders = await fetch_all_open(authenticated_clients)
+                            print(all_open_orders)
+                        
+                        except Exception as e:
+                            raise Exception(e) 
+
                         await redis.publish(
                             "INIT", json.dumps(dict(all_open_orders), default=str)
                         )
@@ -183,7 +190,6 @@ async def main():
     subscriber_task = asyncio.create_task(
         redis_subscriber(redis, pubsub, worker_queues)
     )
-    await load_clients()
 
     for exchange in authenticated_clients.keys():
         asyncio.create_task(
@@ -192,7 +198,7 @@ async def main():
             )
         )
 
-    await asyncio.gather(subscriber_task, results_task, return_exceptions=True)
+    await asyncio.gather(subscriber_task, results_task, return_exceptions=False)
 
     await redis.close()
 
