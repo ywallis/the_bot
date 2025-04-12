@@ -65,7 +65,7 @@ async def cancel_order_return_confirmation(
 async def create_and_return_order(order: OrderMessage, client: CustomExchange):
     last_error: Exception = Exception()
 
-    if order.get("kind") == OrderType.MARKET:
+    if order.get("order_type") == OrderType.MARKET:
         order_type = "market"
     else:
         order_type = "limit"
