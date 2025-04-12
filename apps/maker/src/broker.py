@@ -13,7 +13,7 @@ from apps.maker.src.ccxt_abstractions import (
     create_and_return_order,
 )
 from apps.maker.src.enums import MessageType
-from apps.maker.src.errors import BrokerError
+from apps.maker.src.errors import BrokerError, RequestTimeout
 from apps.maker.src.exchange_clients import authenticated_clients, symbols
 from apps.maker.src.structs import (
     CancellationMessage,
@@ -120,7 +120,9 @@ async def results_worker(redis: Redis, results_queue: asyncio.Queue):
         results_queue.task_done()
 
 
-async def redis_subscriber(redis: Redis, pubsub: PubSub, queues: dict[str, asyncio.Queue]):
+async def redis_subscriber(
+    redis: Redis, pubsub: PubSub, queues: dict[str, asyncio.Queue]
+):
     """Listens to Redis channel and routes messages to the correct queue."""
     await pubsub.subscribe(BROKER_CHANNEL)
 
@@ -154,6 +156,20 @@ async def redis_subscriber(redis: Redis, pubsub: PubSub, queues: dict[str, async
         await pubsub.unsubscribe(BROKER_CHANNEL)
 
 
+async def load_clients():
+    for client in authenticated_clients.values():
+        attempt: int = 1
+        while True:
+            try:
+                await client.load_markets()
+                logger.info(f"Client {client.name} loaded successfully.")
+                break
+            except RequestTimeout as e:
+                logger.error(
+                    f"Client {client.name} has timed out on attempt n. {attempt}, retrying. {e}"
+                )
+
+
 async def main():
     redis = await Redis(host=REDIS_HOSTNAME, port=REDIS_PORT, decode_responses=True)
     pubsub: PubSub = redis.pubsub()
@@ -164,7 +180,10 @@ async def main():
 
     results_queue = asyncio.Queue()
     results_task = asyncio.create_task(results_worker(redis, results_queue))
-    subscriber_task = asyncio.create_task(redis_subscriber(redis, pubsub, worker_queues))
+    subscriber_task = asyncio.create_task(
+        redis_subscriber(redis, pubsub, worker_queues)
+    )
+    await load_clients()
 
     for exchange in authenticated_clients.keys():
         asyncio.create_task(
