@@ -16,9 +16,16 @@ logger = logging.getLogger(__name__)
 
 
 async def fetch_balance(client: CustomExchange, redis: Redis):
-    balance = await client.fetch_balance()
-    logger.debug(f"Balances on {client.name} are {balance}")
-    await redis.set(f"balance-{client.id}", json.dumps(balance))
+    try:
+        balance = await client.fetch_balance()
+        logger.debug(f"Balances on {client.name} are {balance}")
+        await redis.set(f"balance-{client.id}", json.dumps(balance))
+
+    except NetworkError as e:
+        logger.error(f" Ignoring NetworkError in watch_balance for client {client.id}: {e}")
+    except Exception as e:
+        logger.error(f"Error in watch_balance for client {client.id}: {e}")
+        raise
 
 async def watch_balance(client: CustomExchange, redis: Redis):
     while True:

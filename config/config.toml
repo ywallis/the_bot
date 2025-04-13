@@ -1,11 +1,22 @@
 [[strategies]]
 symbol = "ALPH/USDT"
 type = "single_edge_liquidity"
+identifier = "lam"
+taker_exchange = "gate"
+maker_exchange = "mexc"
+should_match = true
+spread = 1.0025
+min_size_usdt = 10
+max_size_usdt = 11
+
+[[strategies]]
+symbol = "ALPH/USDT"
+type = "single_edge_liquidity"
 identifier = "lab"
 taker_exchange = "gate"
 maker_exchange = "bitget"
 should_match = true
-spread = 1.0025
+spread = 1.0035
 min_size_usdt = 10
 max_size_usdt = 11
 

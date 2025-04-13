@@ -13,7 +13,7 @@ from apps.maker.src.ccxt_abstractions import (
     create_and_return_order,
 )
 from apps.maker.src.enums import MessageType
-from apps.maker.src.errors import BrokerError, RequestTimeout
+from apps.maker.src.errors import BrokerError, RequestTimeout, NetworkError
 from apps.maker.src.exchange_clients import authenticated_clients, symbols
 from apps.maker.src.structs import (
     CancellationMessage,
@@ -38,9 +38,24 @@ async def fetch_all_open(clients: dict[str, CustomExchange]) -> OrderBatchMessag
 
     for name, client in clients.items():
         for symbol in symbols:
-            orders = await client.fetch_open_orders(symbol)
-            for order in orders:
-                all_orders.append(order_from_ccxt(order, name))
+            attempt: int = 1
+            while True:
+                try:
+                    orders = await client.fetch_open_orders(symbol)
+                    logger.info(f"Fetched orders from {client}: {orders}")
+                    for order in orders:
+                        all_orders.append(order_from_ccxt(order, name))
+                    break
+                except NetworkError as e:
+                    logger.error(
+                        f"Network error when fetching order, attempt {attempt}: {e}"
+                    )
+                    attempt += 1
+                    if attempt > 3:
+                        raise Exception(
+                            f"Fetching orders failed: client {client}, attempt n. {attempt}"
+                        )
+
     logger.debug(f"Orders were retrieved from exchanges: {all_orders}")
 
     return OrderBatchMessage(
@@ -145,11 +160,13 @@ async def redis_subscriber(
                         logger.info("INIT message received")
                         await load_clients()
                         try:
-                            all_open_orders = await fetch_all_open(authenticated_clients)
+                            all_open_orders = await fetch_all_open(
+                                authenticated_clients
+                            )
                             print(all_open_orders)
-                        
+
                         except Exception as e:
-                            raise Exception(e) 
+                            raise Exception(e)
 
                         await redis.publish(
                             "INIT", json.dumps(dict(all_open_orders), default=str)

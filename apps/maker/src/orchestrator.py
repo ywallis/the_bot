@@ -22,8 +22,17 @@ production = os.getenv("PRODUCTION", False)
 config = load_config()
 strategies = config.get("strategies")
 
+# Check for duplicate strategy identifiers
+identified_strategies: list[str] = []
 if strategies is None:
     raise Exception("No strategy could be loaded")
+for strategy in strategies:
+    identifier = strategy.get("identifier")
+    if identifier in identified_strategies:
+        raise Exception(f"Duplicate strategy identifier: {identifier}")
+    else:
+        identified_strategies.append(identifier)
+        
 
 # Unique processes (start immediately)
 PROCESS_LIST = [
