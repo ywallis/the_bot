@@ -43,7 +43,6 @@ async def process_order_update(
             fee_ratio = 1 / (1 - gate_fee)
 
             quantity = round(quantity * fee_ratio, 3)
-            print("QQQQ", quantity)
 
     await send_match_order(redis, matching_client_id, order, quantity)
 

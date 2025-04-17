@@ -9,7 +9,7 @@ from redis.asyncio import Redis
 import apps.maker.src.logging_config as logging_config
 from apps.maker.src.constants import MESSAGE_PROCESSOR_CHANNEL
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
-from apps.maker.src.structs import CancellationMessage, OrderMessage
+from apps.maker.src.structs import CancellationMessage, OrderBatchMessage, OrderMessage
 
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ async def send_processor_cancellation(
     return None
 
 
-async def send_processor_order(redis: Redis, order: OrderMessage):
+async def send_processor_order(redis: Redis, order: OrderMessage | OrderBatchMessage):
     flattened = json.dumps(dict(order), default=str)
     await redis.publish(MESSAGE_PROCESSOR_CHANNEL, flattened)
     logger.info(f"Order was sent: {order}")
@@ -184,6 +184,63 @@ async def generate_order_replace(
         return None
 
 
+async def generate_take_take_order(
+    redis: Redis,
+    buy_exchange: str,
+    sell_exchange: str,
+    buy_price: float,
+    sell_price: float,
+    amount: float,
+    pair: str,
+    strategy: dict[str, str],
+    identifier: str
+) -> OrderBatchMessage | None:
+    if await check_if_solvent(redis, buy_exchange, sell_exchange, sell_price, amount, pair):
+
+        common_id = generate_oid(strategy["identifier"], identifier)
+
+        buy_order = OrderMessage(
+        kind=MessageType.ORDER,
+        strategy=f"{strategy['identifier']}_{identifier}",
+        exchange=buy_exchange,
+        id=common_id,
+        exchange_id="_",
+        pair=pair,
+        side=OrderSide.BUY,
+        order_type=OrderType.UNIQUE,
+        price=Decimal(buy_price),
+        amount=Decimal(amount),
+    )
+        sell_order = OrderMessage(
+        kind=MessageType.ORDER,
+        strategy=f"{strategy['identifier']}_{identifier}",
+        exchange=sell_exchange,
+        id=common_id,
+        exchange_id="_",
+        pair=pair,
+        side=OrderSide.BUY,
+        order_type=OrderType.UNIQUE,
+        price=Decimal(sell_price),
+        amount=Decimal(amount),
+    )
+
+
+        order_batch = OrderBatchMessage(
+            kind=MessageType.ORDERBATCH,
+            strategy=strategy["strategy"],
+            id="x",
+            orders=[buy_order, sell_order],
+        )
+
+        await send_processor_order(redis, order_batch)
+        logger.debug(f"Order batch was created and sent: {order_batch}")
+        return order_batch
+    
+    else:
+        logger.debug("Client not solvent.")
+        return None
+
+
 def maker_order_sizer(
     maker_level: float,
     taker_book: list[list],
@@ -232,3 +289,49 @@ def within_percentage_range(
     upper_bound = y * (1 + percentage / 100)
 
     return lower_bound <= x <= upper_bound
+
+
+def ob_matcher(
+    bids: list[list[float]],
+    asks: list[list[float]],
+    spread: float,
+    sizing: float,
+    max_order_size: float,
+    min_order_size: float,
+    extend_spread=0,
+) -> tuple[float, float, float]:
+    """This function takes in two order books sides represented by lists.
+    It will then go both lists, and generate a target ask, target bid, and appropriate size to
+    extract maximum value from both books. Other inputs are floats.
+    extend_spread is used to target prices beyond the optimal spread.
+    This can be used to help guarantee execution for limit orders, or increase skew for cost-based market buy orders.
+    """
+
+    depth: int = 0
+    cumulative_bids: float = 0
+    cumulative_asks: float = 0
+
+    while depth + extend_spread < len(bids) and depth + extend_spread < len(asks):
+        if bids[depth][0] >= asks[depth][0] * spread:
+            cumulative_bids += bids[depth][1]
+            cumulative_asks += asks[depth][1]
+
+            target_order_size: float = min(cumulative_bids, cumulative_asks) * sizing
+
+            if target_order_size > max_order_size:
+                target_order_size = max_order_size
+
+            if target_order_size > min_order_size:
+                target_bid = bids[depth + extend_spread][0]
+                target_ask = asks[depth + extend_spread][0]
+                logger.debug(
+                    f"Matched order books, ask:{target_ask}, bid:{target_bid}, amount {target_order_size}"
+                )
+                return target_ask, target_bid, target_order_size
+            else:
+                depth += 1
+        else:
+            break
+
+    logger.debug("Could not successfully match order books")
+    return 0, 0, 0
