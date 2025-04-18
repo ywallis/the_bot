@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 # TODO:
 
 # - Check throttling! 
+# - Inventory needs balancing depending on fee structure
 
 
 async def take_take(redis: Redis, strategy: dict[str, str]):

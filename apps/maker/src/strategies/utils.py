@@ -227,8 +227,8 @@ async def generate_take_take_order(
 
         order_batch = OrderBatchMessage(
             kind=MessageType.ORDERBATCH,
-            strategy=strategy["strategy"],
-            id="x",
+            strategy=f"{strategy['identifier']}_{identifier}",
+            id=common_id,
             orders=[buy_order, sell_order],
         )
 

@@ -1,6 +1,7 @@
+import asyncio
 import json
 from decimal import Decimal
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from redis.asyncio import Redis
@@ -10,6 +11,7 @@ from apps.maker.src.enums import MessageType, OidComponent, OrderSide, OrderType
 from apps.maker.src.strategies.utils import (
     check_if_solvent,
     generate_oid,
+    generate_take_take_order,
     maker_order_sizer,
     min_max_usd_converter,
     ob_matcher,
@@ -17,17 +19,17 @@ from apps.maker.src.strategies.utils import (
     send_processor_cancellation,
     send_processor_order,
 )
-from apps.maker.src.structs import CancellationMessage, OrderMessage
+from apps.maker.src.structs import CancellationMessage, OrderBatchMessage, OrderMessage
 from apps.maker.src.utils import info_from_oid
 
 
 def test_info_from_oid():
+    oid = generate_oid("la", "es")
 
-    oid = generate_oid("la", "es") 
-    
     assert info_from_oid(oid, OidComponent.TIME).startswith("2")
     assert info_from_oid(oid, OidComponent.STRATEGY) == "la"
     assert info_from_oid(oid, OidComponent.ORDER) == "es"
+
 
 @pytest.mark.asyncio
 async def test_send_processor_init_cancellation():
@@ -45,7 +47,7 @@ async def test_send_processor_init_cancellation():
         dict(
             CancellationMessage(
                 kind=MessageType.CANCELLATION,
-                strategy=f"{strategy["identifier"]}_{order_identifier}",
+                strategy=f"{strategy['identifier']}_{order_identifier}",
                 exchange=strategy["maker_exchange"],
                 id="",
                 pair=strategy["symbol"],
@@ -164,48 +166,38 @@ def test_maker_order_sizer():
     "bids, asks, spread, sizing, max_size, min_size, extend_spread, expected",
     [
         # Happy path: matching depth 0
-        (
-            [[100, 1], [99, 2]], [[90, 1], [91, 2]],
-            1.1, 1.0, 10, 0.5, 0,
-            (90, 100, 1.0)
-        ),
+        ([[100, 1], [99, 2]], [[90, 1], [91, 2]], 1.1, 1.0, 10, 0.5, 0, (90, 100, 1.0)),
         # Matching at depth 1
-        (
-            [[100, 1], [99, 4]], [[95, 1], [90, 5]],
-            1.05, 1.0, 10, 1.5, 0,
-            (90, 99, 5.0)
-        ),
+        ([[100, 1], [99, 4]], [[95, 1], [90, 5]], 1.05, 1.0, 10, 1.5, 0, (90, 99, 5.0)),
         # Not enough spread (should not match)
-        (
-            [[95, 1], [94, 1]], [[94, 1], [93, 1]],
-            1.2, 1.0, 10, 0.5, 0,
-            (0, 0, 0)
-        ),
+        ([[95, 1], [94, 1]], [[94, 1], [93, 1]], 1.2, 1.0, 10, 0.5, 0, (0, 0, 0)),
         # Sizing too small to meet min_order_size
         (
-            [[101, 0.2], [100, 0.3]], [[90, 0.2], [89, 0.3]],
-            1.1, 1.0, 10, 1.0, 0,
-            (0, 0, 0)
+            [[101, 0.2], [100, 0.3]],
+            [[90, 0.2], [89, 0.3]],
+            1.1,
+            1.0,
+            10,
+            1.0,
+            0,
+            (0, 0, 0),
         ),
         # Capped by max_order_size
-        (
-            [[100, 10]], [[90, 10]],
-            1.05, 1.0, 5.0, 1.0, 0,
-            (90, 100, 5.0)
-        ),
+        ([[100, 10]], [[90, 10]], 1.05, 1.0, 5.0, 1.0, 0, (90, 100, 5.0)),
         # extend_spread shifts target price
         (
-            [[101, 1], [100, 1]], [[90, 1], [89, 1]],
-            1.1, 1.0, 10, 0.5, 1,
-            (89, 100, 1.0)
+            [[101, 1], [100, 1]],
+            [[90, 1], [89, 1]],
+            1.1,
+            1.0,
+            10,
+            0.5,
+            1,
+            (89, 100, 1.0),
         ),
         # extend_spread too large, out of bounds
-        (
-            [[100, 1]], [[90, 1]],
-            1.1, 1.0, 10, 0.5, 1,
-            (0, 0, 0)
-        ),
-    ]
+        ([[100, 1]], [[90, 1]], 1.1, 1.0, 10, 0.5, 1, (0, 0, 0)),
+    ],
 )
 def test_ob_matcher(
     bids, asks, spread, sizing, max_size, min_size, extend_spread, expected
@@ -213,3 +205,96 @@ def test_ob_matcher(
     result = ob_matcher(bids, asks, spread, sizing, max_size, min_size, extend_spread)
     assert result == expected
 
+
+@pytest.mark.asyncio
+async def test_generate_take_take_order():
+    mock_redis = AsyncMock()
+    mocked_publish = AsyncMock()
+    mock_redis.publish = mocked_publish
+
+    strategy = {}
+    strategy["identifier"] = "test"
+    identifier = "tt"
+    buy_exchange = "coinbase"
+    sell_exchange = "binance"
+    common_id = "t-202512-test-tt"
+    pair = "BTC/USDT"
+    buy_price = 100
+    sell_price = 110
+    amount = 1
+
+    expected_buy_order = OrderMessage(
+        kind=MessageType.ORDER,
+        strategy=f"{strategy['identifier']}_{identifier}",
+        exchange=buy_exchange,
+        id=common_id,
+        exchange_id="_",
+        pair=pair,
+        side=OrderSide.BUY,
+        order_type=OrderType.UNIQUE,
+        price=Decimal(buy_price),
+        amount=Decimal(amount),
+    )
+    expected_sell_order = OrderMessage(
+        kind=MessageType.ORDER,
+        strategy=f"{strategy['identifier']}_{identifier}",
+        exchange=sell_exchange,
+        id=common_id,
+        exchange_id="_",
+        pair=pair,
+        side=OrderSide.BUY,
+        order_type=OrderType.UNIQUE,
+        price=Decimal(sell_price),
+        amount=Decimal(amount),
+    )
+
+    expected_order_batch = OrderBatchMessage(
+        kind=MessageType.ORDERBATCH,
+        strategy=f"{strategy['identifier']}_{identifier}",
+        id=common_id,
+        orders=[expected_buy_order, expected_sell_order],
+    )
+
+    # async def retrieve_balance_redis_side_effect(_redis, _symbol):
+    #     return {"BTC": {"free": 50000}, "USDT": {"free": 500000}}
+    #
+    # retrieve_balance_redis_mock = AsyncMock(
+    #     side_effect=retrieve_balance_redis_side_effect
+    # )
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            "apps.maker.src.strategies.utils.check_if_solvent",
+            AsyncMock(return_value=True),
+        )
+        mp.setattr(
+            "apps.maker.src.strategies.utils.generate_oid",
+            Mock(return_value=common_id),
+        )
+        # mp.setattr(
+        #     "apps.maker.src.strategies.utils.retrieve_balances_redis",
+        #     retrieve_balance_redis_mock,
+        # )
+        task = asyncio.create_task(
+            generate_take_take_order(
+                mock_redis,
+                buy_exchange,
+                sell_exchange,
+                buy_price,
+                sell_price,
+                amount,
+                pair,
+                strategy,
+                identifier,
+            )
+        )
+        await asyncio.sleep(0.1)
+        task.cancel()
+
+        assert mocked_publish.call_count > 0
+
+        # Validate all expected messages
+        mocked_publish.assert_awaited_with(
+            MESSAGE_PROCESSOR_CHANNEL,
+            json.dumps(dict(expected_order_batch), default=str),
+        )
