@@ -12,6 +12,7 @@ from apps.maker.src.strategies.utils import (
     generate_oid,
     maker_order_sizer,
     min_max_usd_converter,
+    ob_matcher,
     order_time,
     send_processor_cancellation,
     send_processor_order,
@@ -157,3 +158,58 @@ def test_maker_order_sizer():
 
     assert maker_order_sizer(50000, taker_book, OrderSide.BUY, 1.0001, 5, 0.5) == 0.5
     assert maker_order_sizer(50000, taker_book, OrderSide.BUY, 1.01, 5, 0.5) == 0.5
+
+
+@pytest.mark.parametrize(
+    "bids, asks, spread, sizing, max_size, min_size, extend_spread, expected",
+    [
+        # Happy path: matching depth 0
+        (
+            [[100, 1], [99, 2]], [[90, 1], [91, 2]],
+            1.1, 1.0, 10, 0.5, 0,
+            (90, 100, 1.0)
+        ),
+        # Matching at depth 1
+        (
+            [[100, 1], [99, 4]], [[95, 1], [90, 5]],
+            1.05, 1.0, 10, 1.5, 0,
+            (90, 99, 5.0)
+        ),
+        # Not enough spread (should not match)
+        (
+            [[95, 1], [94, 1]], [[94, 1], [93, 1]],
+            1.2, 1.0, 10, 0.5, 0,
+            (0, 0, 0)
+        ),
+        # Sizing too small to meet min_order_size
+        (
+            [[101, 0.2], [100, 0.3]], [[90, 0.2], [89, 0.3]],
+            1.1, 1.0, 10, 1.0, 0,
+            (0, 0, 0)
+        ),
+        # Capped by max_order_size
+        (
+            [[100, 10]], [[90, 10]],
+            1.05, 1.0, 5.0, 1.0, 0,
+            (90, 100, 5.0)
+        ),
+        # extend_spread shifts target price
+        (
+            [[101, 1], [100, 1]], [[90, 1], [89, 1]],
+            1.1, 1.0, 10, 0.5, 1,
+            (89, 100, 1.0)
+        ),
+        # extend_spread too large, out of bounds
+        (
+            [[100, 1]], [[90, 1]],
+            1.1, 1.0, 10, 0.5, 1,
+            (0, 0, 0)
+        ),
+    ]
+)
+def test_ob_matcher(
+    bids, asks, spread, sizing, max_size, min_size, extend_spread, expected
+):
+    result = ob_matcher(bids, asks, spread, sizing, max_size, min_size, extend_spread)
+    assert result == expected
+
