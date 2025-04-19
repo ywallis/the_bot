@@ -19,8 +19,6 @@ logger = logging.getLogger(__name__)
 # TODO:
 
 # - Check throttling!
-# - Inventory needs balancing depending on fee structure
-
 
 async def take_take(redis: Redis, strategy: dict[str, str]):
     # Defining state
@@ -58,6 +56,7 @@ async def take_take(redis: Redis, strategy: dict[str, str]):
             continue
 
         current_time = datetime.now(UTC)
+
         e1_order_book_time = datetime.fromtimestamp(
             e1_order_book["timestamp"] / 1000, UTC
         )
@@ -67,14 +66,12 @@ async def take_take(redis: Redis, strategy: dict[str, str]):
         logger.debug(f"{exchange_1} order book is \n {e1_order_book}")
         logger.debug(f"{exchange_2} order book is \n {e2_order_book}")
 
-        # Do I really need this if take-take is not involved?
-
-        if current_time - e1_order_book_time > timedelta(seconds=5):
-            logger.info("Taker order book is stale, waiting for update")
+        if current_time - e1_order_book_time > timedelta(seconds=15):
+            logger.debug("Taker order book is stale, waiting for update")
             continue
 
-        if current_time - e2_order_book_time > timedelta(seconds=5):
-            logger.info("Maker order book is stale, waiting for update")
+        if current_time - e2_order_book_time > timedelta(seconds=15):
+            logger.debug("Maker order book is stale, waiting for update")
             continue
 
         e1_bids: list[list] = e1_order_book["bids"]
@@ -90,7 +87,6 @@ async def take_take(redis: Redis, strategy: dict[str, str]):
         min_size, max_size = min_max_usd_converter(
             e1_best_bid, min_size_usdt, max_size_usdt
         )
-        # Start take_take with client_a as buyer, client_b as seller.
 
         if e1_best_bid >= e2_best_ask * spread:
             sell_exchange = exchange_1
