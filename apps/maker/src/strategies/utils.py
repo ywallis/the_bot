@@ -193,37 +193,44 @@ async def generate_take_take_order(
     amount: float,
     pair: str,
     strategy: dict[str, str],
-    identifier: str
+    identifier: str,
 ) -> OrderBatchMessage | None:
-    if await check_if_solvent(redis, buy_exchange, sell_exchange, sell_price, amount, pair):
-
+    if await check_if_solvent(
+        redis, buy_exchange, sell_exchange, sell_price, amount, pair
+    ):
         common_id = generate_oid(strategy["identifier"], identifier)
 
-        buy_order = OrderMessage(
-        kind=MessageType.ORDER,
-        strategy=f"{strategy['identifier']}_{identifier}",
-        exchange=buy_exchange,
-        id=common_id,
-        exchange_id="_",
-        pair=pair,
-        side=OrderSide.BUY,
-        order_type=OrderType.UNIQUE,
-        price=Decimal(buy_price),
-        amount=Decimal(amount),
-    )
-        sell_order = OrderMessage(
-        kind=MessageType.ORDER,
-        strategy=f"{strategy['identifier']}_{identifier}",
-        exchange=sell_exchange,
-        id=common_id,
-        exchange_id="_",
-        pair=pair,
-        side=OrderSide.BUY,
-        order_type=OrderType.UNIQUE,
-        price=Decimal(sell_price),
-        amount=Decimal(amount),
-    )
+        if buy_exchange == "gate" or buy_exchange == "bitget":
+            fee_ratio = 1 / (1 - 0.001)
 
+            buy_amount = round(amount * fee_ratio, 5)
+
+        else:
+            buy_amount = amount
+        buy_order = OrderMessage(
+            kind=MessageType.ORDER,
+            strategy=f"{strategy['identifier']}_{identifier}",
+            exchange=buy_exchange,
+            id=common_id,
+            exchange_id="_",
+            pair=pair,
+            side=OrderSide.BUY,
+            order_type=OrderType.UNIQUE,
+            price=Decimal(buy_price),
+            amount=Decimal(buy_amount),
+        )
+        sell_order = OrderMessage(
+            kind=MessageType.ORDER,
+            strategy=f"{strategy['identifier']}_{identifier}",
+            exchange=sell_exchange,
+            id=common_id,
+            exchange_id="_",
+            pair=pair,
+            side=OrderSide.BUY,
+            order_type=OrderType.UNIQUE,
+            price=Decimal(sell_price),
+            amount=Decimal(amount),
+        )
 
         order_batch = OrderBatchMessage(
             kind=MessageType.ORDERBATCH,
@@ -235,7 +242,7 @@ async def generate_take_take_order(
         await send_processor_order(redis, order_batch)
         logger.debug(f"Order batch was created and sent: {order_batch}")
         return order_batch
-    
+
     else:
         logger.debug("Client not solvent.")
         return None

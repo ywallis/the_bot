@@ -11,10 +11,6 @@ from apps.maker.src.strategies.single_edge_liquidity import single_edge_liquidit
 from apps.maker.src.structs import CancellationMessage, OrderMessage
 
 # TODO
-# - Clean this shit, make fixtures you can re-use
-# - Make tests for all util functions
-# - Make a constant for timestamp and make sure it is generated properly with a test
-
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(

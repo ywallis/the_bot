@@ -255,13 +255,6 @@ async def test_generate_take_take_order():
         orders=[expected_buy_order, expected_sell_order],
     )
 
-    # async def retrieve_balance_redis_side_effect(_redis, _symbol):
-    #     return {"BTC": {"free": 50000}, "USDT": {"free": 500000}}
-    #
-    # retrieve_balance_redis_mock = AsyncMock(
-    #     side_effect=retrieve_balance_redis_side_effect
-    # )
-
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
             "apps.maker.src.strategies.utils.check_if_solvent",

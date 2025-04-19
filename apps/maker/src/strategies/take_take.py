@@ -7,6 +7,7 @@ from redis.asyncio import Redis
 
 import apps.maker.src.logging_config as logging_config
 from apps.maker.src.strategies.utils import (
+    generate_take_take_order,
     min_max_usd_converter,
     ob_matcher,
     retrieve_ob_redis,
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # TODO:
 
-# - Check throttling! 
+# - Check throttling!
 # - Inventory needs balancing depending on fee structure
 
 
@@ -99,10 +100,25 @@ async def take_take(redis: Redis, strategy: dict[str, str]):
                 continue
             target_ask, target_bid, target_order_size = match
 
-        if e2_best_bid >= e1_best_ask * spread:
+        elif e2_best_bid >= e1_best_ask * spread:
             sell_exchange = exchange_2
             buy_exchange = exchange_1
             match = ob_matcher(e2_bids, e1_asks, spread, sizing, max_size, min_size)
             if match is None:
                 continue
             target_ask, target_bid, target_order_size = match
+
+        else:
+            continue
+
+        await generate_take_take_order(
+            redis,
+            buy_exchange,
+            sell_exchange,
+            target_ask,
+            target_bid,
+            target_order_size,
+            symbol,
+            strategy,
+            "tt",
+        )
