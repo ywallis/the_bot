@@ -194,3 +194,16 @@ def base_strategy():
         "min_size_usdt": "10",
         "max_size_usdt": "100000",
     }
+
+@pytest.fixture
+def base_strategy_tt():
+    return {
+        "symbol": "BTC/USDT",
+        "identifier": "test_strategy",
+        "exchange_1": "gate",
+        "exchange_": "coinbase",
+        "spread": "1.005",
+        "sizing": "0.8",
+        "min_size_usdt": "10",
+        "max_size_usdt": "100000",
+    }

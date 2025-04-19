@@ -27,7 +27,7 @@ async def take_take(redis: Redis, strategy: dict[str, str]):
 
     symbol: str = strategy["symbol"]
     exchange_1: str = strategy["exchange_1"]
-    exchange_2: str = strategy["exchange_"]
+    exchange_2: str = strategy["exchange_2"]
     spread: float = float(strategy["spread"])
     sizing: float = float(strategy["sizing"])
     min_size_usdt: float = float(strategy["min_size_usdt"])
