@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import time
 
 from datetime import UTC, datetime, timedelta
 from redis.asyncio import Redis
@@ -38,7 +37,7 @@ async def take_take(redis: Redis, strategy: dict[str, str]):
     while watching:
         # Simple throttle
 
-        # time.sleep(0.01)
+        await asyncio.sleep(0.01)
 
         batch = asyncio.gather(
             retrieve_ob_redis(redis, f"{symbol}-{exchange_1}"),
@@ -107,8 +106,6 @@ async def take_take(redis: Redis, strategy: dict[str, str]):
         else:
             continue
 
-        print(target_ask, target_bid, target_order_size)
-        print(buy_exchange, sell_exchange)
         await generate_take_take_order(
             redis,
             buy_exchange,
