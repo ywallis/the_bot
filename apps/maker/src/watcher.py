@@ -23,8 +23,8 @@ strategies = config.get("strategies")
 if strategies is None:
     raise Exception("No strategy found")
 for strategy in strategies:
-    exchange_and_pair.add((strategy["taker_exchange"], strategy["symbol"]))
-    exchange_and_pair.add((strategy["maker_exchange"], strategy["symbol"]))
+    exchange_and_pair.add((strategy["exchange_1"], strategy["symbol"]))
+    exchange_and_pair.add((strategy["exchange_2"], strategy["symbol"]))
 
 
 async def watch_ob(client: CustomExchange, ticker: str, redis: Redis):

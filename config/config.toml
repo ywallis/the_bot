@@ -2,6 +2,8 @@
 symbol = "ALPH/USDT"
 type = "single_edge_liquidity"
 identifier = "lam"
+exchange_1 = "gate"
+exchange_2 = "mexc"
 taker_exchange = "gate"
 maker_exchange = "mexc"
 should_match = true
@@ -13,6 +15,8 @@ max_size_usdt = 11
 symbol = "ALPH/USDT"
 type = "single_edge_liquidity"
 identifier = "lab"
+exchange_1 = "gate"
+exchange_2 = "bitget"
 taker_exchange = "gate"
 maker_exchange = "bitget"
 should_match = true
