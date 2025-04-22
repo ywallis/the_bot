@@ -201,7 +201,7 @@ def base_strategy_tt():
         "symbol": "BTC/USDT",
         "identifier": "test_strategy",
         "exchange_1": "gate",
-        "exchange_": "coinbase",
+        "exchange_2": "coinbase",
         "spread": "1.005",
         "sizing": "0.8",
         "min_size_usdt": "10",

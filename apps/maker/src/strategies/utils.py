@@ -226,7 +226,7 @@ async def generate_take_take_order(
             id=common_id,
             exchange_id="_",
             pair=pair,
-            side=OrderSide.BUY,
+            side=OrderSide.SELL,
             order_type=OrderType.UNIQUE,
             price=Decimal(sell_price),
             amount=Decimal(amount),

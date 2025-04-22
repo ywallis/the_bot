@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 import json
 from decimal import Decimal
 from unittest.mock import AsyncMock, call
@@ -8,55 +9,132 @@ import pytest
 from apps.maker.src.constants import MESSAGE_PROCESSOR_CHANNEL
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
 from apps.maker.src.strategies.take_take import take_take
-from apps.maker.src.structs import OrderBatchMessage, OrderMessage
 
 # TODO
+now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "gate_side_effects, coinbase_side_effects, expected_messages",
     [
-        # Test case 1: Two cancellations, one sell order at price 60000
+        # Test case 1: Basic, no inventory compensation
         (
             [
-                {"bids": [[59900, 1], [59899, 1]], "asks": [[60000, 1], [60001, 1]]}
+                {
+                    "bids": [[59900, 1], [59899, 1]],
+                    "asks": [[60000, 1], [60001, 1]],
+                    "timestamp": now_ms,
+                }
             ],  # gate OB
             [
-                {"bids": [[49900, 1], [49899, 1]], "asks": [[50000, 1], [50001, 1]]}
+                {
+                    "bids": [[49900, 1], [49899, 1]],
+                    "asks": [[50000, 1], [50001, 1]],
+                    "timestamp": now_ms,
+                }
             ],  # coinbase OB
             [
-                OrderBatchMessage(
-                    type=MessageType.ORDERBATCH,
-                    strategy="test_strategy_tt",
-                    id="t-0_test_strategy_tt",
-                    orders=[
-                        OrderMessage(
-                            kind=MessageType.ORDER,
-                            strategy="test_strategy_tt",
-                            exchange="gate",
-                            id="t-0_test_strategy_tt",
-                            exchange_id="_",
-                            pair="BTC/USDT",
-                            side=OrderSide.SELL,
-                            order_type=OrderType.UNIQUE,
-                            price=Decimal(60000),
-                            amount=Decimal(2),
-                        ),
-                        OrderMessage(
-                            kind=MessageType.ORDER,
-                            strategy="test_strategy_tt",
-                            exchange="coinbase",
-                            id="t-0_test_strategy_eb",
-                            exchange_id="_",
-                            pair="BTC/USDT",
-                            side=OrderSide.BUY,
-                            order_type=OrderType.UNIQUE,
-                            price=Decimal(39900),
-                            amount=Decimal(2),
-                        ),
+                {
+                    "kind": MessageType.ORDERBATCH,
+                    "strategy": "test_strategy_tt",
+                    "id": "t-0_test_strategy_tt",
+                    "orders": [
+                        {
+                            "kind": MessageType.ORDER,
+                            "strategy": "test_strategy_tt",
+                            "exchange": "coinbase",
+                            "id": "t-0_test_strategy_tt",
+                            "exchange_id": "_",
+                            "pair": "BTC/USDT",
+                            "side": OrderSide.BUY,
+                            "order_type": OrderType.UNIQUE,
+                            "price": Decimal(50000),
+                            "amount": Decimal(0.8),
+                        },
+                        {
+                            "kind": MessageType.ORDER,
+                            "strategy": "test_strategy_tt",
+                            "exchange": "gate",
+                            "id": "t-0_test_strategy_tt",
+                            "exchange_id": "_",
+                            "pair": "BTC/USDT",
+                            "side": OrderSide.SELL,
+                            "order_type": OrderType.UNIQUE,
+                            "price": Decimal(59900),
+                            "amount": Decimal(0.8),
+                        },
                     ],
-                ),
+                },
+            ],
+        ),
+        # Test case 2: Basic, no inventory compensation, e2 driven
+        (
+            [
+                {
+                    "bids": [[49900, 1], [49899, 1]],
+                    "asks": [[50000, 1], [50001, 1]],
+                    "timestamp": now_ms,
+                }
+            ],  # gate OB
+            [
+                {
+                    "bids": [[59900, 1], [59899, 1]],
+                    "asks": [[60000, 1], [60001, 1]],
+                    "timestamp": now_ms,
+                }
+            ],  # coinbase OB
+            [
+                {
+                    "kind": MessageType.ORDERBATCH,
+                    "strategy": "test_strategy_tt",
+                    "id": "t-0_test_strategy_tt",
+                    "orders": [
+                        {
+                            "kind": MessageType.ORDER,
+                            "strategy": "test_strategy_tt",
+                            "exchange": "gate",
+                            "id": "t-0_test_strategy_tt",
+                            "exchange_id": "_",
+                            "pair": "BTC/USDT",
+                            "side": OrderSide.BUY,
+                            "order_type": OrderType.UNIQUE,
+                            "price": Decimal(50000),
+                            "amount": Decimal(0.8008),
+                        },
+                        {
+                            "kind": MessageType.ORDER,
+                            "strategy": "test_strategy_tt",
+                            "exchange": "coinbase",
+                            "id": "t-0_test_strategy_tt",
+                            "exchange_id": "_",
+                            "pair": "BTC/USDT",
+                            "side": OrderSide.SELL,
+                            "order_type": OrderType.UNIQUE,
+                            "price": Decimal(59900),
+                            "amount": Decimal(0.8),
+                        },
+                    ],
+                },
+            ],
+        ),
+        # Test case 3: No arb 
+        (
+            [
+                {
+                    "bids": [[49900, 1], [49899, 1]],
+                    "asks": [[50000, 1], [50001, 1]],
+                    "timestamp": now_ms,
+                }
+            ],  # gate OB
+            [
+                {
+                    "bids": [[49900, 1], [49899, 1]],
+                    "asks": [[50000, 1], [50001, 1]],
+                    "timestamp": now_ms,
+                }
+            ],  # coinbase OB
+            [
             ],
         ),
     ],
@@ -93,7 +171,7 @@ async def test_single_edge_liquidity_order(
     # Patch functions
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
-            "apps.maker.src.strategies.single_edge_liquidity.retrieve_ob_redis",
+            "apps.maker.src.strategies.take_take.retrieve_ob_redis",
             retrieve_ob_redis_mock,
         )
         mp.setattr(
