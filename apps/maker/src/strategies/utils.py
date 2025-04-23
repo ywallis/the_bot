@@ -306,7 +306,7 @@ def ob_matcher(
     max_order_size: float,
     min_order_size: float,
     extend_spread=0,
-) -> tuple[float, float, float]:
+) -> tuple[float, float, float] | None:
     """This function takes in two order books sides represented by lists.
     It will then go both lists, and generate a target ask, target bid, and appropriate size to
     extract maximum value from both books. Other inputs are floats.
@@ -341,4 +341,4 @@ def ob_matcher(
             break
 
     logger.debug("Could not successfully match order books")
-    return 0, 0, 0
+    return None

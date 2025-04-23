@@ -31,6 +31,7 @@ async def take_take(redis: Redis, strategy: dict[str, str]):
     sizing: float = float(strategy["sizing"])
     min_size_usdt: float = float(strategy["min_size_usdt"])
     max_size_usdt: float = float(strategy["max_size_usdt"])
+    joint_nonce: str = ""
     min_size: float
     max_size: float
 
@@ -72,6 +73,13 @@ async def take_take(redis: Redis, strategy: dict[str, str]):
         if current_time - e2_order_book_time > timedelta(seconds=15):
             logger.debug("Maker order book is stale, waiting for update")
             continue
+
+        # Double order prevention
+        if e1_order_book["timestamp"] + e2_order_book["timestamp"] == joint_nonce:
+            logger.debug("Order book combination has not changed since last cycle.")
+            continue
+        else: 
+            joint_nonce = e1_order_book["timestamp"] + e2_order_book["timestamp"]
 
         e1_bids: list[list] = e1_order_book["bids"]
         e1_asks: list[list] = e1_order_book["asks"]

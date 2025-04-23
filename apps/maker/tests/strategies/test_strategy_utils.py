@@ -170,7 +170,7 @@ def test_maker_order_sizer():
         # Matching at depth 1
         ([[100, 1], [99, 4]], [[95, 1], [90, 5]], 1.05, 1.0, 10, 1.5, 0, (90, 99, 5.0)),
         # Not enough spread (should not match)
-        ([[95, 1], [94, 1]], [[94, 1], [93, 1]], 1.2, 1.0, 10, 0.5, 0, (0, 0, 0)),
+        ([[95, 1], [94, 1]], [[94, 1], [93, 1]], 1.2, 1.0, 10, 0.5, 0, None),
         # Sizing too small to meet min_order_size
         (
             [[101, 0.2], [100, 0.3]],
@@ -180,7 +180,7 @@ def test_maker_order_sizer():
             10,
             1.0,
             0,
-            (0, 0, 0),
+            None,
         ),
         # Capped by max_order_size
         ([[100, 10]], [[90, 10]], 1.05, 1.0, 5.0, 1.0, 0, (90, 100, 5.0)),
@@ -196,7 +196,9 @@ def test_maker_order_sizer():
             (89, 100, 1.0),
         ),
         # extend_spread too large, out of bounds
-        ([[100, 1]], [[90, 1]], 1.1, 1.0, 10, 0.5, 1, (0, 0, 0)),
+        ([[100, 1]], [[90, 1]], 1.1, 1.0, 10, 0.5, 1, None),
+        # Books too thin to satisfy min 
+        ([[100, 0.1]], [[90, 0.1]], 1.1, 1.0, 10, 0.5, 0, None),
     ],
 )
 def test_ob_matcher(

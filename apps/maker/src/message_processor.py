@@ -75,6 +75,11 @@ class MessageProcessor:
                         logger.debug(f"Received init reply from broker: {response}")
                         order_batch = cast(OrderBatchMessage, parse_message(response))
                         for order in order_batch["orders"]:
+
+                            # No recollection of unique orders
+                            
+                            if order.get('order_type') == OrderType.UNIQUE:
+                                continue
                             open_orders[order["strategy"]] = order
                         break
                 await pubsub.unsubscribe("INIT")
