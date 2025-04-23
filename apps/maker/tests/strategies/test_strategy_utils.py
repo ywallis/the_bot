@@ -154,6 +154,35 @@ async def test_check_if_solvent_false():
 
     assert is_solvent is False  # Expect True because balances are sufficient
 
+@pytest.mark.asyncio
+async def test_check_if_solvent_false_old_timestamp():
+    redis_mock = AsyncMock()
+
+    buy_client_id = "client1"
+    sell_client_id = "client2"
+    price = 100
+    quantity = 2
+    pair = "BTC/USDT"
+    order_timestamp = 2
+
+    # Mock balances
+    buy_balance = {"USDT": {"free": 1000}, "timestamp": 1}
+    sell_balance = {"BTC": {"free": 1000}, "timestamp": 1}
+
+    # Mock `redis.get()` correctly
+    redis_mock.get = AsyncMock(
+        side_effect=[
+            json.dumps(buy_balance),  # First call (balance-client1)
+            json.dumps(sell_balance),  # Second call (balance-client2)
+        ]
+    )
+
+    is_solvent = await check_if_solvent(
+        redis_mock, buy_client_id, sell_client_id, price, quantity, pair, order_timestamp
+    )
+
+    assert is_solvent is False  # Expect True because balances are sufficient
+
 
 def test_maker_order_sizer():
     taker_book = [[50001, 1], [50002, 2], [50003, 3]]
