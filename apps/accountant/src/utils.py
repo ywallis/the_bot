@@ -1,8 +1,33 @@
 from copy import deepcopy
+import os
 import psycopg
 from psycopg import sql
 
+from dotenv import load_dotenv
 from apps.shared.src.structs import CustomExchange
+
+
+def load_pg_config() -> dict[str, str]:
+    config: dict[str, str] = {}
+
+    load_dotenv()
+    POSTGRES_DB = os.getenv("POSTGRES_DB")
+    if POSTGRES_DB is None:
+        raise Exception("DB Credentials not found")
+    POSTGRES_USER = os.getenv("POSTGRES_USER")
+    if POSTGRES_USER is None:
+        raise Exception("DB Credentials not found")
+    POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+    if POSTGRES_PASSWORD is None:
+        raise Exception("DB Credentials not found")
+    POSTGRES_PORT = os.getenv("POSTGRES_PORT")
+    if POSTGRES_PORT is None:
+        raise Exception("DB Credentials not found")
+    config["POSTGRES_DB"] = POSTGRES_DB
+    config["POSTGRES_USER"] = POSTGRES_USER
+    config["POSTGRES_PASSWORD"] = POSTGRES_PASSWORD
+    config["POSTGRES_PORT"] = POSTGRES_PORT
+    return config
 
 
 def prepare_items_for_pg(
@@ -39,22 +64,23 @@ def prepare_items_for_pg(
 
         for fee in item.get("fees", []):
             if isinstance(fee, dict):
-                if float(fee.get("cost", 0)) != 0:
+                if float(fee.get("cost", "0")) != "0":
                     item["fee_cost"] = fee.get("cost", "")
                     item["fee_currency"] = fee.get("currency", "")
         item["exchange"] = client.name
 
         # Generate usdt_value column
-        cost_str = item.get("cost", "0")
-        fee_cost_str = item.get("fee_cost", "0")
+        cost_str = str(item.get("cost", "0"))
+        fee_cost_str = str(item.get("fee_cost", "0"))
 
-        assert cost_str is str
+        print(cost_str)
+        assert isinstance(cost_str, str)
         try:
             cost = float(cost_str)
         except ValueError:
             cost = 0.0
 
-        assert fee_cost_str is str
+        assert isinstance(fee_cost_str, str)
         try:
             fee_cost = float(fee_cost_str)
         except ValueError:
@@ -68,8 +94,8 @@ def prepare_items_for_pg(
             item["usdt_value"] = str(cost - fee_cost)
 
         # Generate asset_net_q column
-        amount_str = item.get("amount", "0")
-        assert amount_str is str
+        amount_str = str(item.get("amount", "0"))
+        assert isinstance(amount_str, str)
         try:
             amount = float(amount_str)
         except ValueError:
@@ -129,15 +155,16 @@ async def retrieve_and_prepare_trades(
     return prepare_items_for_pg(client, trades)
 
 
-def export_to_sql(data: list[dict], credentials: dict, table: str):
+def export_to_sql(data: list[dict], credentials: dict[str, str], table: str):
     """Takes in a list of orders or trades in CCXT format, and a dict of PG credentials, and outputs the data to the attached DB."""
 
     dbname = credentials["POSTGRES_DB"]
     user = credentials["POSTGRES_USER"]
     password = credentials["POSTGRES_PASSWORD"]
+    port = credentials["POSTGRES_PORT"]
 
     with psycopg.connect(
-        f"dbname={dbname} user={user} password={password} host=localhost port=5432"
+        f"dbname={dbname} user={user} password={password} host=localhost port={port}"
     ) as conn:
         with conn.cursor() as cur:
             # Insert data
@@ -152,9 +179,14 @@ def export_to_sql(data: list[dict], credentials: dict, table: str):
                 sql.SQL(", ").join(columns_identifiers),
                 sql.SQL(", ").join(sql.Placeholder() * len(columns)),
             )
+            def sanitize(value):
+                if value == "":
+                    return None
+                return value
+
 
             # Convert dictionaries to tuple format for psycopg3
-            values = [tuple(d.values()) for d in data]
+            values = [tuple(sanitize(v) for v in d.values()) for d in data]
 
             # Execute the insert for all rows
             cur.executemany(insert_query, values)

@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 async def fetch_balance(client: CustomExchange, redis: Redis):
     try:
         balance = await client.fetch_balance()
+        balance["timestamp"] = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
         logger.debug(f"Balances on {client.name} are {balance}")
         await redis.set(f"balance-{client.id}", json.dumps(balance))
 
