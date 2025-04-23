@@ -224,6 +224,7 @@ async def test_generate_take_take_order():
     buy_price = 100
     sell_price = 110
     amount = 1
+    last_order_timestamp = 0
 
     expected_buy_order = OrderMessage(
         kind=MessageType.ORDER,
@@ -281,6 +282,7 @@ async def test_generate_take_take_order():
                 pair,
                 strategy,
                 identifier,
+                last_order_timestamp
             )
         )
         await asyncio.sleep(0.1)

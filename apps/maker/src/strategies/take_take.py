@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from redis.asyncio import Redis
 
 import apps.maker.src.logging_config as logging_config
@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 
 # TODO:
 
-# - Check throttling!
+# - Small sleep after order send
+
 
 async def take_take(redis: Redis, strategy: dict[str, str]):
     # Defining state
@@ -32,6 +33,7 @@ async def take_take(redis: Redis, strategy: dict[str, str]):
     min_size_usdt: float = float(strategy["min_size_usdt"])
     max_size_usdt: float = float(strategy["max_size_usdt"])
     joint_nonce: str = ""
+    last_order_timestamp: int = 0
     min_size: float
     max_size: float
 
@@ -78,8 +80,19 @@ async def take_take(redis: Redis, strategy: dict[str, str]):
         if e1_order_book["timestamp"] + e2_order_book["timestamp"] == joint_nonce:
             logger.debug("Order book combination has not changed since last cycle.")
             continue
-        else: 
+        else:
             joint_nonce = e1_order_book["timestamp"] + e2_order_book["timestamp"]
+
+        if int(e1_order_book["timestamp"]) < last_order_timestamp:
+            logger.debug(
+                f"{exchange_1} order book has not been refreshed since last order"
+            )
+            continue
+        if int(e2_order_book["timestamp"]) < last_order_timestamp:
+            logger.debug(
+                f"{exchange_2} order book has not been refreshed since last order"
+            )
+            continue
 
         e1_bids: list[list] = e1_order_book["bids"]
         e1_asks: list[list] = e1_order_book["asks"]
@@ -124,4 +137,7 @@ async def take_take(redis: Redis, strategy: dict[str, str]):
             symbol,
             strategy,
             "tt",
+            last_order_timestamp
         )
+        last_order_timestamp = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+

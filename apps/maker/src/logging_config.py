@@ -25,4 +25,4 @@ def setup_logging(log_file="app.log"):
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)

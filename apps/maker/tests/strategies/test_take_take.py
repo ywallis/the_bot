@@ -158,7 +158,7 @@ async def test_take_take(
     retrieve_ob_redis_mock = AsyncMock(side_effect=retrieve_ob_redis_side_effect)
 
     async def retrieve_balance_redis_side_effect(_redis, _symbol):
-        return {"BTC": {"free": 50000}, "USDT": {"free": 500000}}
+        return {"BTC": {"free": 50000}, "USDT": {"free": 500000}, "timestamp": now_ms}
 
     retrieve_balance_redis_mock = AsyncMock(
         side_effect=retrieve_balance_redis_side_effect
@@ -234,38 +234,6 @@ async def test_take_take_throttle(
             "timestamp": now_ms,
         }
     ]
-    # coinbase OB
-    # expected_message = {
-    #     "kind": MessageType.ORDERBATCH,
-    #     "strategy": "test_strategy_tt",
-    #     "id": "t-0_test_strategy_tt",
-    #     "orders": [
-    #         {
-    #             "kind": MessageType.ORDER,
-    #             "strategy": "test_strategy_tt",
-    #             "exchange": "gate",
-    #             "id": "t-0_test_strategy_tt",
-    #             "exchange_id": "_",
-    #             "pair": "BTC/USDT",
-    #             "side": OrderSide.BUY,
-    #             "order_type": OrderType.UNIQUE,
-    #             "price": Decimal(50000),
-    #             "amount": Decimal(0.8008),
-    #         },
-    #         {
-    #             "kind": MessageType.ORDER,
-    #             "strategy": "test_strategy_tt",
-    #             "exchange": "coinbase",
-    #             "id": "t-0_test_strategy_tt",
-    #             "exchange_id": "_",
-    #             "pair": "BTC/USDT",
-    #             "side": OrderSide.SELL,
-    #             "order_type": OrderType.UNIQUE,
-    #             "price": Decimal(59900),
-    #             "amount": Decimal(0.8),
-    #         },
-    #     ],
-    # }
 
     async def retrieve_ob_redis_side_effect(_redis, symbol):
         if "gate" in symbol:
@@ -277,7 +245,7 @@ async def test_take_take_throttle(
     retrieve_ob_redis_mock = AsyncMock(side_effect=retrieve_ob_redis_side_effect)
 
     async def retrieve_balance_redis_side_effect(_redis, _symbol):
-        return {"BTC": {"free": 50000}, "USDT": {"free": 500000}}
+        return {"BTC": {"free": 50000}, "USDT": {"free": 500000}, "timestamp": now_ms}
 
     retrieve_balance_redis_mock = AsyncMock(
         side_effect=retrieve_balance_redis_side_effect

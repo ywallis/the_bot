@@ -57,6 +57,7 @@ async def check_if_solvent(
     price: float,
     quantity: float,
     pair: str,
+    last_order_timestamp: None | int = None,
 ) -> bool:
     """This function checks if two exchanges have the necessary balances to place
     two arbitrage orders in their relevant assets."""
@@ -75,6 +76,18 @@ async def check_if_solvent(
     if buy_client_balance is None or sell_client_balance is None:
         logger.error("Error retrieving balance from Redis")
         raise Exception("Error retrieving balance")
+
+    if last_order_timestamp is not None:
+        if last_order_timestamp > int(buy_client_balance["timestamp"]):
+            logger.debug(
+                f"Balance on {buy_client_id} hasn't been updated since last order."
+            )
+            return False
+        if last_order_timestamp > int(sell_client_balance["timestamp"]):
+            logger.debug(
+                f"Balance on {sell_client_id} hasn't been updated since last order."
+            )
+            return False
 
     try:
         if (
@@ -194,9 +207,16 @@ async def generate_take_take_order(
     pair: str,
     strategy: dict[str, str],
     identifier: str,
+    last_order_timestamp: int,
 ) -> OrderBatchMessage | None:
     if await check_if_solvent(
-        redis, buy_exchange, sell_exchange, sell_price, amount, pair
+        redis,
+        buy_exchange,
+        sell_exchange,
+        sell_price,
+        amount,
+        pair,
+        last_order_timestamp,
     ):
         common_id = generate_oid(strategy["identifier"], identifier)
 
