@@ -1,7 +1,10 @@
 import os
-from dotenv import load_dotenv
-from apps.shared.src.utils import load_config
+
 import ccxt.pro as ccxt
+from dotenv import load_dotenv
+
+from apps.shared.src.structs import CustomExchange
+from apps.shared.src.utils import load_config
 
 load_dotenv()
 # Load TOML file
@@ -12,7 +15,7 @@ exchanges = config.get("exchanges", [])
 strategies = config.get("strategies", [])
 symbols = set([strategy["symbol"] for strategy in strategies])
 
-authenticated_clients = {}
+authenticated_clients: dict[str, CustomExchange] = {}
 
 for exchange in exchanges:
     id = exchange["id"]
@@ -34,6 +37,5 @@ for exchange in exchanges:
         auth_client = getattr(ccxt, id)(
             {"apiKey": exchange_key, "secret": exchange_secret}
         )
-        auth_client.options['maxRetriesOnFailure'] = 1
+        auth_client.options["maxRetriesOnFailure"] = 1
     authenticated_clients[id] = auth_client
-

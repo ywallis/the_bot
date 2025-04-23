@@ -1,14 +1,16 @@
-import pytest
 import asyncio
 from unittest.mock import AsyncMock, patch
-from apps.maker.src.structs import CustomExchange
-from apps.maker.src.enums import MessageType
+
+import pytest
+
 from apps.maker.src.broker import (
     process_message,
-    worker,
-    results_worker,
     redis_subscriber,
+    results_worker,
+    worker,
 )
+from apps.maker.src.enums import MessageType
+from apps.shared.src.structs import CustomExchange
 
 
 # Need to create a ccxt response fixture
@@ -109,9 +111,7 @@ async def test_results_worker_cancellation():
 
     await results_worker(mock_redis, results_queue)
 
-    mocked_publish.assert_called_once_with(
-        "234", f"{MessageType.CANCELLATION}|success"
-    )
+    mocked_publish.assert_called_once_with("234", f"{MessageType.CANCELLATION}|success")
 
 
 @pytest.mark.asyncio

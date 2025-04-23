@@ -1,6 +1,6 @@
 from collections import deque
 from decimal import Decimal
-from typing import Protocol, TypedDict
+from typing import TypedDict
 
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
 
@@ -33,33 +33,10 @@ class CancellationMessage(TypedDict):
     pair: str
 
 
-class CustomExchange(Protocol):
-    name: str
-    id: str
-
-    async def create_order(
-        self, symbol: str, type: str, side: str, amount: float, price: float, params={}
-    ) -> dict: ...
-    async def cancel_order(self, id: str, symbol: str) -> dict: ...
-
-    async def fetch_open_orders(
-        self,
-        symbol: str | None = None,
-        since: int | None = None,
-        limit: int | None = None,
-        params={},
-    ) -> list[dict[str, str]]: ...
-    async def watch_order_book(self, symbol: str) -> dict: ...
-
-    async def watch_balance(self) -> dict: ...
-    async def fetch_balance(self) -> dict: ...
-    async def watch_orders(self, symbol: str, since: int) -> list[dict]: ...
-    async def close(self): ...
-    
-
 class Response(TypedDict):
     kind: MessageType
     text: str
+
 
 class LimitedSet:
     def __init__(self, max_size):

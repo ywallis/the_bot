@@ -7,3 +7,13 @@ def load_config():
     with open(CONFIG_PATH, "rb") as f:
         config = tomllib.load(f)
         return config
+
+
+exchange_and_pair: set[tuple[str, str]] = set()
+
+strategies = load_config().get("strategies")
+if strategies is None:
+    raise Exception("No strategy found")
+for strategy in strategies:
+    exchange_and_pair.add((strategy["exchange_1"], strategy["symbol"]))
+    exchange_and_pair.add((strategy["exchange_2"], strategy["symbol"]))

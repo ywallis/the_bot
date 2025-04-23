@@ -6,8 +6,8 @@ from redis.asyncio import ConnectionPool, Redis
 
 import apps.maker.src.logging_config as logging_config
 from apps.maker.src.errors import NetworkError
-from apps.maker.src.structs import CustomExchange
 from apps.shared.src.exchange_clients import authenticated_clients
+from apps.shared.src.structs import CustomExchange
 
 # TODO:
 

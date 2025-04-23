@@ -14,9 +14,9 @@ from apps.maker.src.ccxt_abstractions import (
 from apps.maker.src.constants import BROKER_CHANNEL, REDIS_HOSTNAME, REDIS_PORT
 from apps.maker.src.enums import MessageType
 from apps.maker.src.errors import BrokerError, NetworkError, RequestTimeout
+from apps.shared.src.structs import CustomExchange
 from apps.maker.src.structs import (
     CancellationMessage,
-    CustomExchange,
     OrderBatchMessage,
     OrderMessage,
 )

@@ -1,6 +1,6 @@
 import asyncio
-from decimal import Decimal
 import json
+from decimal import Decimal
 from unittest.mock import AsyncMock
 
 import pytest
@@ -8,7 +8,8 @@ import pytest
 from apps.maker.src.constants import MESSAGE_PROCESSOR_CHANNEL
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
 from apps.maker.src.matcher import watch_orders
-from apps.maker.src.structs import CustomExchange, OrderMessage
+from apps.maker.src.structs import OrderMessage
+from apps.shared.src.structs import CustomExchange
 
 
 @pytest.mark.asyncio
@@ -95,9 +96,7 @@ async def test_watch_buy_orders_various_order_states():
         asyncio.CancelledError("stop test loop"),  # force loop exit
     ]
 
-    should_match = {
-        "strategy123": "gate"
-    }
+    should_match = {"strategy123": "gate"}
 
     # Launch the watcher
     task = asyncio.create_task(watch_orders(redis, client, "BTC/USDT", should_match))
@@ -115,6 +114,7 @@ async def test_watch_buy_orders_various_order_states():
     assert channel == MESSAGE_PROCESSOR_CHANNEL
     assert '"exchange": "gate"' in message
     assert message == json.dumps(dict(expected_matching_order), default=str)
+
 
 @pytest.mark.asyncio
 async def test_watch_sell_orders_various_order_states():
@@ -201,9 +201,7 @@ async def test_watch_sell_orders_various_order_states():
         asyncio.CancelledError("stop test loop"),  # force loop exit
     ]
 
-    should_match = {
-        "strategy123": "gate"
-    }
+    should_match = {"strategy123": "gate"}
 
     # Launch the watcher
     task = asyncio.create_task(watch_orders(redis, client, "BTC/USDT", should_match))
@@ -221,6 +219,7 @@ async def test_watch_sell_orders_various_order_states():
     assert channel == MESSAGE_PROCESSOR_CHANNEL
     assert '"exchange": "gate"' in message
     assert message == json.dumps(dict(expected_matching_order), default=str)
+
 
 @pytest.mark.asyncio
 async def test_watch_sell_orders_match_self():
@@ -296,9 +295,7 @@ async def test_watch_sell_orders_match_self():
         asyncio.CancelledError("stop test loop"),  # force loop exit
     ]
 
-    should_match = {
-        "strategy123": "gate"
-    }
+    should_match = {"strategy123": "gate"}
 
     # Launch the watcher
     task = asyncio.create_task(watch_orders(redis, client, "BTC/USDT", should_match))

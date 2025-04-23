@@ -9,22 +9,12 @@ import apps.maker.src.logging_config as logging_config
 from apps.maker.src.errors import NetworkError
 from apps.maker.src.structs import CustomExchange
 from apps.shared.src.exchange_clients import authenticated_clients
-from apps.shared.src.utils import load_config
+from apps.shared.src.utils import exchange_and_pair
 
 # TODO:
 
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
-
-config = load_config()
-exchange_and_pair: set[tuple[str, str]] = set()
-
-strategies = config.get("strategies")
-if strategies is None:
-    raise Exception("No strategy found")
-for strategy in strategies:
-    exchange_and_pair.add((strategy["exchange_1"], strategy["symbol"]))
-    exchange_and_pair.add((strategy["exchange_2"], strategy["symbol"]))
 
 
 async def watch_ob(client: CustomExchange, ticker: str, redis: Redis):
