@@ -2,7 +2,6 @@ import asyncio
 import logging
 import time
 
-# from datetime import UTC, datetime, timedelta
 from redis.asyncio import Redis
 
 import apps.maker.src.logging_config as logging_config
@@ -50,7 +49,6 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
     await send_processor_cancellation(redis, strategy, buy_order_identifier)
 
     while watching:
-        
         # Simple throttle
 
         time.sleep(0.01)
@@ -70,25 +68,8 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
             await asyncio.sleep(1)
             continue
 
-        # current_time = datetime.now(UTC)
-        # taker_order_book_time = datetime.fromtimestamp(
-        #     taker_order_book["timestamp"] / 1000, UTC
-        # )
-        # maker_order_book_time = datetime.fromtimestamp(
-        #     maker_order_book["timestamp"] / 1000, UTC
-        # )
         logger.debug(f"Taker ({taker}) order book is \n {taker_order_book}")
         logger.debug(f"Maker ({maker}) order book is \n {maker_order_book}")
-
-        # Do I really need this if take-take is not involved?
-
-        # if current_time - taker_order_book_time > timedelta(seconds=5):
-        #     logger.info("Taker order book is stale, waiting for update")
-        #     continue
-        #
-        # if current_time - maker_order_book_time > timedelta(seconds=5):
-        #     logger.info("Maker order book is stale, waiting for update")
-        #     continue
 
         taker_client_bids: list[list] = taker_order_book["bids"]
         taker_client_asks: list[list] = taker_order_book["asks"]

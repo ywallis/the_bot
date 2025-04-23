@@ -8,7 +8,7 @@ import time
 from dotenv import load_dotenv
 
 import apps.maker.src.logging_config as logging_config
-from apps.maker.src.utils import load_config
+from apps.shared.src.utils import load_config
 
 # Setup logging
 logging_config.setup_logging()
@@ -32,7 +32,7 @@ for strategy in strategies:
         raise Exception(f"Duplicate strategy identifier: {identifier}")
     else:
         identified_strategies.append(identifier)
-        
+
 
 # Unique processes (start immediately)
 PROCESS_LIST = [
@@ -43,9 +43,11 @@ PROCESS_LIST = [
     ["uv", "run", "-m", "apps.maker.src.message_processor"],
 ]
 
+
 def launch_process(cmd):
     """Launch a process in its own process group."""
     return subprocess.Popen(cmd, preexec_fn=os.setpgrp)
+
 
 def cleanup_and_exit(exit_code=1):
     """Terminate all running processes and exit."""
@@ -61,9 +63,11 @@ def cleanup_and_exit(exit_code=1):
                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)  # Force kill if needed
     sys.exit(exit_code)
 
+
 # Register signal handlers for manual termination (Ctrl+C)
 def handle_exit(_sig, _frame):
     cleanup_and_exit(0)  # Normal exit on SIGINT/SIGTERM
+
 
 signal.signal(signal.SIGINT, handle_exit)
 signal.signal(signal.SIGTERM, handle_exit)
@@ -93,4 +97,3 @@ if __name__ == "__main__":
                     logger.error(f"Process {proc} crashed unexpectedly, winding down.")
                     cleanup_and_exit(1)
         time.sleep(2)
-

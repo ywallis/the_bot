@@ -1,15 +1,14 @@
-from pathlib import Path
-import tomllib
-from typing import TypeGuard, Any, cast
-from apps.maker.src.enums import MessageType, OrderSide, OrderType, OidComponent
+import json
+from decimal import Decimal
+from typing import Any, TypeGuard, cast
+
+from apps.maker.src.enums import MessageType, OidComponent, OrderSide, OrderType
 from apps.maker.src.structs import (
+    CancellationMessage,
     OrderBatchMessage,
     OrderMessage,
-    CancellationMessage,
     Response,
 )
-from decimal import Decimal
-import json
 
 
 def info_from_oid(oid: str, desired_component: OidComponent) -> str:
@@ -25,13 +24,6 @@ def info_from_oid(oid: str, desired_component: OidComponent) -> str:
             return components[1]
         case OidComponent.ORDER:
             return components[2]
-
-
-def load_config():
-    CONFIG_PATH = Path(__file__).parents[3] / "config" / "config.toml"
-    with open(CONFIG_PATH, "rb") as f:
-        config = tomllib.load(f)
-        return config
 
 
 def parse_message(

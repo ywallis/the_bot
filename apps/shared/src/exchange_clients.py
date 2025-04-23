@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from apps.maker.src.utils import load_config
+from apps.shared.src.utils import load_config
 import ccxt.pro as ccxt
 
 load_dotenv()

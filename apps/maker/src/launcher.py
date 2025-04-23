@@ -1,15 +1,17 @@
 import asyncio
-import logging
 import importlib
+import logging
 import sys
+
 from redis.asyncio import ConnectionPool, Redis
 
 import apps.maker.src.logging_config as logging_config
 from apps.maker.src.constants import REDIS_HOSTNAME, REDIS_PORT
-from apps.maker.src.utils import load_config
+from apps.shared.src.utils import load_config
 
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
+
 
 async def main(strategy_index: int):
     pool = ConnectionPool(
@@ -30,11 +32,14 @@ async def main(strategy_index: int):
 
     # Ensure the function exists in the module
     if not hasattr(module, function_name):
-        raise AttributeError(f"Function '{function_name}' not found in module '{module.__name__}'")
+        raise AttributeError(
+            f"Function '{function_name}' not found in module '{module.__name__}'"
+        )
 
     # Get function reference and execute it
     strategy_function = getattr(module, function_name)
     await strategy_function(redis, strategy)  # Pass the selected strategy
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
@@ -44,4 +49,3 @@ if __name__ == "__main__":
     strategy_index = int(sys.argv[1])
 
     asyncio.run(main(strategy_index))
-

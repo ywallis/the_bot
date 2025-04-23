@@ -15,9 +15,10 @@ from apps.maker.src.constants import (
 )
 from apps.maker.src.enums import MessageType, OidComponent, OrderSide, OrderType
 from apps.maker.src.errors import NetworkError
-from apps.maker.src.exchange_clients import authenticated_clients
 from apps.maker.src.structs import CustomExchange, LimitedSet, OrderMessage
-from apps.maker.src.utils import info_from_oid, load_config
+from apps.maker.src.utils import info_from_oid
+from apps.shared.src.exchange_clients import authenticated_clients
+from apps.shared.src.utils import load_config
 
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)

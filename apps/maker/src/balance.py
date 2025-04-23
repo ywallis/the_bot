@@ -5,9 +5,9 @@ import logging
 from redis.asyncio import ConnectionPool, Redis
 
 import apps.maker.src.logging_config as logging_config
-from apps.maker.src.exchange_clients import authenticated_clients
-from apps.maker.src.structs import CustomExchange
 from apps.maker.src.errors import NetworkError
+from apps.maker.src.structs import CustomExchange
+from apps.shared.src.exchange_clients import authenticated_clients
 
 # TODO:
 
@@ -22,10 +22,13 @@ async def fetch_balance(client: CustomExchange, redis: Redis):
         await redis.set(f"balance-{client.id}", json.dumps(balance))
 
     except NetworkError as e:
-        logger.error(f" Ignoring NetworkError in watch_balance for client {client.id}: {e}")
+        logger.error(
+            f" Ignoring NetworkError in watch_balance for client {client.id}: {e}"
+        )
     except Exception as e:
         logger.error(f"Error in watch_balance for client {client.id}: {e}")
         raise
+
 
 async def watch_balance(client: CustomExchange, redis: Redis):
     while True:
@@ -35,7 +38,9 @@ async def watch_balance(client: CustomExchange, redis: Redis):
             await redis.set(f"balance-{client.id}", json.dumps(balance))
 
         except NetworkError as e:
-            logger.error(f" Ignoring NetworkError in watch_balance for client {client.id}: {e}")
+            logger.error(
+                f" Ignoring NetworkError in watch_balance for client {client.id}: {e}"
+            )
         except Exception as e:
             logger.error(f"Error in watch_balance for client {client.id}: {e}")
             raise

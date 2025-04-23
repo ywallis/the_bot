@@ -6,15 +6,14 @@ from typing import Any
 from redis.asyncio import Redis
 from redis.asyncio.client import PubSub
 
-from apps.maker.src.constants import REDIS_HOSTNAME, REDIS_PORT, BROKER_CHANNEL
 import apps.maker.src.logging_config as logging_config
 from apps.maker.src.ccxt_abstractions import (
     cancel_order_return_confirmation,
     create_and_return_order,
 )
+from apps.maker.src.constants import BROKER_CHANNEL, REDIS_HOSTNAME, REDIS_PORT
 from apps.maker.src.enums import MessageType
-from apps.maker.src.errors import BrokerError, RequestTimeout, NetworkError
-from apps.maker.src.exchange_clients import authenticated_clients, symbols
+from apps.maker.src.errors import BrokerError, NetworkError, RequestTimeout
 from apps.maker.src.structs import (
     CancellationMessage,
     CustomExchange,
@@ -27,6 +26,7 @@ from apps.maker.src.utils import (
     order_from_ccxt,
     parse_message,
 )
+from apps.shared.src.exchange_clients import authenticated_clients, symbols
 
 # Initializing centralized logging
 logging_config.setup_logging()
