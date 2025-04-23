@@ -1,5 +1,6 @@
 from typing import Protocol
 
+
 class CustomExchange(Protocol):
     name: str
     id: str
@@ -23,4 +24,12 @@ class CustomExchange(Protocol):
     async def watch_orders(self, symbol: str, since: int) -> list[dict]: ...
     async def close(self): ...
     async def load_markets(self): ...
-    
+    async def fetch_canceled_and_closed_orders(
+        self, symbol: str, limit: int, since: str | None, params: dict
+    ) -> dict | list[dict]: ...
+    async def fetch_closed_orders(
+        self, symbol: str, limit: int, since: str | None, params: dict
+    ) -> dict | list[dict]: ...
+    async def fetch_my_trades(
+        self, symbol: str, limit: int, since: str | None, params: dict
+    ) -> dict | list[dict]: ...

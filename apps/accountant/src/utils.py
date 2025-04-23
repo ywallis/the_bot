@@ -1,12 +1,20 @@
+from copy import deepcopy
 import psycopg
 from psycopg import sql
 
+from apps.shared.src.structs import CustomExchange
 
-def prepare_items_for_pg(client, imported_items):
+
+def prepare_items_for_pg(
+    client: CustomExchange,
+    raw_items: list[dict[str, str | dict[str, str]]] | dict[str, str | dict[str, str]],
+):
     """This function prepares CCXT order/trade items for an export to a PG database"""
 
-    if type(imported_items) is not list:
-        items = [imported_items]
+    imported_items = deepcopy(raw_items)
+
+    if not isinstance(imported_items, list):
+        items: list[dict[str, str | dict[str, str]]] = [imported_items]
     else:
         items = imported_items
 
@@ -19,39 +27,58 @@ def prepare_items_for_pg(client, imported_items):
 
         # Integrating empty statement in case of nonexistent values
 
-        item["fee_cost"] = None
-        item["fee_currency"] = None
-        item["usdt_value"] = None
-        item["asset_net_q"] = None
+        item["fee_cost"] = ""
+        item["fee_currency"] = ""
+        item["usdt_value"] = ""
+        item["asset_net_q"] = ""
 
-        if item["fee"] is not None:
-            item["fee_cost"] = item["fee"]["cost"]
-            item["fee_currency"] = item["fee"]["currency"]
-        for fee in item["fees"]:
-            if float(fee["cost"]) != 0:
-                item["fee_cost"] = fee["cost"]
-                item["fee_currency"] = fee["currency"]
+        fee = item.get("fee")
+        if isinstance(fee, dict):
+            item["fee_cost"] = fee.get("cost", "")
+            item["fee_currency"] = fee.get("currency", "")
+
+        for fee in item.get("fees", []):
+            if isinstance(fee, dict):
+                if float(fee.get("cost", 0)) != 0:
+                    item["fee_cost"] = fee.get("cost", "")
+                    item["fee_currency"] = fee.get("currency", "")
         item["exchange"] = client.name
 
         # Generate usdt_value column
+        cost_str = item.get("cost", "0")
+        fee_cost_str = item.get("fee_cost", "0")
+
+        assert cost_str is str
+        try:
+            cost = float(cost_str)
+        except ValueError:
+            cost = 0.0
+
+        assert fee_cost_str is str
+        try:
+            fee_cost = float(fee_cost_str)
+        except ValueError:
+            fee_cost = 0.0
 
         if item["fee_currency"] != "USDT":
-            item["usdt_value"] = item["cost"]
-        elif item["side"] == "buy":
-            item["usdt_value"] = item["cost"] + item["fee_cost"]
+            item["usdt_value"] = cost_str
+        elif item.get("side") == "buy":
+            item["usdt_value"] = str(cost + fee_cost)
         else:
-            item["usdt_value"] = item["cost"] - item["fee_cost"]
+            item["usdt_value"] = str(cost - fee_cost)
 
-        # Generate asset_net_q columns
+        # Generate asset_net_q column
+        amount_str = item.get("amount", "0")
+        assert amount_str is str
+        try:
+            amount = float(amount_str)
+        except ValueError:
+            amount = 0.0
 
         if item["fee_currency"] != "USDT":
-            if item["fee_cost"] is not None:
-                item["asset_net_q"] = item["amount"] - item["fee_cost"]
-            else:
-                item["asset_net_q"] = None
+            item["asset_net_q"] = str(amount - fee_cost)
         else:
-            item["asset_net_q"] = item["amount"]
-
+            item["asset_net_q"] = amount_str
         # Flatten dicts and lists in order to export them to columns.
         flattened_item = dict_to_text(item)
         prepared_items.append(flattened_item)
@@ -70,32 +97,39 @@ def dict_to_text(d):
     return d
 
 
-def retrieve_and_prepare_orders(client, ticker, start=None, end=None):
+async def retrieve_and_prepare_orders(
+    client: CustomExchange,
+    ticker: str,
+    start: str | None = None,
+    end: str | None = None,
+):
     """This function downloads all latest orders from a client."""
 
     if client.name == "Bitget":
-        orders = client.fetch_canceled_and_closed_orders(
+        orders = await client.fetch_canceled_and_closed_orders(
             symbol=ticker, limit=100, since=start, params={"until": end}
         )
     else:
-        orders = client.fetch_closed_orders(
+        orders = await client.fetch_closed_orders(
             symbol=ticker, limit=100, since=start, params={"until": end}
         )
 
     return prepare_items_for_pg(client, orders)
 
 
-def retrieve_and_prepare_trades(client, pair, start=None, end=None):
+async def retrieve_and_prepare_trades(
+    client: CustomExchange, pair: str, start: str | None = None, end: str | None = None
+):
     """This function downloads trades from a CCXT client and prepares them to export to a Postgres server."""
 
-    trades = client.fetch_my_trades(
+    trades = await client.fetch_my_trades(
         symbol=pair, limit=100, since=start, params={"until": end}
     )
 
     return prepare_items_for_pg(client, trades)
 
 
-def export_to_sql(data, credentials, table):
+def export_to_sql(data: list[dict], credentials: dict, table: str):
     """Takes in a list of orders or trades in CCXT format, and a dict of PG credentials, and outputs the data to the attached DB."""
 
     dbname = credentials["POSTGRES_DB"]
@@ -128,7 +162,7 @@ def export_to_sql(data, credentials, table):
         print(f"Data inserted successfully in {table} table!")
 
 
-def unaddressed_imbalances(pair, imbalances, orders):
+def unaddressed_imbalances(pair: str, imbalances, orders):
     """This function tries to notify of imbalances in an arbitrage setup, similar to the matcher, but designed as a background service.
     Imbalances are meant to be fed as a pandas DF. Orders are CCXT objects."""
 

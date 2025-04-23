@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from datetime import datetime, timezone
 
 from redis.asyncio import ConnectionPool, Redis
 
@@ -35,6 +36,8 @@ async def watch_balance(client: CustomExchange, redis: Redis):
         try:
             balance = await client.watch_balance()
             logger.debug(f"Balances on {client.name} are {balance}")
+            # Injecting timestamp
+            balance["timestamp"] = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
             await redis.set(f"balance-{client.id}", json.dumps(balance))
 
         except NetworkError as e:

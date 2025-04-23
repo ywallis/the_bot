@@ -14,7 +14,6 @@ from apps.maker.src.ccxt_abstractions import (
 from apps.maker.src.constants import BROKER_CHANNEL, REDIS_HOSTNAME, REDIS_PORT
 from apps.maker.src.enums import MessageType
 from apps.maker.src.errors import BrokerError, NetworkError, RequestTimeout
-from apps.shared.src.structs import CustomExchange
 from apps.maker.src.structs import (
     CancellationMessage,
     OrderBatchMessage,
@@ -27,6 +26,7 @@ from apps.maker.src.utils import (
     parse_message,
 )
 from apps.shared.src.exchange_clients import authenticated_clients, symbols
+from apps.shared.src.structs import CustomExchange
 
 # Initializing centralized logging
 logging_config.setup_logging()
