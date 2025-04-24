@@ -16,12 +16,12 @@ async def loop(pg_config: dict[str, str]):
             client = authenticated_clients[exchange_name]
             # logger.info()
             orders = await retrieve_and_prepare_orders(client, pair)
-            print(orders)
+            # print(orders)
             if len(orders) != 0:
                 export_to_sql(orders, pg_config, "orders")
 
             trades = await retrieve_and_prepare_trades(client, pair)
-            print(trades)
+            # print(trades)
             if len(trades) != 0:
                 export_to_sql(trades, pg_config, "trades")
 

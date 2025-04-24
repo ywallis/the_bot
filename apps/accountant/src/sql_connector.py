@@ -18,7 +18,7 @@ def send_sql_query(pg_config: dict, sql_query: SQL | Composed, raw: bool = False
         pd.DataFrame or tuple: Query result as a DataFrame or raw rows and column names.
     """
     if parameters is None:
-        parameters = dict()
+        parameters = ()
     try:
         # Establish a connection to the database
         with psycopg.connect(

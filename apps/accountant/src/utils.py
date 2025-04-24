@@ -73,7 +73,6 @@ def prepare_items_for_pg(
         cost_str = str(item.get("cost", "0"))
         fee_cost_str = str(item.get("fee_cost", "0"))
 
-        print(cost_str)
         assert isinstance(cost_str, str)
         try:
             cost = float(cost_str)
@@ -179,11 +178,11 @@ def export_to_sql(data: list[dict], credentials: dict[str, str], table: str):
                 sql.SQL(", ").join(columns_identifiers),
                 sql.SQL(", ").join(sql.Placeholder() * len(columns)),
             )
+
             def sanitize(value):
                 if value == "":
                     return None
                 return value
-
 
             # Convert dictionaries to tuple format for psycopg3
             values = [tuple(sanitize(v) for v in d.values()) for d in data]
@@ -265,3 +264,17 @@ def unaddressed_imbalances(pair: str, imbalances, orders):
 
     if buy_counter == 0 and sell_counter == 0:
         print("There are no unaddressed imbalances.")
+
+
+async def fetch_all_open_orders_client_order_id(
+    tickers: set[str], clients: dict[str, CustomExchange]
+) -> list[dict[str, str]]:
+    """Fetches the clientOrderId for all open orders regardless of client and returns them in a list"""
+    all_orders = []
+    for client in clients.values():
+        for ticker in tickers:
+            orders = await client.fetch_open_orders(ticker)
+            for order in orders:
+                all_orders.append((order["clientOrderId"]))
+
+    return all_orders

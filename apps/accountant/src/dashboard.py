@@ -19,7 +19,7 @@ if __name__ == "__main__":
         raise Exception("Query could not be loaded")
 
     daily_performance = send_sql_query(
-        pg_config, daily_overview, False, {"symbol": sym, "range": 7}
+        pg_config, daily_overview, False, {"symbol": sym, "range": 3}
     )
     # daily_performance = send_sql_query(pg_config, daily_overview, False)
     print("Daily performance:")
