@@ -9,7 +9,7 @@ maker_exchange = "mexc"
 should_match = true
 spread = 1.0025
 min_size_usdt = 10
-max_size_usdt = 11
+max_size_usdt = 50
 
 [[strategies]]
 symbol = "ALPH/USDT"
@@ -22,7 +22,7 @@ maker_exchange = "bitget"
 should_match = true
 spread = 1.0035
 min_size_usdt = 10
-max_size_usdt = 11
+max_size_usdt = 50
 
 [[strategies]]
 symbol = "ALPH/USDT"
@@ -33,7 +33,7 @@ exchange_2 = "mexc"
 spread = 1.0035
 sizing = 0.8
 min_size_usdt = 10
-max_size_usdt = 11
+max_size_usdt = 40
 
 [[strategies]]
 symbol = "ALPH/USDT"
@@ -44,7 +44,7 @@ exchange_2 = "bitget"
 spread = 1.0035
 sizing = 0.8
 min_size_usdt = 10
-max_size_usdt = 11
+max_size_usdt = 40
 
 [[exchanges]]
 name = "Gate.io"
