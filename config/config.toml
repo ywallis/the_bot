@@ -8,7 +8,7 @@ taker_exchange = "gate"
 maker_exchange = "mexc"
 should_match = true
 spread = 1.0025
-min_size_usdt = 10
+min_size_usdt = 100 
 max_size_usdt = 11
 
 [[strategies]]
@@ -21,7 +21,7 @@ taker_exchange = "gate"
 maker_exchange = "bitget"
 should_match = true
 spread = 1.0035
-min_size_usdt = 10
+min_size_usdt = 100
 max_size_usdt = 11
 
 [[strategies]]
@@ -32,7 +32,7 @@ exchange_1 = "gate"
 exchange_2 = "mexc"
 spread = 1.0035
 sizing = 0.8
-min_size_usdt = 10
+min_size_usdt = 50
 max_size_usdt = 11
 
 [[strategies]]
@@ -43,7 +43,7 @@ exchange_1 = "gate"
 exchange_2 = "bitget"
 spread = 1.0035
 sizing = 0.8
-min_size_usdt = 10
+min_size_usdt = 50
 max_size_usdt = 11
 
 [[exchanges]]
