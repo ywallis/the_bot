@@ -1,6 +1,8 @@
 import tomllib
 from pathlib import Path
 
+# TODO:
+# - Separate config for dev and prod
 
 def load_config():
     CONFIG_PATH = Path(__file__).parents[3] / "config" / "config.toml"
