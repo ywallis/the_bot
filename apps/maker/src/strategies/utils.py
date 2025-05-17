@@ -116,7 +116,9 @@ async def retrieve_balances_redis(redis_instance: Redis, key: str):
     return json.loads(serialized_balances)
 
 
-async def retrieve_ob_redis(redis_instance: Redis, key: str):
+async def retrieve_ob_redis(
+    redis_instance: Redis, key: str
+) -> dict[str, str | int | list[list[float]]] | None:
     # Get the JSON string from Redis
     serialized_ob = await redis_instance.get(key)
     if serialized_ob is None:
@@ -270,7 +272,7 @@ async def generate_take_take_order(
 
 def maker_order_sizer(
     maker_level: float,
-    taker_book: list[list],
+    taker_book: list[list[float]] | list[list[int]],
     side: OrderSide,
     min_spread: float,
     max_maker_size: float,
@@ -325,7 +327,7 @@ def ob_matcher(
     sizing: float,
     max_order_size: float,
     min_order_size: float,
-    extend_spread=0,
+    extend_spread: int = 0,
 ) -> tuple[float, float, float] | None:
     """This function takes in two order books sides represented by lists.
     It will then go both lists, and generate a target ask, target bid, and appropriate size to

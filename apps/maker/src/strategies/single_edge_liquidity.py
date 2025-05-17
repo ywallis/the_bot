@@ -71,10 +71,10 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
         logger.debug(f"Taker ({taker}) order book is \n {taker_order_book}")
         logger.debug(f"Maker ({maker}) order book is \n {maker_order_book}")
 
-        taker_client_bids: list[list] = taker_order_book["bids"]
-        taker_client_asks: list[list] = taker_order_book["asks"]
-        maker_client_bids: list[list] = maker_order_book["bids"]
-        maker_client_asks: list[list] = maker_order_book["asks"]
+        taker_client_bids: list[list[float]] = taker_order_book["bids"]
+        taker_client_asks: list[list[float]] = taker_order_book["asks"]
+        maker_client_bids: list[list[float]] = maker_order_book["bids"]
+        maker_client_asks: list[list[float]] = maker_order_book["asks"]
 
         best_bid_taker: float = taker_client_bids[0][0]
         best_ask_taker: float = taker_client_asks[0][0]
