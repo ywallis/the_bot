@@ -4,7 +4,7 @@ import time
 
 from redis.asyncio import Redis
 
-import apps.maker.src.logging_config as logging_config
+import apps.shared.src.logging_config as logging_config
 from apps.maker.src.enums import OrderSide
 from apps.maker.src.strategies.utils import (
     generate_order_replace,

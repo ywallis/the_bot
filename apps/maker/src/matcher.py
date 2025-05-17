@@ -7,16 +7,16 @@ from decimal import Decimal
 
 from redis.asyncio import ConnectionPool, Redis
 
-import apps.maker.src.logging_config as logging_config
+import apps.shared.src.logging_config as logging_config
 from apps.maker.src.constants import (
     MESSAGE_PROCESSOR_CHANNEL,
     REDIS_HOSTNAME,
     REDIS_PORT,
 )
 from apps.maker.src.enums import MessageType, OidComponent, OrderSide, OrderType
-from apps.shared.src.errors import NetworkError
 from apps.maker.src.structs import LimitedSet, OrderMessage
 from apps.maker.src.utils import info_from_oid
+from apps.shared.src.errors import NetworkError
 from apps.shared.src.exchange_clients import authenticated_clients
 from apps.shared.src.structs import CustomExchange
 from apps.shared.src.utils import load_config

@@ -5,7 +5,7 @@ import sys
 
 from redis.asyncio import ConnectionPool, Redis
 
-import apps.maker.src.logging_config as logging_config
+import apps.shared.src.logging_config as logging_config
 from apps.maker.src.constants import REDIS_HOSTNAME, REDIS_PORT
 from apps.shared.src.utils import load_config
 

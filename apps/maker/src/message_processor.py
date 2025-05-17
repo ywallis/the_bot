@@ -2,14 +2,15 @@ import ast
 import asyncio
 import json
 import logging
+from collections.abc import Awaitable
 from copy import copy
 from datetime import datetime
 from decimal import Decimal
-from typing import Awaitable, cast
+from typing import cast
 
 from redis.asyncio import ConnectionPool, Redis
 
-import apps.maker.src.logging_config as logging_config
+import apps.shared.src.logging_config as logging_config
 from apps.maker.src.constants import (
     BROKER_CHANNEL,
     MESSAGE_PROCESSOR_CHANNEL,
@@ -44,8 +45,12 @@ class MessageProcessor:
             connection_pool=self.pool, decode_responses=True
         ).pubsub()
         self.locks = {}  # Dictionary to store locks dynamically
-        self.message_queue = {}  # Dictionary to keep track of the next action to execute in case of a lock
-        self.open_orders = {}  # Keep track of last open order (could be cleaned up by the websocket watcher?)
+        self.message_queue = (
+            {}
+        )  # Dictionary to keep track of the next action to execute in case of a lock
+        self.open_orders = (
+            {}
+        )  # Keep track of last open order (could be cleaned up by the websocket watcher?)
         self.tasks = []
 
     async def get_open_orders(self):
@@ -75,10 +80,9 @@ class MessageProcessor:
                         logger.debug(f"Received init reply from broker: {response}")
                         order_batch = cast(OrderBatchMessage, parse_message(response))
                         for order in order_batch["orders"]:
-
                             # No recollection of unique orders
-                            
-                            if order.get('order_type') == OrderType.UNIQUE:
+
+                            if order.get("order_type") == OrderType.UNIQUE:
                                 continue
                             open_orders[order["strategy"]] = order
                         break

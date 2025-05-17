@@ -7,7 +7,7 @@ import time
 
 from dotenv import load_dotenv
 
-import apps.maker.src.logging_config as logging_config
+import apps.shared.src.logging_config as logging_config
 from apps.shared.src.utils import load_config
 
 # Setup logging

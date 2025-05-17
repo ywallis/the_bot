@@ -1,12 +1,12 @@
 import asyncio
-from decimal import Decimal
 import json
 import logging
 from datetime import datetime
+from decimal import Decimal
 
 from redis.asyncio import Redis
 
-import apps.maker.src.logging_config as logging_config
+import apps.shared.src.logging_config as logging_config
 from apps.maker.src.constants import MESSAGE_PROCESSOR_CHANNEL
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
 from apps.maker.src.structs import CancellationMessage, OrderBatchMessage, OrderMessage

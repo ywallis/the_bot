@@ -2,7 +2,8 @@ import asyncio
 import json
 from copy import deepcopy
 from decimal import Decimal
-from typing import Awaitable, Callable
+from typing import Callable
+from collections.abc import Awaitable
 
 import pytest
 import pytest_asyncio

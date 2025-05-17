@@ -1,16 +1,16 @@
 import asyncio
 import logging
 
-import apps.maker.src.logging_config as logging_config
+import apps.shared.src.logging_config as logging_config
 from apps.maker.src.enums import OrderType
 from apps.maker.src.errors import BrokerError
+from apps.maker.src.structs import CancellationMessage, OrderMessage
 from apps.shared.src.errors import (
     BadRequest,
     ExchangeError,
     InvalidOrder,
     RequestTimeout,
 )
-from apps.maker.src.structs import CancellationMessage, OrderMessage
 from apps.shared.src.structs import CustomExchange
 
 # Initializing centralized logging

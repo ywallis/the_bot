@@ -1,10 +1,10 @@
 import asyncio
 import logging
-
 from datetime import UTC, datetime, timedelta, timezone
+
 from redis.asyncio import Redis
 
-import apps.maker.src.logging_config as logging_config
+import apps.shared.src.logging_config as logging_config
 from apps.maker.src.strategies.utils import (
     generate_take_take_order,
     min_max_usd_converter,
@@ -137,7 +137,6 @@ async def take_take(redis: Redis, strategy: dict[str, str]):
             symbol,
             strategy,
             "tt",
-            last_order_timestamp
+            last_order_timestamp,
         )
         last_order_timestamp = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
-

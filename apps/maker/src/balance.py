@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from redis.asyncio import ConnectionPool, Redis
 
-import apps.maker.src.logging_config as logging_config
+import apps.shared.src.logging_config as logging_config
 from apps.shared.src.errors import NetworkError
 from apps.shared.src.exchange_clients import authenticated_clients
 from apps.shared.src.structs import CustomExchange
