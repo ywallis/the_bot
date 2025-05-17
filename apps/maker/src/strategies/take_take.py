@@ -81,7 +81,9 @@ async def take_take(redis: Redis, strategy: dict[str, str]):
             logger.debug("Order book combination has not changed since last cycle.")
             continue
         else:
-            joint_nonce = e1_order_book["timestamp"] + e2_order_book["timestamp"]
+            joint_nonce = str(e1_order_book["timestamp"]) + str(
+                e2_order_book["timestamp"]
+            )
 
         if int(e1_order_book["timestamp"]) < last_order_timestamp:
             logger.debug(

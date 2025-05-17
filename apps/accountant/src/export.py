@@ -16,8 +16,6 @@ logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
 
-
-
 async def loop(pg_config: dict[str, str]):
     while True:
         for exchange_name, pair in exchange_and_pair:
@@ -36,7 +34,10 @@ async def loop(pg_config: dict[str, str]):
         await asyncio.sleep(10)
         break
 
+async def main(pg_config):
+    await load_clients()
+    await loop(pg_config)
 
 if __name__ == "__main__":
     pg_config = load_pg_config()
-    asyncio.run(loop(pg_config))
+    asyncio.run(main(pg_config))

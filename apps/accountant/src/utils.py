@@ -1,3 +1,4 @@
+import logging
 import os
 from copy import deepcopy
 
@@ -5,7 +6,12 @@ import psycopg
 from dotenv import load_dotenv
 from psycopg import sql
 
-from apps.shared.src.structs import CustomExchange, ccxtFee, ccxtItem
+import apps.shared.src.logging_config as logging_config
+from apps.shared.src.structs import CustomExchange, ccxtItem
+
+# Initializing centralized logging
+logging_config.setup_logging()
+logger = logging.getLogger(__name__)
 
 
 def load_pg_config() -> dict[str, str]:
@@ -198,7 +204,7 @@ def export_to_sql(data: list[dict[str, str]], credentials: dict[str, str], table
             # Execute the insert for all rows
             cur.executemany(insert_query, values)
 
-        print(f"Data inserted successfully in {table} table!")
+        logger.info(f"Data inserted successfully in {table} table!")
 
 
 def unaddressed_imbalances(pair: str, imbalances, orders):
@@ -211,7 +217,7 @@ def unaddressed_imbalances(pair: str, imbalances, orders):
     try:
         imbalances.set_index("clientorderid", inplace=True)
     except AttributeError:
-        print("Nothing returned from database, there are likely no imbalances.")
+        logger.info("Nothing returned from database, there are likely no imbalances.")
         raise AttributeError(
             "Nothing returned from database, there are likely no imbalances."
         )

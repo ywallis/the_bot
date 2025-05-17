@@ -9,7 +9,7 @@ from redis.asyncio import Redis
 import apps.shared.src.logging_config as logging_config
 from apps.maker.src.constants import MESSAGE_PROCESSOR_CHANNEL
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
-from apps.maker.src.structs import CancellationMessage, OrderBatchMessage, OrderMessage
+from apps.maker.src.structs import CancellationMessage, OrderBatchMessage, OrderMessage, OrderBook
 
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
@@ -118,13 +118,14 @@ async def retrieve_balances_redis(redis_instance: Redis, key: str):
 
 async def retrieve_ob_redis(
     redis_instance: Redis, key: str
-) -> dict[str, str | int | list[list[float]]] | None:
+) -> OrderBook | None:
     # Get the JSON string from Redis
     serialized_ob = await redis_instance.get(key)
     if serialized_ob is None:
         return None  # Key not found
     # Deserialize the JSON string back to a CCXT ob
-    return json.loads(serialized_ob)
+    ob = json.loads(serialized_ob)
+    return ob
 
 
 def order_time() -> str:

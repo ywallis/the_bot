@@ -5,6 +5,15 @@ from typing import TypedDict
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
 
 
+class OrderBook(TypedDict):
+    asks: list[list[float]]
+    bids: list[list[float]]
+    datetime: str
+    timestamp: int
+    nonce: int
+    symbol: str
+
+
 class OrderMessage(TypedDict):
     kind: MessageType
     strategy: str
