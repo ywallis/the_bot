@@ -44,7 +44,7 @@ def send_sql_query(pg_config: dict, sql_query: SQL | Composed, raw: bool = False
                     return rows, col_names
 
                 # Convert to a DataFrame
-                df = pd.DataFrame(rows, columns=col_names)
+                df = pd.DataFrame(rows, columns=col_names) # pyright: ignore
                 return df
     except psycopg.Error as e:
         print(f"Database error: {e}")

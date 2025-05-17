@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 async def load_clients():
     for client in authenticated_clients.values():
         attempt: int = 1
-        while True:
+        while attempt <= 5:
             try:
                 await client.load_markets()
                 logger.info(f"Client {client.name} loaded successfully.")
@@ -25,6 +25,7 @@ async def load_clients():
                 logger.error(
                     f"Client {client.name} has timed out on attempt n. {attempt}, retrying. {e}"
                 )
+                attempt += 1
 
 
 load_dotenv()

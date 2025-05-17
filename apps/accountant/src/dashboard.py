@@ -1,6 +1,7 @@
 from psycopg import sql
 from apps.accountant.src.sql_connector import QueryLoader, send_sql_query
 from apps.accountant.src.utils import load_pg_config
+from apps.shared.src.utils import pairs
 
 
 if __name__ == "__main__":
@@ -18,12 +19,13 @@ if __name__ == "__main__":
     if monthly_overview is None:
         raise Exception("Query could not be loaded")
 
-    daily_performance = send_sql_query(
-        pg_config, daily_overview, False, {"symbol": sym, "range": 3}
-    )
-    # daily_performance = send_sql_query(pg_config, daily_overview, False)
-    print("Daily performance:")
-    print(daily_performance)
+    for sym in pairs:
+        daily_performance = send_sql_query(
+            pg_config, daily_overview, False, {"symbol": sym, "range": 3}
+        )
+        # daily_performance = send_sql_query(pg_config, daily_overview, False)
+        print("Daily performance:")
+        print(daily_performance)
     monthly_performance = send_sql_query(pg_config, monthly_overview)
     print("Monthly performance:")
     print(monthly_performance)

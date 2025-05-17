@@ -13,6 +13,7 @@ def load_config():
 
 
 exchange_and_pair: set[tuple[str, str]] = set()
+pairs: set[str] = set()
 
 strategies: list[dict[str, str]] | None = load_config().get("strategies")
 if strategies is None:
@@ -20,3 +21,4 @@ if strategies is None:
 for strategy in strategies:
     exchange_and_pair.add((strategy["exchange_1"], strategy["symbol"]))
     exchange_and_pair.add((strategy["exchange_2"], strategy["symbol"]))
+    pairs.add(strategy["symbol"])
