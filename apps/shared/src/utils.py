@@ -4,6 +4,7 @@ from pathlib import Path
 # TODO:
 # - Separate config for dev and prod
 
+
 def load_config():
     CONFIG_PATH = Path(__file__).parents[3] / "config" / "config.toml"
     with open(CONFIG_PATH, "rb") as f:
@@ -13,7 +14,7 @@ def load_config():
 
 exchange_and_pair: set[tuple[str, str]] = set()
 
-strategies = load_config().get("strategies")
+strategies: list[dict[str, str]] | None = load_config().get("strategies")
 if strategies is None:
     raise Exception("No strategy found")
 for strategy in strategies:

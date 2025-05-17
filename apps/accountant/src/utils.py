@@ -1,16 +1,17 @@
-from copy import deepcopy
 import os
+from copy import deepcopy
+
 import psycopg
+from dotenv import load_dotenv
 from psycopg import sql
 
-from dotenv import load_dotenv
-from apps.shared.src.structs import CustomExchange
+from apps.shared.src.structs import CustomExchange, ccxtFee, ccxtItem
 
 
 def load_pg_config() -> dict[str, str]:
     config: dict[str, str] = {}
 
-    load_dotenv()
+    _ = load_dotenv()
     POSTGRES_DB = os.getenv("POSTGRES_DB")
     if POSTGRES_DB is None:
         raise Exception("DB Credentials not found")
@@ -32,18 +33,18 @@ def load_pg_config() -> dict[str, str]:
 
 def prepare_items_for_pg(
     client: CustomExchange,
-    raw_items: list[dict[str, str | dict[str, str]]] | dict[str, str | dict[str, str]],
-):
+    raw_items: list[ccxtItem] | ccxtItem,
+) -> list[dict[str, str]]:
     """This function prepares CCXT order/trade items for an export to a PG database"""
 
     imported_items = deepcopy(raw_items)
 
     if not isinstance(imported_items, list):
-        items: list[dict[str, str | dict[str, str]]] = [imported_items]
+        items: list[ccxtItem] = [imported_items]
     else:
         items = imported_items
 
-    prepared_items = []
+    prepared_items: list[dict[str, str]] = []
 
     for item in items:
         # Renaming order to order_id because of conflict in SQL
@@ -63,10 +64,9 @@ def prepare_items_for_pg(
             item["fee_currency"] = fee.get("currency", "")
 
         for fee in item.get("fees", []):
-            if isinstance(fee, dict):
-                if float(fee.get("cost", "0")) != "0":
-                    item["fee_cost"] = fee.get("cost", "")
-                    item["fee_currency"] = fee.get("currency", "")
+            if float(fee.get("cost", "0")) != 0.0:
+                item["fee_cost"] = fee.get("cost", "")
+                item["fee_currency"] = fee.get("currency", "")
         item["exchange"] = client.name
 
         # Generate usdt_value column
@@ -111,15 +111,23 @@ def prepare_items_for_pg(
     return prepared_items
 
 
-def dict_to_text(d):
-    def convert(i_value):
-        if isinstance(i_value, dict) or isinstance(i_value, list):
-            return str(i_value)  # Convert sub-dict to string
-        return i_value
+def dict_to_text(d: ccxtItem) -> dict[str, str]:
+    def convert(i_value: object) -> str:
+        if isinstance(i_value, str):
+            return i_value
+        if isinstance(i_value, dict):
+            return ", ".join(
+                f"{k}:{v}"
+                for k, v in i_value.items()  # pyright: ignore[reportUnknownVariableType]
+            )
+        if isinstance(i_value, list):
+            return ", ".join(
+                f"{fee['currency']}:{fee['cost']}"
+                for fee in i_value  # pyright: ignore[reportUnknownVariableType]
+            )
+        return str(i_value)
 
-    for key, value in d.items():
-        d[key] = convert(value)
-    return d
+    return {key: convert(value) for key, value in d.items()}
 
 
 async def retrieve_and_prepare_orders(
@@ -154,7 +162,7 @@ async def retrieve_and_prepare_trades(
     return prepare_items_for_pg(client, trades)
 
 
-def export_to_sql(data: list[dict], credentials: dict[str, str], table: str):
+def export_to_sql(data: list[dict[str, str]], credentials: dict[str, str], table: str):
     """Takes in a list of orders or trades in CCXT format, and a dict of PG credentials, and outputs the data to the attached DB."""
 
     dbname = credentials["POSTGRES_DB"]
@@ -179,8 +187,8 @@ def export_to_sql(data: list[dict], credentials: dict[str, str], table: str):
                 sql.SQL(", ").join(sql.Placeholder() * len(columns)),
             )
 
-            def sanitize(value):
-                if value == "":
+            def sanitize(value: str):
+                if value == "" or value == "None":
                     return None
                 return value
 

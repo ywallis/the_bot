@@ -1,13 +1,21 @@
+import asyncio
+import logging
+
+import apps.shared.src.logging_config as logging_config
 from apps.accountant.src.utils import (
     export_to_sql,
+    load_pg_config,
     retrieve_and_prepare_orders,
     retrieve_and_prepare_trades,
-    load_pg_config,
 )
-from apps.shared.src.exchange_clients import authenticated_clients
+from apps.shared.src.exchange_clients import authenticated_clients, load_clients
 from apps.shared.src.utils import exchange_and_pair
 
-import asyncio
+# Initializing centralized logging
+logging_config.setup_logging()
+logger = logging.getLogger(__name__)
+
+
 
 
 async def loop(pg_config: dict[str, str]):

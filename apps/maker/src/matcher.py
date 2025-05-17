@@ -14,7 +14,7 @@ from apps.maker.src.constants import (
     REDIS_PORT,
 )
 from apps.maker.src.enums import MessageType, OidComponent, OrderSide, OrderType
-from apps.maker.src.errors import NetworkError
+from apps.shared.src.errors import NetworkError
 from apps.maker.src.structs import LimitedSet, OrderMessage
 from apps.maker.src.utils import info_from_oid
 from apps.shared.src.exchange_clients import authenticated_clients

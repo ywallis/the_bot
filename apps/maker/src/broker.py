@@ -13,7 +13,8 @@ from apps.maker.src.ccxt_abstractions import (
 )
 from apps.maker.src.constants import BROKER_CHANNEL, REDIS_HOSTNAME, REDIS_PORT
 from apps.maker.src.enums import MessageType
-from apps.maker.src.errors import BrokerError, NetworkError, RequestTimeout
+from apps.maker.src.errors import BrokerError
+from apps.shared.src.errors import NetworkError
 from apps.maker.src.structs import (
     CancellationMessage,
     OrderBatchMessage,
@@ -25,7 +26,11 @@ from apps.maker.src.utils import (
     order_from_ccxt,
     parse_message,
 )
-from apps.shared.src.exchange_clients import authenticated_clients, symbols
+from apps.shared.src.exchange_clients import (
+    authenticated_clients,
+    symbols,
+    load_clients,
+)
 from apps.shared.src.structs import CustomExchange
 
 # Initializing centralized logging
@@ -178,20 +183,6 @@ async def redis_subscriber(
                         )
     finally:
         await pubsub.unsubscribe(BROKER_CHANNEL)
-
-
-async def load_clients():
-    for client in authenticated_clients.values():
-        attempt: int = 1
-        while True:
-            try:
-                await client.load_markets()
-                logger.info(f"Client {client.name} loaded successfully.")
-                break
-            except RequestTimeout as e:
-                logger.error(
-                    f"Client {client.name} has timed out on attempt n. {attempt}, retrying. {e}"
-                )
 
 
 async def main():

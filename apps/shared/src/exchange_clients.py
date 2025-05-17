@@ -1,10 +1,31 @@
 import os
+import logging
 
-import ccxt.pro as ccxt
+import ccxt.pro as ccxt # pyright: ignore[reportMissingTypeStubs]
 from dotenv import load_dotenv
 
+import apps.shared.src.logging_config as logging_config
 from apps.shared.src.structs import CustomExchange
 from apps.shared.src.utils import load_config
+from apps.shared.src.errors import RequestTimeout
+
+# Initializing centralized logging
+logging_config.setup_logging()
+logger = logging.getLogger(__name__)
+
+async def load_clients():
+    for client in authenticated_clients.values():
+        attempt: int = 1
+        while True:
+            try:
+                await client.load_markets()
+                logger.info(f"Client {client.name} loaded successfully.")
+                break
+            except RequestTimeout as e:
+                logger.error(
+                    f"Client {client.name} has timed out on attempt n. {attempt}, retrying. {e}"
+                )
+
 
 load_dotenv()
 # Load TOML file

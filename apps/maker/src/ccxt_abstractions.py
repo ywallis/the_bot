@@ -3,9 +3,9 @@ import logging
 
 import apps.maker.src.logging_config as logging_config
 from apps.maker.src.enums import OrderType
-from apps.maker.src.errors import (
+from apps.maker.src.errors import BrokerError
+from apps.shared.src.errors import (
     BadRequest,
-    BrokerError,
     ExchangeError,
     InvalidOrder,
     RequestTimeout,
