@@ -222,7 +222,6 @@ def unaddressed_imbalances(pair: str, imbalances, orders):
     try:
         imbalances.set_index("clientorderid", inplace=True)
     except AttributeError:
-        logger.info("Nothing returned from database, there are likely no imbalances.")
         raise AttributeError(
             "Nothing returned from database, there are likely no imbalances."
         )

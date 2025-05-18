@@ -5,7 +5,6 @@ from apps.shared.src.utils import pairs
 
 
 if __name__ == "__main__":
-    sym = "ALPH/USDT"
     pg_config = load_pg_config()
     query_loader = QueryLoader()
     query_loader.load_queries()
