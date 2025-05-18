@@ -33,16 +33,6 @@ async def match_sell(client, order):
         asyncio.create_task(client.create_market_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price,
                                                        params={'clientOrderId': identifier}))
 
-        # Testing with appending to a file
-        # if order['filled'] != 0:
-        #     with open('matched.txt', 'a') as file:
-        #         # file.write(f'\n{datetime.now()}\n{trade}\nPlacing a {quantity} {pair} buy order on {client.name} for {price}.')
-        #         file.write(f'\n{str(order)}')
-
-
-        # client.create_limit_order(symbol=pair, side='buy', amount=quantity_with_fee, price=price,
-        #                                  params={'clientOrderId': identifier})
-
 
 async def match_buy(client, order):
     """This function takes in an incoming buy order change, and matches it in an arb setup."""

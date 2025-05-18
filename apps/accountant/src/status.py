@@ -1,0 +1,120 @@
+import asyncio
+from datetime import datetime
+import os
+
+from pandas import DataFrame
+from psycopg import sql
+
+from apps.shared.src.errors import RequestTimeout, NetworkError, ExchangeError
+from apps.accountant.src.sql_connector import QueryLoader, send_sql_query
+from apps.accountant.src.utils import (
+    fetch_all_open_orders_client_order_id,
+    load_pg_config,
+    unaddressed_imbalances,
+)
+from apps.shared.src.exchange_clients import (
+    authenticated_clients,
+    load_clients,
+    symbols,
+)
+from apps.shared.src.structs import CustomExchange
+
+
+async def get_order_status(clients: dict[str, CustomExchange], ticker: str, details=True):
+    """This function lists all open orders for a client in a terminal format."""
+
+    for client in clients.values():
+        all_open_orders = await client.fetch_open_orders(ticker)
+        open_buy_orders_total = 0
+        open_sell_orders_total = 0
+
+        for order in all_open_orders:
+            if order["side"] == "buy":
+                open_buy_orders_total += float(order["remaining"])
+            elif order["side"] == "sell":
+                open_sell_orders_total += float(order["remaining"])
+            if details:
+                print(
+                    f"Open {order['side']} order on {client.name} at {order['price']}, "
+                    f"{round(float(order['remaining']), 2)} of {round(float(order['amount']), 2)} remaining."
+                )
+        if open_buy_orders_total != 0:
+            print(f"Total of {round(open_buy_orders_total, 2)} buys open on {client.name}.")
+        if open_sell_orders_total != 0:
+            print(
+                f"Total of {round(open_sell_orders_total, 2)} sells open on {client.name}."
+            )
+
+
+async def fetch_balances(clients: dict[str, CustomExchange]):
+    for client in clients.values():
+        balances = await client.fetch_balance()
+        assert isinstance(balances["free"], dict)
+        for symbol, amount in balances["free"].items():
+            print(f"{round(amount, 6)} {symbol} available on {client.name}")
+
+
+async def fetch_imbalances(
+    symbol: str, imbalances: DataFrame, orders: list[dict[str, str]]
+):
+    unaddressed_imbalances(symbol, imbalances, orders)
+
+
+def get_daily_performance(query: sql.Composed, symbol: str):
+    pg_config = load_pg_config()
+    daily_performance = send_sql_query(
+        pg_config, query, False, {"symbol": symbol, "range": 1}
+    )
+    print(daily_performance)
+
+
+async def main(clients: dict[str, CustomExchange], pairs: set):
+    pg_config = load_pg_config()
+    # Initialize QueryLoader
+
+    query_loader = QueryLoader()
+    query_loader.load_queries()
+    fetch_imbalances_query = query_loader.get_query("fetch_imbalances")
+    daily_string = query_loader.get_query("daily_overview")
+    if daily_string is None:
+        raise Exception("Query could not be loaded")
+    daily_overview = sql.SQL(daily_string).format(
+        symbol=sql.Placeholder("symbol"), range=sql.Placeholder("range")
+    )
+    if fetch_imbalances_query is None:
+        raise Exception("Error loading query")
+    await load_clients()
+
+    while True:
+        try:
+            os.system("clear")
+            print(f'Status at {datetime.now()}')
+            for symbol in symbols:
+                await get_order_status(clients, symbol, True)
+            await fetch_balances(clients)
+            imbalances = send_sql_query(pg_config, fetch_imbalances_query)
+            if imbalances is None:
+                print("No imbalances returnes")
+            else:
+                all_open_orders = await fetch_all_open_orders_client_order_id(
+                    pairs, authenticated_clients
+                )
+                if not isinstance(imbalances, DataFrame):
+                    raise Exception("Error returning imbalances from DB")
+                for symbol in pairs:
+                    await fetch_imbalances(symbol, imbalances, all_open_orders)
+                    get_daily_performance(daily_overview, symbol)
+            await asyncio.sleep(10)
+        except ExchangeError as e:
+            print('Exchange error, retrying.')
+            print(e)
+        except RequestTimeout as e:
+            print('Request timeout, retrying.')
+            print(e)
+        except NetworkError as e:
+            print('Network error, retrying.')
+            print(e)
+
+
+if __name__ == "__main__":
+    asyncio.run(main(authenticated_clients, symbols))

@@ -1,12 +1,12 @@
 services:
   postgres:
     build: ./postgres
-    container_name: postgres-container
+    container_name: postgres-bot
     restart: unless-stopped
     env_file:
-      .env
+      ../../.env
     ports:
-      - '5432:5432'
+      - '5433:5432'
     volumes:
       - pgdata:/var/lib/postgresql/data
 
@@ -19,7 +19,7 @@ services:
       - postgres
     restart: unless-stopped
     env_file:
-      .env
+      ../../.env
 
 volumes:
   pgdata:

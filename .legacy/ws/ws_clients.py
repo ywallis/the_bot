@@ -1,13 +1,14 @@
+from ccxt.base.exchange import Exchange # type: ignore
 import ccxt.pro as ccxt
 from config.option_picker import strategy_picker, status_client_picker
 
 
 strategy = strategy_picker()
 pair = strategy['pair']
-all_clients = []
-maker_clients = []
+all_clients: list[Exchange] = []
+maker_clients: list[Exchange] = []
 
-taker_client = getattr(ccxt, strategy['taker_exchange']['id'])({'apiKey': strategy['taker_exchange']['key'],
+taker_client: Exchange = getattr(ccxt, strategy['taker_exchange']['id'])({'apiKey': strategy['taker_exchange']['key'],
                                                                 'secret': strategy['taker_exchange']['secret']})
 all_clients.append(taker_client)
 
@@ -26,3 +27,7 @@ for exchange in strategy['maker_exchanges']:
     maker_clients.append(auth_client)
 
 all_clients = status_client_picker(all_clients)
+
+# Adding clients_dict to be used by broker
+
+all_clients_dict = {client.id: client for client in all_clients}

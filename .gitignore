@@ -1,2 +1,7 @@
+app.log
 .env
 /Logs/*
+**/__pycache__/
+**/*.pyc
+test.py
+Session.vim

@@ -1,3 +1,4 @@
+from ccxt.base.exchange import Exchange # type: ignore
 from config.strategies import deployed_strategies
 
 
@@ -15,7 +16,7 @@ def strategy_picker():
             return deployed_strategies[selected_strategy]
 
 
-def status_client_picker(clients):
+def status_client_picker(clients: list[Exchange]):
 
     choosing_client = True
 

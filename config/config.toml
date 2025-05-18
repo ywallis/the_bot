@@ -1,0 +1,59 @@
+[[strategies]]
+symbol = "ALPH/USDT"
+type = "single_edge_liquidity"
+identifier = "lam"
+exchange_1 = "gate"
+exchange_2 = "mexc"
+taker_exchange = "gate"
+maker_exchange = "mexc"
+should_match = true
+spread = 1.0025
+min_size_usdt = 100 
+max_size_usdt = 11
+
+[[strategies]]
+symbol = "ALPH/USDT"
+type = "single_edge_liquidity"
+identifier = "lab"
+exchange_1 = "gate"
+exchange_2 = "bitget"
+taker_exchange = "gate"
+maker_exchange = "bitget"
+should_match = true
+spread = 1.0035
+min_size_usdt = 100
+max_size_usdt = 11
+
+[[strategies]]
+symbol = "ALPH/USDT"
+type = "take_take"
+identifier = "tam"
+exchange_1 = "gate"
+exchange_2 = "mexc"
+spread = 1.0035
+sizing = 0.8
+min_size_usdt = 50
+max_size_usdt = 11
+
+[[strategies]]
+symbol = "ALPH/USDT"
+type = "take_take"
+identifier = "tab"
+exchange_1 = "gate"
+exchange_2 = "bitget"
+spread = 1.0035
+sizing = 0.8
+min_size_usdt = 50
+max_size_usdt = 11
+
+[[exchanges]]
+name = "Gate.io"
+id = "gate"
+
+[[exchanges]]
+name = "Mexc"
+id = "mexc"
+
+[[exchanges]]
+name = "Bitget"
+id = "bitget"
