@@ -300,7 +300,7 @@ async def main():
 
     # Let broker boot and check for open orders
 
-    await asyncio.sleep(1)
+    await asyncio.sleep(2)
     processor.open_orders = await processor.get_open_orders()
     if processor.open_orders:
         logger.info(f"Pre-existing open order were found: {processor.open_orders}")
