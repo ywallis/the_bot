@@ -79,7 +79,7 @@ if __name__ == "__main__":
     for cmd in PROCESS_LIST:
         proc = launch_process(cmd)
         processes.append((cmd, proc))
-        time.sleep(0.2)  # Delay of 1 second between each process launch
+        time.sleep(0.5)  # Delay of 1 second between each process launch
 
     # Wait 1 min before launching strategy processes
     time.sleep(60)
