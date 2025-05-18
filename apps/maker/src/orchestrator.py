@@ -36,11 +36,11 @@ for strategy in strategies:
 
 # Unique processes (start immediately)
 PROCESS_LIST = [
+    ["uv", "run", "-m", "apps.maker.src.broker"],
+    ["uv", "run", "-m", "apps.maker.src.message_processor"],
     ["uv", "run", "-m", "apps.maker.src.watcher"],
     ["uv", "run", "-m", "apps.maker.src.matcher"],
     ["uv", "run", "-m", "apps.maker.src.balance"],
-    ["uv", "run", "-m", "apps.maker.src.broker"],
-    ["uv", "run", "-m", "apps.maker.src.message_processor"],
 ]
 
 
