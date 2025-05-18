@@ -18,21 +18,18 @@ logger = logging.getLogger(__name__)
 
 async def loop(pg_config: dict[str, str]):
     while True:
+
         for exchange_name, pair in exchange_and_pair:
             client = authenticated_clients[exchange_name]
-            # logger.info()
             orders = await retrieve_and_prepare_orders(client, pair)
-            # print(orders)
             if len(orders) != 0:
-                export_to_sql(orders, pg_config, "orders")
+                export_to_sql(orders, pg_config, "orders", client.name)
 
             trades = await retrieve_and_prepare_trades(client, pair)
-            # print(trades)
             if len(trades) != 0:
-                export_to_sql(trades, pg_config, "trades")
+                export_to_sql(trades, pg_config, "trades", client.name)
 
         await asyncio.sleep(10)
-        break
 
 async def main(pg_config):
     await load_clients()

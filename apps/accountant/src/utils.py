@@ -168,7 +168,12 @@ async def retrieve_and_prepare_trades(
     return prepare_items_for_pg(client, trades)
 
 
-def export_to_sql(data: list[dict[str, str]], credentials: dict[str, str], table: str):
+def export_to_sql(
+    data: list[dict[str, str]],
+    credentials: dict[str, str],
+    table: str,
+    client_name: str,
+):
     """Takes in a list of orders or trades in CCXT format, and a dict of PG credentials, and outputs the data to the attached DB."""
 
     dbname = credentials["POSTGRES_DB"]
@@ -204,7 +209,7 @@ def export_to_sql(data: list[dict[str, str]], credentials: dict[str, str], table
             # Execute the insert for all rows
             cur.executemany(insert_query, values)
 
-        logger.info(f"Data inserted successfully in {table} table!")
+        logger.info(f"Data for {client_name} inserted successfully in {table} table!")
 
 
 def unaddressed_imbalances(pair: str, imbalances, orders):
