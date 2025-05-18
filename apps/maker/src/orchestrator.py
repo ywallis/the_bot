@@ -74,7 +74,12 @@ signal.signal(signal.SIGTERM, handle_exit)
 
 if __name__ == "__main__":
     # Start unique processes immediately
-    processes = [(cmd, launch_process(cmd)) for cmd in PROCESS_LIST]
+    # processes = [(cmd, launch_process(cmd)) for cmd in PROCESS_LIST]
+    processes = []
+    for cmd in PROCESS_LIST:
+        proc = launch_process(cmd)
+        processes.append((cmd, proc))
+        time.sleep(0.2)  # Delay of 1 second between each process launch
 
     # Wait 1 min before launching strategy processes
     time.sleep(60)
