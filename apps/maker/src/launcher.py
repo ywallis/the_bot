@@ -7,7 +7,7 @@ from redis.asyncio import ConnectionPool, Redis
 
 import apps.shared.src.logging_config as logging_config
 from apps.maker.src.constants import REDIS_HOSTNAME, REDIS_PORT
-from apps.shared.src.utils import load_config
+from apps.shared.src.utils import strategies 
 
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
@@ -18,8 +18,6 @@ async def main(strategy_index: int):
         host=REDIS_HOSTNAME, port=REDIS_PORT, db=0, max_connections=20
     )
     redis = Redis(decode_responses=True, connection_pool=pool)
-    config = load_config()
-    strategies = config.get("strategies")
 
     if not strategies:
         raise Exception("Could not find any valid strategy")

@@ -10,6 +10,7 @@ from apps.accountant.src.utils import (
 )
 from apps.shared.src.exchange_clients import authenticated_clients, load_clients
 from apps.shared.src.utils import exchange_and_pair
+from apps.shared.src.errors import ExchangeError, RequestTimeout, NetworkError
 
 # Initializing centralized logging
 logging_config.setup_logging()
@@ -21,13 +22,21 @@ async def loop(pg_config: dict[str, str]):
 
         for exchange_name, pair in exchange_and_pair:
             client = authenticated_clients[exchange_name]
-            orders = await retrieve_and_prepare_orders(client, pair)
-            if len(orders) != 0:
-                export_to_sql(orders, pg_config, "orders", client.name)
+            try:
+                orders = await retrieve_and_prepare_orders(client, pair)
+                if len(orders) != 0:
+                    export_to_sql(orders, pg_config, "orders", client.name)
 
-            trades = await retrieve_and_prepare_trades(client, pair)
-            if len(trades) != 0:
-                export_to_sql(trades, pg_config, "trades", client.name)
+                trades = await retrieve_and_prepare_trades(client, pair)
+                if len(trades) != 0:
+                    export_to_sql(trades, pg_config, "trades", client.name)
+
+            except ExchangeError as e:
+                logger.error(f'Exchange error: {e}')
+            except RequestTimeout as e:
+                logger.error(f'RequestTimeout error: {e}')
+            except NetworkError as e:
+                logger.error(f'Network error: {e}')
 
         await asyncio.sleep(10)
 
