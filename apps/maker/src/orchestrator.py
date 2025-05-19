@@ -5,33 +5,25 @@ import subprocess
 import sys
 import time
 
-from dotenv import load_dotenv
-
 import apps.shared.src.logging_config as logging_config
-from apps.shared.src.utils import load_config
+from apps.shared.src.utils import strategies
 
 # Setup logging
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
-# Load environment variables
-load_dotenv()
-production = os.getenv("PRODUCTION", False)
-
-# Load configuration
-config = load_config()
-strategies = config.get("strategies")
-
 # Check for duplicate strategy identifiers
-identified_strategies: list[str] = []
+identified_strategies: set[str] = set()
 if strategies is None:
     raise Exception("No strategy could be loaded")
 for strategy in strategies:
     identifier = strategy.get("identifier")
+    if identifier is None:
+        raise Exception("Missing strategy identifier")
     if identifier in identified_strategies:
         raise Exception(f"Duplicate strategy identifier: {identifier}")
     else:
-        identified_strategies.append(identifier)
+        identified_strategies.add(identifier)
 
 
 # Unique processes (start immediately)
@@ -94,11 +86,11 @@ if __name__ == "__main__":
     while True:
         for i, (cmd, proc) in enumerate(processes):
             if proc.poll() is not None:  # Process exited
-                if production:
-                    # Restart process if in production mode
-                    print(f"Process {cmd} crashed. Restarting...")
-                    processes[i] = (cmd, launch_process(cmd))
-                else:
-                    logger.error(f"Process {proc} crashed unexpectedly, winding down.")
-                    cleanup_and_exit(1)
+                # if production:
+                #     # Restart process if in production mode
+                #     print(f"Process {cmd} crashed. Restarting...")
+                #     processes[i] = (cmd, launch_process(cmd))
+                # else:
+                logger.error(f"Process {proc} crashed unexpectedly, winding down.")
+                cleanup_and_exit(1)
         time.sleep(2)

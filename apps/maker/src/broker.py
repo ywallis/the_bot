@@ -47,7 +47,7 @@ async def fetch_all_open(clients: dict[str, CustomExchange]) -> OrderBatchMessag
             while True:
                 try:
                     orders = await client.fetch_open_orders(symbol)
-                    logger.info(f"Fetched orders from {client}: {orders}")
+                    logger.info(f"Fetched {symbol} orders from {client}: {orders}")
                     for order in orders:
                         all_orders.append(order_from_ccxt(order, name))
                     break
