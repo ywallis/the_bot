@@ -8,8 +8,9 @@ taker_exchange = "gate"
 maker_exchange = "mexc"
 should_match = true
 spread = 1.0025
-min_size_usdt = 100 
-max_size_usdt = 11
+min_size_usdt = 11 
+max_size_usdt = 100
+production = true
 
 [[strategies]]
 symbol = "ALPH/USDT"
@@ -21,8 +22,23 @@ taker_exchange = "gate"
 maker_exchange = "bitget"
 should_match = true
 spread = 1.0035
-min_size_usdt = 100
+min_size_usdt = 11
+max_size_usdt = 100
+production = true
+
+[[strategies]]
+symbol = "HYPE/USDT"
+type = "single_edge_liquidity"
+identifier = "lhm"
+exchange_1 = "bitget"
+exchange_2 = "mexc"
+taker_exchange = "bitget"
+maker_exchange = "mexc"
+should_match = true
+spread = 1.0025
+min_size_usdt = 11
 max_size_usdt = 11
+production = false 
 
 [[strategies]]
 symbol = "ALPH/USDT"
@@ -32,8 +48,9 @@ exchange_1 = "gate"
 exchange_2 = "mexc"
 spread = 1.0035
 sizing = 0.8
-min_size_usdt = 50
-max_size_usdt = 11
+min_size_usdt = 11
+max_size_usdt = 50
+production = true
 
 [[strategies]]
 symbol = "ALPH/USDT"
@@ -43,8 +60,21 @@ exchange_1 = "gate"
 exchange_2 = "bitget"
 spread = 1.0035
 sizing = 0.8
-min_size_usdt = 50
+min_size_usdt = 11 
+max_size_usdt = 50
+production = true
+
+[[strategies]]
+symbol = "HYPE/USDT"
+type = "take_take"
+identifier = "thm"
+exchange_1 = "gate"
+exchange_2 = "bitget"
+spread = 1.0035
+sizing = 0.8
+min_size_usdt = 11 
 max_size_usdt = 11
+production = false 
 
 [[exchanges]]
 name = "Gate.io"
