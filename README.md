@@ -1,3 +1,3 @@
-# alph-arb-ccxt
+# The Bot
 
-Using the ccxt library to improve on my current arb logic
+A liquidity arbitrage framework for myself only.
