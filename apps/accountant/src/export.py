@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 async def loop(pg_config: dict[str, str]):
     while True:
-
         for exchange_name, pair in exchange_and_pair:
             client = authenticated_clients[exchange_name]
             try:
@@ -32,17 +31,19 @@ async def loop(pg_config: dict[str, str]):
                     export_to_sql(trades, pg_config, "trades", client.name)
 
             except ExchangeError as e:
-                logger.error(f'Exchange error: {e}')
+                logger.error(f"Exchange error: {e}")
             except RequestTimeout as e:
-                logger.error(f'RequestTimeout error: {e}')
+                logger.error(f"RequestTimeout error: {e}")
             except NetworkError as e:
-                logger.error(f'Network error: {e}')
+                logger.error(f"Network error: {e}")
 
         await asyncio.sleep(10)
 
-async def main(pg_config):
+
+async def main(pg_config: dict[str, str]):
     await load_clients()
     await loop(pg_config)
+
 
 if __name__ == "__main__":
     pg_config = load_pg_config()

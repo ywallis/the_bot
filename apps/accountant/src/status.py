@@ -65,7 +65,8 @@ def get_daily_performance(query: sql.Composed, symbol: str):
     daily_performance = send_sql_query(
         pg_config, query, False, {"symbol": symbol, "range": 1}
     )
-    print(daily_performance)
+    if daily_performance is not None:
+        print(daily_performance)
 
 
 async def main(clients: dict[str, CustomExchange], pairs: set):
@@ -94,7 +95,7 @@ async def main(clients: dict[str, CustomExchange], pairs: set):
             await fetch_balances(clients)
             imbalances = send_sql_query(pg_config, fetch_imbalances_query)
             if imbalances is None:
-                print("No imbalances returnes")
+                print("No imbalances returned")
             else:
                 all_open_orders = await fetch_all_open_orders_client_order_id(
                     pairs, authenticated_clients
@@ -102,7 +103,10 @@ async def main(clients: dict[str, CustomExchange], pairs: set):
                 if not isinstance(imbalances, DataFrame):
                     raise Exception("Error returning imbalances from DB")
                 for symbol in pairs:
-                    await fetch_imbalances(symbol, imbalances, all_open_orders)
+                    try:
+                        await fetch_imbalances(symbol, imbalances, all_open_orders)
+                    except KeyError:
+                        print(f"No imbalances for {symbol}")
                     get_daily_performance(daily_overview, symbol)
             await asyncio.sleep(10)
         except ExchangeError as e:
