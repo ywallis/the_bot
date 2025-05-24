@@ -29,7 +29,7 @@ production = true
 [[strategies]]
 symbol = "HYPE/USDT"
 type = "single_edge_liquidity"
-identifier = "lhm"
+identifier = "lhb"
 exchange_1 = "bitget"
 exchange_2 = "mexc"
 taker_exchange = "gate"
@@ -67,7 +67,7 @@ production = true
 [[strategies]]
 symbol = "HYPE/USDT"
 type = "take_take"
-identifier = "thm"
+identifier = "thb"
 exchange_1 = "gate"
 exchange_2 = "bitget"
 spread = 1.0035
