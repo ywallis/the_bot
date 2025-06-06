@@ -277,7 +277,7 @@ def maker_order_sizer(
     side: OrderSide,
     min_spread: float,
     max_maker_size: float,
-    min_maker_size: float = 10,
+    min_maker_size: float = 0,
 ) -> float:
     """NEEDS FLESHING OUT!
     Goal of function is to watch how much liquidity is available on the taker client within the defined spread.
