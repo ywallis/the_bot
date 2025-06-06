@@ -74,13 +74,13 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
 
         taker_client_bids: list[list[float]] = taker_order_book["bids"]
         taker_client_asks: list[list[float]] = taker_order_book["asks"]
-        # maker_client_bids: list[list[float]] = maker_order_book["bids"]
-        # maker_client_asks: list[list[float]] = maker_order_book["asks"]
+        maker_client_bids: list[list[float]] = maker_order_book["bids"]
+        maker_client_asks: list[list[float]] = maker_order_book["asks"]
 
         best_bid_taker: float = taker_client_bids[0][0]
         best_ask_taker: float = taker_client_asks[0][0]
-        # best_bid_maker: float = maker_client_bids[0][0]
-        # best_ask_maker: float = maker_client_asks[0][0]
+        best_bid_maker: float = maker_client_bids[0][0]
+        best_ask_maker: float = maker_client_asks[0][0]
 
         min_size, max_size = min_max_usd_converter(
             best_bid_taker, min_size_usdt, max_size_usdt
@@ -110,7 +110,7 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
 
         # Sell order generation
 
-        if sell_size > min_size:
+        if sell_size > min_size and target_sell_price > best_ask_maker:
             logger.debug(f"Optimal sell size currently {sell_size}")
 
             order_side = OrderSide.SELL
@@ -173,7 +173,7 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
 
         # Buy order generation
 
-        if buy_size > min_size:
+        if buy_size > min_size and target_buy_price < best_bid_maker:
             logger.debug(f"Optimal buy size currently {buy_size}")
 
             order_side = OrderSide.BUY
