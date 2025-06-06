@@ -20,8 +20,7 @@ logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
 # TODO:
-# - Consider which throttling systems still make sense
-# - Make sure all values put into redis follow the format I want
+# Could also check if liquidity is higher on maker exchange
 
 
 async def fake_maker(redis: Redis, strategy: dict[str, str]):
@@ -100,16 +99,65 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
             max_size,
         )
 
-        available_liquidity_maker = maker_order_sizer(
-            target_sell_price,
-            maker_client_asks,
-            OrderSide.SELL,
-            min_spread,
-            max_size,
-        )
+        sell_size = available_liquidity_taker * liquidity_utilization
 
-        max_sell_size = available_liquidity_taker * liquidity_utilization
+        if sell_size > min_size:
+            logger.debug(f"Optimal sell size currently {sell_size}")
 
-        if max_sell_size > min_size:
-            pass
-            # generate_order_replace()
+            order_side = OrderSide.BUY
+            if sell_order is None:
+                logger.debug("Sell does not exist yet.")
+                sell_order = await generate_order_replace(
+                    redis,
+                    maker,
+                    taker,
+                    target_sell_price,
+                    sell_size,
+                    symbol,
+                    order_side,
+                    strategy,
+                    sell_order_identifier,
+                    bool(sell_order),
+                )
+            elif not within_percentage_range(sell_order["price"], sell_size, 0.01):
+                logger.debug(
+                    f"Order price of {sell_order.get('price')} too far from target {target_sell_price}, replacing."
+                )
+                sell_order = await generate_order_replace(
+                    redis,
+                    maker,
+                    taker,
+                    target_sell_price,
+                    sell_size,
+                    symbol,
+                    order_side,
+                    strategy,
+                    sell_order_identifier,
+                    bool(sell_order),
+                )
+
+                continue
+
+            elif not within_percentage_range(sell_order["amount"], sell_size, 5):
+                logger.debug(
+                    f"Order amount of {sell_order.get('amount')} too far from target {sell_size}, replacing."
+                )
+                sell_order = await generate_order_replace(
+                    redis,
+                    maker,
+                    taker,
+                    target_sell_price,
+                    sell_size,
+                    symbol,
+                    order_side,
+                    strategy,
+                    sell_order_identifier,
+                    bool(sell_order),
+                )
+                continue
+
+        else:
+            if sell_order:
+                await send_processor_cancellation(
+                    redis, strategy, sell_order_identifier
+                )
