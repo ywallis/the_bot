@@ -8,6 +8,7 @@ class ccxtFee(TypedDict):
 
 class ccxtItem(TypedDict):
     order_id: NotRequired[str]
+    order: NotRequired[str]
     fee: NotRequired[ccxtFee]
     fees: NotRequired[list[ccxtFee]]
     cost: NotRequired[str]
