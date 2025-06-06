@@ -74,13 +74,13 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
 
         taker_client_bids: list[list[float]] = taker_order_book["bids"]
         taker_client_asks: list[list[float]] = taker_order_book["asks"]
-        maker_client_bids: list[list[float]] = maker_order_book["bids"]
-        maker_client_asks: list[list[float]] = maker_order_book["asks"]
+        # maker_client_bids: list[list[float]] = maker_order_book["bids"]
+        # maker_client_asks: list[list[float]] = maker_order_book["asks"]
 
         best_bid_taker: float = taker_client_bids[0][0]
         best_ask_taker: float = taker_client_asks[0][0]
-        best_bid_maker: float = maker_client_bids[0][0]
-        best_ask_maker: float = maker_client_asks[0][0]
+        # best_bid_maker: float = maker_client_bids[0][0]
+        # best_ask_maker: float = maker_client_asks[0][0]
 
         min_size, max_size = min_max_usd_converter(
             best_bid_taker, min_size_usdt, max_size_usdt
@@ -89,22 +89,31 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
         target_sell_price: float = best_ask_taker * spread
         target_buy_price: float = best_bid_taker * spread
 
-        # Sell order generation
-
-        available_liquidity_taker = maker_order_sizer(
+        available_liquidity_taker_asks = maker_order_sizer(
             target_sell_price,
             taker_client_asks,
             OrderSide.SELL,
             min_spread,
             max_size,
         )
+        available_liquidity_taker_bids = maker_order_sizer(
+            target_buy_price,
+            taker_client_bids,
+            OrderSide.BUY,
+            min_spread,
+            max_size,
+        )
 
-        sell_size = available_liquidity_taker * liquidity_utilization
+        sell_size = available_liquidity_taker_asks * liquidity_utilization
+
+        buy_size = available_liquidity_taker_bids * liquidity_utilization
+
+        # Sell order generation
 
         if sell_size > min_size:
             logger.debug(f"Optimal sell size currently {sell_size}")
 
-            order_side = OrderSide.BUY
+            order_side = OrderSide.SELL
             if sell_order is None:
                 logger.debug("Sell does not exist yet.")
                 sell_order = await generate_order_replace(
@@ -158,6 +167,69 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
 
         else:
             if sell_order:
+                await send_processor_cancellation(
+                    redis, strategy, sell_order_identifier
+                )
+
+        # Buy order generation
+
+        if buy_size > min_size:
+            logger.debug(f"Optimal buy size currently {buy_size}")
+
+            order_side = OrderSide.BUY
+            if buy_order is None:
+                logger.debug("Buy does not exist yet.")
+                buy_order = await generate_order_replace(
+                    redis,
+                    maker,
+                    taker,
+                    target_buy_price,
+                    buy_size,
+                    symbol,
+                    order_side,
+                    strategy,
+                    buy_order_identifier,
+                    bool(buy_order),
+                )
+            elif not within_percentage_range(buy_order["price"], buy_size, 0.01):
+                logger.debug(
+                    f"Order price of {buy_order.get('price')} too far from target {target_buy_price}, replacing."
+                )
+                buy_order = await generate_order_replace(
+                    redis,
+                    maker,
+                    taker,
+                    target_buy_price,
+                    buy_size,
+                    symbol,
+                    order_side,
+                    strategy,
+                    buy_order_identifier,
+                    bool(buy_order),
+                )
+
+                continue
+
+            elif not within_percentage_range(buy_order["amount"], buy_size, 5):
+                logger.debug(
+                    f"Order amount of {buy_order.get('amount')} too far from target {buy_size}, replacing."
+                )
+                buy_order = await generate_order_replace(
+                    redis,
+                    maker,
+                    taker,
+                    target_buy_price,
+                    buy_size,
+                    symbol,
+                    order_side,
+                    strategy,
+                    buy_order_identifier,
+                    bool(buy_order),
+                )
+                continue
+
+        else:
+            if buy_order:
                 await send_processor_cancellation(
                     redis, strategy, sell_order_identifier
                 )
