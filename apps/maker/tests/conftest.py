@@ -197,6 +197,20 @@ def base_strategy():
     }
 
 @pytest.fixture
+def base_strategy_fm():
+    return {
+        "symbol": "BTC/USDT",
+        "identifier": "test_strategy",
+        "maker_exchange": "maker",
+        "taker_exchange": "taker",
+        "spread": "1.01",
+        "liquidity_utilization": "1",
+        "min_spread": "1.005",
+        "min_size_usdt": "10",
+        "max_size_usdt": "1000000",
+    }
+
+@pytest.fixture
 def base_strategy_tt():
     return {
         "symbol": "BTC/USDT",
