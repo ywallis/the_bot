@@ -6,7 +6,7 @@ from datetime import datetime
 from redis.asyncio import ConnectionPool, Redis
 
 import apps.shared.src.logging_config as logging_config
-from apps.shared.src.errors import NetworkError, UnsubscribeError
+from apps.shared.src.errors import NetworkError, UnsubscribeError, ChecksumError
 from apps.shared.src.exchange_clients import authenticated_clients
 from apps.shared.src.structs import CustomExchange
 from apps.shared.src.utils import exchange_and_pair
@@ -29,11 +29,19 @@ async def watch_ob(client: CustomExchange, ticker: str, redis: Redis):
             logger.error(
                 f" Ignoring NetworkError in watch_ob for client {client.id}: {e}"
             )
+            await client.close()
 
         except UnsubscribeError as e:
             logger.error(
                 f" Ignoring UnsubscribeError in watch_ob for client {client.id}: {e}"
             )
+            await client.close()
+
+        except ChecksumError as e:
+            logger.error(
+                f" Ignoring UnsubscribeError in watch_ob for client {client.id}: {e}"
+            )
+            await client.close()
 
         except Exception as e:
             logger.error(f"Error in watch_ob for client {client.id}: {e}")
