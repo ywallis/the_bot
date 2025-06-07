@@ -114,8 +114,10 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
             logger.debug(f"Optimal sell size currently {sell_size}")
 
             order_side = OrderSide.SELL
+
             if sell_order is None:
                 logger.debug("Sell does not exist yet.")
+
                 sell_order = await generate_order_replace(
                     redis,
                     maker,
@@ -128,10 +130,12 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
                     sell_order_identifier,
                     bool(sell_order),
                 )
+
             elif not within_percentage_range(sell_order["price"], sell_size, 0.01):
                 logger.debug(
-                    f"Order price of {sell_order.get('price')} too far from target {target_sell_price}, replacing."
+                    f"{sell_order.get('price')} too far from {target_sell_price}"
                 )
+
                 sell_order = await generate_order_replace(
                     redis,
                     maker,
@@ -148,9 +152,8 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
                 continue
 
             elif not within_percentage_range(sell_order["amount"], sell_size, 5):
-                logger.debug(
-                    f"Order amount of {sell_order.get('amount')} too far from target {sell_size}, replacing."
-                )
+                logger.debug(f"{sell_order.get('amount')} too far from {sell_size}")
+
                 sell_order = await generate_order_replace(
                     redis,
                     maker,
@@ -177,6 +180,7 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
             logger.debug(f"Optimal buy size currently {buy_size}")
 
             order_side = OrderSide.BUY
+
             if buy_order is None:
                 logger.debug("Buy does not exist yet.")
                 buy_order = await generate_order_replace(
@@ -191,10 +195,12 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
                     buy_order_identifier,
                     bool(buy_order),
                 )
+
             elif not within_percentage_range(buy_order["price"], buy_size, 0.01):
                 logger.debug(
-                    f"Order price of {buy_order.get('price')} too far from target {target_buy_price}, replacing."
+                    f"{buy_order.get('price')} too far from {target_buy_price}"
                 )
+
                 buy_order = await generate_order_replace(
                     redis,
                     maker,
@@ -211,9 +217,8 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
                 continue
 
             elif not within_percentage_range(buy_order["amount"], buy_size, 5):
-                logger.debug(
-                    f"Order amount of {buy_order.get('amount')} too far from target {buy_size}, replacing."
-                )
+                logger.debug(f"{buy_order.get('amount')} too far from {buy_size}")
+
                 buy_order = await generate_order_replace(
                     redis,
                     maker,
