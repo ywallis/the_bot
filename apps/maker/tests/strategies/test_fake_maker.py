@@ -321,6 +321,96 @@ from apps.maker.src.structs import CancellationMessage, OrderMessage
                 ),
             ],
         ),
+        # Test case 6: Two cancellations, a set of orders and 2 cancellations
+        (
+            [
+                {"bids": [[50000, 1], [49999, 1]], "asks": [[50000, 1], [50001, 1]]},
+                {"bids": [[40000, 1], [39999, 1]], "asks": [[60000, 1], [60001, 1]]},
+            ],  # maker OB
+            [
+                {"bids": [[50000, 1], [49999, 1]], "asks": [[50000, 1], [50001, 1]]},
+                {"bids": [[50000, 2], [49999, 1]], "asks": [[50000, 2], [50001, 1]]},
+            ],  # taker OB
+            [
+                CancellationMessage(
+                    kind=MessageType.CANCELLATION,
+                    strategy="test_strategy_es",
+                    exchange="maker",
+                    id="",
+                    pair="BTC/USDT",
+                ),
+                CancellationMessage(
+                    kind=MessageType.CANCELLATION,
+                    strategy="test_strategy_eb",
+                    exchange="maker",
+                    id="",
+                    pair="BTC/USDT",
+                ),
+                OrderMessage(
+                    kind=MessageType.ORDER,
+                    strategy="test_strategy_es",
+                    exchange="maker",
+                    id="t-0_test_strategy_es",
+                    exchange_id="_",
+                    pair="BTC/USDT",
+                    side=OrderSide.SELL,
+                    order_type=OrderType.REPLACE,
+                    price=Decimal(50500),
+                    amount=Decimal(2),
+                ),
+                OrderMessage(
+                    kind=MessageType.ORDER,
+                    strategy="test_strategy_eb",
+                    exchange="maker",
+                    id="t-0_test_strategy_eb",
+                    exchange_id="_",
+                    pair="BTC/USDT",
+                    side=OrderSide.BUY,
+                    order_type=OrderType.REPLACE,
+                    price=Decimal(49500),
+                    amount=Decimal(2),
+                ),
+                CancellationMessage(
+                    kind=MessageType.CANCELLATION,
+                    strategy="test_strategy_es",
+                    exchange="maker",
+                    id="",
+                    pair="BTC/USDT",
+                ),
+                CancellationMessage(
+                    kind=MessageType.CANCELLATION,
+                    strategy="test_strategy_eb",
+                    exchange="maker",
+                    id="",
+                    pair="BTC/USDT",
+                ),
+            ],
+        ),
+        # Test case 7: Two cancellations, no orders because natural spread wider
+        (
+            [
+                {"bids": [[40000, 1], [39999, 1]], "asks": [[60000, 1], [60001, 1]]},
+            ],  # maker OB
+            [
+                {"bids": [[50000, 2], [49999, 1]], "asks": [[50000, 2], [50001, 1]]},
+            ],  # taker OB
+            [
+                CancellationMessage(
+                    kind=MessageType.CANCELLATION,
+                    strategy="test_strategy_es",
+                    exchange="maker",
+                    id="",
+                    pair="BTC/USDT",
+                ),
+                CancellationMessage(
+                    kind=MessageType.CANCELLATION,
+                    strategy="test_strategy_eb",
+                    exchange="maker",
+                    id="",
+                    pair="BTC/USDT",
+                ),
+            ],
+        ),
     ],
 )
 async def test_fake_maker(
@@ -384,5 +474,4 @@ async def test_fake_maker(
                 for message in expected_messages
             ]
         )
-        print(mocked_publish.call_args_list)
         assert mocked_publish.call_count == len(expected_messages)

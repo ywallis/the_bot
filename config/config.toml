@@ -27,6 +27,22 @@ max_size_usdt = 100
 production = true
 
 [[strategies]]
+symbol = "ALPH/USDT"
+type = "fake_maker"
+identifier = "fab"
+exchange_1 = "gate"
+exchange_2 = "bitget"
+taker_exchange = "gate"
+maker_exchange = "bitget"
+should_match = true
+min_spread = 1.0035
+spread = 1.006
+liquidity_utilization = 1
+min_size_usdt = 11
+max_size_usdt = 11
+production = false
+
+[[strategies]]
 symbol = "HYPE/USDT"
 type = "single_edge_liquidity"
 identifier = "lhb"

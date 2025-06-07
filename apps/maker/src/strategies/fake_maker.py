@@ -110,7 +110,7 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
 
         # Sell order generation
 
-        if sell_size > min_size and target_sell_price > best_ask_maker:
+        if sell_size >= min_size and target_sell_price > best_ask_maker:
             logger.debug(f"Optimal sell size currently {sell_size}")
 
             order_side = OrderSide.SELL
@@ -169,13 +169,14 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
 
         else:
             if sell_order:
-                await send_processor_cancellation(
+                logger.debug("Natural spread larger than strategy")
+                sell_order = await send_processor_cancellation(
                     redis, strategy, sell_order_identifier
                 )
 
         # Buy order generation
 
-        if buy_size > min_size and target_buy_price < best_bid_maker:
+        if buy_size >= min_size and target_buy_price < best_bid_maker:
             logger.debug(f"Optimal buy size currently {buy_size}")
 
             order_side = OrderSide.BUY
@@ -233,6 +234,7 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
 
         else:
             if buy_order:
-                await send_processor_cancellation(
-                    redis, strategy, sell_order_identifier
+                logger.debug("Natural spread larger than strategy")
+                buy_order = await send_processor_cancellation(
+                    redis, strategy, buy_order_identifier 
                 )
