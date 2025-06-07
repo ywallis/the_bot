@@ -87,7 +87,7 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
         )
 
         target_sell_price: float = best_ask_taker * spread
-        target_buy_price: float = best_bid_taker * spread
+        target_buy_price: float = best_bid_taker * (2 - spread)
 
         available_liquidity_taker_asks = maker_order_sizer(
             target_sell_price,
@@ -131,7 +131,9 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
                     bool(sell_order),
                 )
 
-            elif not within_percentage_range(sell_order["price"], sell_size, 0.01):
+            elif not within_percentage_range(
+                sell_order["price"], target_sell_price, 0.01
+            ):
                 logger.debug(
                     f"{sell_order.get('price')} too far from {target_sell_price}"
                 )
@@ -149,8 +151,6 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
                     bool(sell_order),
                 )
 
-                continue
-
             elif not within_percentage_range(sell_order["amount"], sell_size, 5):
                 logger.debug(f"{sell_order.get('amount')} too far from {sell_size}")
 
@@ -166,7 +166,6 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
                     sell_order_identifier,
                     bool(sell_order),
                 )
-                continue
 
         else:
             if sell_order:
@@ -196,7 +195,9 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
                     bool(buy_order),
                 )
 
-            elif not within_percentage_range(buy_order["price"], buy_size, 0.01):
+            elif not within_percentage_range(
+                buy_order["price"], target_buy_price, 0.01
+            ):
                 logger.debug(
                     f"{buy_order.get('price')} too far from {target_buy_price}"
                 )
@@ -214,8 +215,6 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
                     bool(buy_order),
                 )
 
-                continue
-
             elif not within_percentage_range(buy_order["amount"], buy_size, 5):
                 logger.debug(f"{buy_order.get('amount')} too far from {buy_size}")
 
@@ -231,7 +230,6 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
                     buy_order_identifier,
                     bool(buy_order),
                 )
-                continue
 
         else:
             if buy_order:
