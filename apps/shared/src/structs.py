@@ -51,11 +51,23 @@ class CustomExchange(Protocol):
     async def close(self): ...
     async def load_markets(self): ...
     async def fetch_canceled_and_closed_orders(
-        self, symbol: str, limit: int, since: str | None, params: dict[str, str | None]
+        self,
+        symbol: str,
+        limit: int,
+        since: int | None,
+        params: dict[str, str | int | None],
     ) -> ccxtItem | list[ccxtItem]: ...
     async def fetch_closed_orders(
-        self, symbol: str, limit: int, since: str | None, params: dict[str, str | None]
+        self,
+        symbol: str,
+        limit: int,
+        since: int | None,
+        params: dict[str, str | int | None],
     ) -> ccxtItem | list[ccxtItem]: ...
     async def fetch_my_trades(
-        self, symbol: str, limit: int, since: str | None, params: dict[str, str | None]
+        self,
+        symbol: str,
+        limit: int,
+        since: int | None,
+        params: dict[str, str | int | None],
     ) -> ccxtItem | list[ccxtItem]: ...
