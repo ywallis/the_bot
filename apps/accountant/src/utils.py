@@ -139,8 +139,8 @@ def dict_to_text(d: ccxtItem) -> dict[str, str]:
 async def retrieve_and_prepare_orders(
     client: CustomExchange,
     ticker: str,
-    start: str | None = None,
-    end: str | None = None,
+    start: int | None = None,
+    end: int | None = None,
 ):
     """This function downloads all latest orders from a client."""
 
@@ -157,7 +157,7 @@ async def retrieve_and_prepare_orders(
 
 
 async def retrieve_and_prepare_trades(
-    client: CustomExchange, pair: str, start: str | None = None, end: str | None = None
+    client: CustomExchange, pair: str, start: int | None = None, end: int | None = None
 ):
     """This function downloads trades from a CCXT client and prepares them to export to a Postgres server."""
 
