@@ -22,7 +22,6 @@ if __name__ == "__main__":
         daily_performance = send_sql_query(
             pg_config, daily_overview, False, {"symbol": sym, "range": 3}
         )
-        # daily_performance = send_sql_query(pg_config, daily_overview, False)
         print("Daily performance:")
         print(daily_performance)
     monthly_performance = send_sql_query(pg_config, monthly_overview)
