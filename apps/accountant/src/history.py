@@ -21,7 +21,7 @@ async def get_history(
 ):
     start_date = datetime.strptime(start_date_str, "%d/%m/%y")
     loop_start = start_date
-    original_loop_size = timedelta(minutes=120)
+    original_loop_size = timedelta(minutes=30)
     loop_size = original_loop_size
 
     while loop_start < start_date + timedelta(days=1):
