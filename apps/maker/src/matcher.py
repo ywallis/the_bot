@@ -29,22 +29,25 @@ logger = logging.getLogger(__name__)
 
 
 async def process_order_update(
-    redis: Redis, matching_client_id: str, order: dict[str, str]
+    redis: Redis, origin_client_id: str, matching_client_id: str, order: dict[str, str]
 ):
-    gate_fee = 0.001
+    native_asset_fee = {"bitget": 0.001, "gate": 0.001}
     quantity = float(order["filled"])
     price = float(order["price"])
     side = order["side"]
 
+    if order["side"] == "buy":
+        if origin_client_id in native_asset_fee:
+            quantity = quantity * (1 - native_asset_fee[origin_client_id])
+
     if price * quantity <= 3:
         quantity = 3.1 / float(order["price"])
 
-    # if side == OrderSide.SELL:
     if side == "sell":
-        if matching_client_id == "gate":
-            fee_ratio = 1 / (1 - gate_fee)
+        if matching_client_id in native_asset_fee:
+            fee_ratio = 1 / (1 - native_asset_fee[matching_client_id])
 
-            quantity = round(quantity * fee_ratio, 3)
+            quantity = quantity * fee_ratio
 
     await send_match_order(redis, matching_client_id, order, quantity)
 
@@ -123,7 +126,10 @@ async def watch_orders(
                     recently_processed_orders.add(order_copy.get("clientOrderId"))
                     asyncio.create_task(
                         process_order_update(
-                            redis, should_match[strategy_identifier], order_copy
+                            redis=redis,
+                            origin_client_id=client.id,
+                            matching_client_id=should_match[strategy_identifier],
+                            order=order_copy,
                         )
                     )
                 else:
