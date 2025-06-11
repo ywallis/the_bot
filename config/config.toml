@@ -8,7 +8,7 @@ taker_exchange = "gate"
 maker_exchange = "mexc"
 should_match = true
 spread = 1.0025
-min_size_usdt = 11 
+min_size_usdt = 11
 max_size_usdt = 100
 production = true
 
@@ -40,7 +40,7 @@ spread = 1.005
 liquidity_utilization = 0.9
 min_size_usdt = 11
 max_size_usdt = 100
-production = true 
+production = true
 
 [[strategies]]
 symbol = "ALPH/USDT"
@@ -56,7 +56,7 @@ spread = 1.005
 liquidity_utilization = 0.9
 min_size_usdt = 11
 max_size_usdt = 100
-production = true 
+production = true
 
 [[strategies]]
 symbol = "ALPH/USDT"
@@ -78,7 +78,7 @@ exchange_1 = "gate"
 exchange_2 = "bitget"
 spread = 1.0035
 sizing = 0.8
-min_size_usdt = 11 
+min_size_usdt = 11
 max_size_usdt = 50
 production = true
 
@@ -94,7 +94,7 @@ should_match = true
 spread = 1.0030
 min_size_usdt = 11
 max_size_usdt = 11
-production = true 
+production = true
 
 [[strategies]]
 symbol = "HYPE/USDT"
@@ -108,7 +108,7 @@ should_match = true
 spread = 1.0025
 min_size_usdt = 11
 max_size_usdt = 11
-production = true 
+production = true
 
 [[strategies]]
 symbol = "HYPE/USDT"
@@ -118,9 +118,9 @@ exchange_1 = "gate"
 exchange_2 = "bitget"
 spread = 1.0035
 sizing = 1
-min_size_usdt = 11 
+min_size_usdt = 11
 max_size_usdt = 11
-production = true 
+production = true
 
 [[strategies]]
 symbol = "HYPE/USDT"
@@ -130,9 +130,9 @@ exchange_1 = "gate"
 exchange_2 = "mexc"
 spread = 1.0035
 sizing = 1
-min_size_usdt = 11 
+min_size_usdt = 11
 max_size_usdt = 11
-production = true 
+production = true
 
 [[strategies]]
 symbol = "HYPE/USDT"
@@ -148,7 +148,7 @@ spread = 1.005
 liquidity_utilization = 1
 min_size_usdt = 11
 max_size_usdt = 11
-production = true 
+production = true
 
 [[strategies]]
 symbol = "HYPE/USDT"
@@ -163,8 +163,24 @@ min_spread = 1.0035
 spread = 1.005
 liquidity_utilization = 1
 min_size_usdt = 11
-max_size_usdt = 11 
-production = true 
+max_size_usdt = 11
+production = true
+
+[[strategies]]
+symbol = "ALPH/USDT"
+type = "fake_maker"
+identifier = "fhm"
+exchange_1 = "gate"
+exchange_2 = "mexc"
+taker_exchange = "gate"
+maker_exchange = "mexc"
+should_match = true
+min_spread = 1.0035
+spread = 1.005
+liquidity_utilization = 1
+min_size_usdt = 11
+max_size_usdt = 11
+production = false
 
 [[exchanges]]
 name = "Gate.io"
