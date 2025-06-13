@@ -2,6 +2,7 @@ import ast
 import asyncio
 import json
 import logging
+import signal
 from collections.abc import Awaitable
 from copy import copy
 from datetime import datetime
@@ -45,13 +46,36 @@ class MessageProcessor:
             connection_pool=self.pool, decode_responses=True
         ).pubsub()
         self.locks = {}  # Dictionary to store locks dynamically
-        self.message_queue = (
-            {}
-        )  # Dictionary to keep track of the next action to execute in case of a lock
-        self.open_orders = (
-            {}
-        )  # Keep track of last open order (could be cleaned up by the websocket watcher?)
+        self.message_queue = {}  # Dictionary to keep track of the next action to execute in case of a lock
+        self.open_orders: dict[
+            str, OrderMessage
+        ] = {}  # Keep track of last open order (could be cleaned up by the websocket watcher?)
         self.tasks = []
+        self.shutdown_event = asyncio.Event()
+
+    async def block_and_shutdown(self, tasks_to_cancel: list[asyncio.Task]):
+        logger.info("Cancelling all open tasks")
+        # Shut down listener and collector
+        for task in tasks_to_cancel:
+            task.cancel()
+        await asyncio.sleep(1)
+        for task in self.tasks:
+            if not task.done():
+                print(task)
+                task.cancel()
+        logger.info("All open tasks sucessfully closed")
+
+    async def cancel_all_open(self):
+        all_cancellation: list[asyncio.Task] = []
+
+        for order in self.open_orders.values():
+            cancellation_message = cancellation_from_order(order)
+            logger.info(f"Winding down, cancelling order {order}")
+            all_cancellation.append(
+                asyncio.create_task(self.place_cancellation(cancellation_message))
+            )
+        await asyncio.gather(*all_cancellation)
+        logger.info("All open orders sucessfully cancelled")
 
     async def get_open_orders(self):
         open_orders = {}
@@ -298,6 +322,9 @@ async def main():
     logger.debug("Message processor starting")
     processor = MessageProcessor()
 
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGTERM, processor.shutdown_event.set)
+
     # Let broker boot and check for open orders
 
     await asyncio.sleep(2)
@@ -311,7 +338,11 @@ async def main():
     # Start periodic collection of results
     collector_task = asyncio.create_task(processor.collect_results_periodically())
 
-    await asyncio.gather(listener_task, collector_task)
+    await processor.shutdown_event.wait()
+    await processor.cancel_all_open()
+    await processor.block_and_shutdown([listener_task, collector_task])
+
+    await asyncio.gather(listener_task, collector_task, return_exceptions=True)
 
 
 if __name__ == "__main__":

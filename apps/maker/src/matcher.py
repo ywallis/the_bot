@@ -36,7 +36,7 @@ async def process_order_update(
     price = float(order["price"])
     side = order["side"]
 
-    if order["side"] == "buy":
+    if side == "buy":
         if origin_client_id in native_asset_fee:
             quantity = quantity * (1 - native_asset_fee[origin_client_id])
 
