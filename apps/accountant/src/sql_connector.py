@@ -1,10 +1,13 @@
 import os
-import psycopg
+
 import pandas as pd
+import psycopg
 from psycopg.sql import SQL, Composed
 
 
-def send_sql_query(pg_config: dict, sql_query: SQL | Composed, raw: bool = False, parameters=None):
+def send_sql_query(
+    pg_config: dict, sql_query: SQL | Composed, raw: bool = False, parameters=None
+):
     """
     Sends an SQL query to a PostgreSQL database and returns the result.
 
@@ -34,7 +37,6 @@ def send_sql_query(pg_config: dict, sql_query: SQL | Composed, raw: bool = False
                 # Fetch all rows
                 rows = cur.fetchall()
                 if not rows or cur.description is None:
-                    print("No data returned or query does not produce a result set!")
                     return None
 
                 # Get column names
@@ -44,11 +46,12 @@ def send_sql_query(pg_config: dict, sql_query: SQL | Composed, raw: bool = False
                     return rows, col_names
 
                 # Convert to a DataFrame
-                df = pd.DataFrame(rows, columns=col_names) # pyright: ignore
+                df = pd.DataFrame(rows, columns=col_names)  # pyright: ignore
                 return df
     except psycopg.Error as e:
         print(f"Database error: {e}")
         return None
+
 
 class QueryLoader:
     def __init__(self, query_dir="apps/accountant/src/queries"):
