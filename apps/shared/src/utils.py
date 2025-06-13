@@ -1,6 +1,7 @@
 import os
 import tomllib
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 # TODO:
@@ -23,6 +24,11 @@ if production:
 exchange_and_pair: set[tuple[str, str]] = set()
 pairs: set[str] = set()
 
+refresh_speed: str | None = load_config().get("refresh_speed")
+
+if refresh_speed is None:
+    raise Exception("Refresh speed is not defined")
+
 strategies: list[dict[str, str]] | None = load_config().get("strategies")
 if strategies is None:
     raise Exception("No strategy found")
@@ -31,3 +37,4 @@ for strategy in strategies:
     exchange_and_pair.add((strategy["exchange_1"], strategy["symbol"]))
     exchange_and_pair.add((strategy["exchange_2"], strategy["symbol"]))
     pairs.add(strategy["symbol"])
+    strategy["refresh_speed"] = refresh_speed

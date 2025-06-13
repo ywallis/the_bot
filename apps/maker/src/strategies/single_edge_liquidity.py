@@ -29,6 +29,7 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
 
     watching: bool = True
 
+    refresh_speed: float = float(strategy["refresh_speed"])
     symbol: str = strategy["symbol"]
     maker: str = strategy["maker_exchange"]
     taker: str = strategy["taker_exchange"]
@@ -51,7 +52,7 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
     while watching:
         # Simple throttle
 
-        time.sleep(0.01)
+        time.sleep(refresh_speed)
 
         batch = asyncio.gather(
             retrieve_ob_redis(redis, f"{symbol}-{maker}"),
