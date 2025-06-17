@@ -229,7 +229,7 @@ class MessageProcessor:
                 for order in order_batch["orders"]:
                     order_tasks.append(self.place_order(order))
 
-                asyncio.gather(*order_tasks)
+                await asyncio.gather(*order_tasks)
 
             if msg["kind"] == MessageType.CANCELLATION:
                 if strategy in self.open_orders:
