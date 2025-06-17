@@ -1,9 +1,9 @@
 import asyncio
 import json
+from collections.abc import Awaitable
 from copy import deepcopy
 from decimal import Decimal
 from typing import Callable
-from collections.abc import Awaitable
 
 import pytest
 import pytest_asyncio
@@ -184,9 +184,11 @@ async def dummy_task() -> Callable[[], Awaitable[str]]:
 
     return _dummy_task
 
+
 @pytest.fixture
 def base_strategy():
     return {
+        "refresh_speed": "0.01",
         "symbol": "BTC/USDT",
         "identifier": "test_strategy",
         "maker_exchange": "maker",
@@ -196,9 +198,11 @@ def base_strategy():
         "max_size_usdt": "100000",
     }
 
+
 @pytest.fixture
 def base_strategy_fm():
     return {
+        "refresh_speed": "0.01",
         "symbol": "BTC/USDT",
         "identifier": "test_strategy",
         "maker_exchange": "maker",
@@ -210,9 +214,11 @@ def base_strategy_fm():
         "max_size_usdt": "1000000",
     }
 
+
 @pytest.fixture
 def base_strategy_tt():
     return {
+        "refresh_speed": "0.01",
         "symbol": "BTC/USDT",
         "identifier": "test_strategy",
         "exchange_1": "gate",

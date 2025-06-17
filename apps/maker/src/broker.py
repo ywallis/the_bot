@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import signal
 from typing import Any
 
 from redis.asyncio import Redis
@@ -189,6 +190,13 @@ async def main():
     redis = await Redis(host=REDIS_HOSTNAME, port=REDIS_PORT, decode_responses=True)
     pubsub: PubSub = redis.pubsub()
 
+    shutdown_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGTERM, shutdown_event.set)
+    # loop.add_signal_handler(
+    #     signal.SIGTERM, lambda: asyncio.create_task(handle_sigterm(shutdown_event))
+    # )
+
     worker_queues = {
         exchange: asyncio.Queue() for exchange in authenticated_clients.keys()
     }
@@ -205,6 +213,12 @@ async def main():
                 worker_queues[exchange], results_queue, authenticated_clients[exchange]
             )
         )
+
+    # Processing SIGTERM
+    await shutdown_event.wait()
+
+    logger.info("Shutting down after waiting for 5 seconds")
+    await asyncio.sleep(5)
 
     await asyncio.gather(subscriber_task, results_task, return_exceptions=False)
 

@@ -25,6 +25,7 @@ async def take_take(redis: Redis, strategy: dict[str, str]):
 
     watching: bool = True
 
+    refresh_speed: float = float(strategy["refresh_speed"])
     symbol: str = strategy["symbol"]
     exchange_1: str = strategy["exchange_1"]
     exchange_2: str = strategy["exchange_2"]
@@ -40,7 +41,7 @@ async def take_take(redis: Redis, strategy: dict[str, str]):
     while watching:
         # Simple throttle
 
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(refresh_speed)
 
         batch = asyncio.gather(
             retrieve_ob_redis(redis, f"{symbol}-{exchange_1}"),

@@ -45,10 +45,17 @@ def cleanup_and_exit(exit_code=1):
     """Terminate all running processes and exit."""
     print("Cleaning up processes...")
     for _, proc in processes:
+        # First pass only to send a signal
+
+        if proc.poll() is None:  # Only kill if the process is still running
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+
+    for _, proc in processes:
+        # Second pass to kill anything that takes more than x s to close
+
         if proc.poll() is None:  # Only kill if the process is still running
             try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)  # Graceful termination
-                proc.wait(timeout=3)  # Wait for process to exit
+                proc.wait(timeout=5)  # Wait for process to exit
             except ProcessLookupError:
                 pass  # Process already exited, nothing to do
             except Exception:
@@ -67,7 +74,7 @@ signal.signal(signal.SIGTERM, handle_exit)
 if __name__ == "__main__":
     # Start unique processes immediately
     # processes = [(cmd, launch_process(cmd)) for cmd in PROCESS_LIST]
-    processes = []
+    processes: list[tuple[list[str], subprocess.Popen]] = []
     for cmd in PROCESS_LIST:
         proc = launch_process(cmd)
         processes.append((cmd, proc))
