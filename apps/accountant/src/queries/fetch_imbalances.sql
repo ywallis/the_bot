@@ -23,7 +23,7 @@ WITH trade_data AS (
     LEFT JOIN
         orders ON trades.order_id = orders.id
     WHERE
-        trades.datetime >= '2024-09-01 00:00:00'
+        trades.datetime >= '2024-09-01 00:00:00' and trades.symbol = %(symbol)s
     GROUP BY
   			trades.symbol,
         orders.clientorderid
@@ -49,4 +49,4 @@ WHERE
 		ABS(delta * CASE
         WHEN delta < 0 THEN weighted_avg_sell_price
         ELSE weighted_avg_buy_price
-    END) > 3.1 and symbol = %(symbol)s;
+    END) > 3.1;
