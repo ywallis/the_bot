@@ -22,6 +22,8 @@ CREATE TABLE trades (
 
 CREATE UNIQUE INDEX exchange_trade_id_side_idx ON public.trades (exchange, id, side);
 
+CREATE INDEX symbol_trades_idx ON trades(symbol);
+
 CREATE TABLE orders (
   id TEXT,
   clientOrderId TEXT,
@@ -58,3 +60,5 @@ CREATE TABLE orders (
 );
 
 CREATE UNIQUE INDEX exchange_order_id_side_idx ON public.orders (exchange, id, side);
+CREATE INDEX symbol_orders_idx ON orders(symbol);
+
