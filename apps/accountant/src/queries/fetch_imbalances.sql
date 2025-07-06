@@ -49,4 +49,4 @@ WHERE
 		ABS(delta * CASE
         WHEN delta < 0 THEN weighted_avg_sell_price
         ELSE weighted_avg_buy_price
-    END) > 3.1;
+    END) > 3.1 and symbol = %(symbol)s;

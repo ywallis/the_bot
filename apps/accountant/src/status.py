@@ -56,12 +56,6 @@ async def fetch_balances(clients: dict[str, CustomExchange]):
             print(f"{round(amount, 6)} {symbol} available on {client.name}")
 
 
-async def fetch_imbalances(
-    symbol: str, imbalances: DataFrame, orders: list[dict[str, str]]
-):
-    unaddressed_imbalances(symbol, imbalances, orders)
-
-
 def get_daily_performance(query: sql.Composed, symbol: str):
     pg_config = load_pg_config()
     daily_performance = send_sql_query(
@@ -91,26 +85,28 @@ async def main(clients: dict[str, CustomExchange], pairs: set):
     while True:
         try:
             os.system("clear")
-            print(f'Status at {datetime.now()}')
+            print(f"Status at {datetime.now()}")
             for symbol in pairs:
                 await get_order_status(clients, symbol, True)
             await fetch_balances(clients)
-            imbalances = send_sql_query(pg_config, fetch_imbalances_query)
-            if imbalances is None:
-                print("No imbalances returned")
-            else:
-                all_open_orders = await fetch_all_open_orders_client_order_id(
-                    pairs, authenticated_clients
+            all_open_orders = await fetch_all_open_orders_client_order_id(
+                pairs, authenticated_clients
+            )
+            for symbol in pairs:
+                print(symbol)
+                imbalances = send_sql_query(
+                    pg_config, fetch_imbalances_query, False, {"symbol": symbol}
                 )
-                if not isinstance(imbalances, DataFrame):
-                    raise Exception("Error returning imbalances from DB")
-                for symbol in pairs:
+                if imbalances is None:
+                    print("No imbalances returned")
+                if isinstance(imbalances, DataFrame):
+                    # raise Exception("Error returning imbalances from DB")
                     try:
-                        await fetch_imbalances(symbol, imbalances, all_open_orders)
+                        unaddressed_imbalances(symbol, imbalances, all_open_orders)
                     except KeyError:
                         print(f"No imbalances for {symbol}")
                     get_daily_performance(daily_overview, symbol)
-            await asyncio.sleep(20)
+            await asyncio.sleep(10)
         except ExchangeError as e:
             print("Exchange error, retrying.")
             print(e)

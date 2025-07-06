@@ -2,6 +2,7 @@ import logging
 import os
 from copy import deepcopy
 
+from pandas import DataFrame
 import psycopg
 from dotenv import load_dotenv
 from psycopg import sql
@@ -212,7 +213,9 @@ def export_to_sql(
         logger.info(f"Data for {client_name} inserted successfully in {table} table!")
 
 
-def unaddressed_imbalances(pair: str, imbalances, orders):
+def unaddressed_imbalances(
+    pair: str, imbalances: DataFrame, orders: list[dict[str, str]]
+):
     """This function tries to notify of imbalances in an arbitrage setup, similar to the matcher, but designed as a background service.
     Imbalances are meant to be fed as a pandas DF. Orders are CCXT objects."""
 
