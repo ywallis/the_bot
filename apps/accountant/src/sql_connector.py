@@ -6,7 +6,10 @@ from psycopg.sql import SQL, Composed
 
 
 def send_sql_query(
-    pg_config: dict, sql_query: SQL | Composed, raw: bool = False, parameters=None
+    pg_config: dict,
+    sql_query: SQL | Composed,
+    raw: bool = False,
+    parameters: dict[str, str | int] | tuple | None = None,
 ):
     """
     Sends an SQL query to a PostgreSQL database and returns the result.
