@@ -20,7 +20,9 @@ from apps.shared.src.exchange_clients import (
 from apps.shared.src.structs import CustomExchange
 
 
-async def get_order_status(clients: dict[str, CustomExchange], ticker: str, details=True):
+async def get_order_status(
+    clients: dict[str, CustomExchange], ticker: str, details=True
+):
     """This function lists all open orders for a client in a terminal format."""
 
     for client in clients.values():
@@ -110,13 +112,13 @@ async def main(clients: dict[str, CustomExchange], pairs: set):
                     get_daily_performance(daily_overview, symbol)
             await asyncio.sleep(20)
         except ExchangeError as e:
-            print('Exchange error, retrying.')
+            print("Exchange error, retrying.")
             print(e)
         except RequestTimeout as e:
-            print('Request timeout, retrying.')
+            print("Request timeout, retrying.")
             print(e)
         except NetworkError as e:
-            print('Network error, retrying.')
+            print("Network error, retrying.")
             print(e)
 
 

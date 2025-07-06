@@ -1,17 +1,18 @@
-import os
 import logging
+import os
 
-import ccxt.pro as ccxt # pyright: ignore[reportMissingTypeStubs]
+import ccxt.pro as ccxt  # pyright: ignore[reportMissingTypeStubs]
 from dotenv import load_dotenv
 
 import apps.shared.src.logging_config as logging_config
+from apps.shared.src.errors import RequestTimeout
 from apps.shared.src.structs import CustomExchange
 from apps.shared.src.utils import load_config
-from apps.shared.src.errors import RequestTimeout
 
 # Initializing centralized logging
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
+
 
 async def load_clients():
     for client in authenticated_clients.values():
@@ -60,4 +61,6 @@ for exchange in exchanges:
             {"apiKey": exchange_key, "secret": exchange_secret}
         )
         auth_client.options["maxRetriesOnFailure"] = 1
+        auth_client.timeout = 30000
+        # auth_client.verbose = True
     authenticated_clients[id] = auth_client
