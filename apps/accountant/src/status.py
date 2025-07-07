@@ -97,7 +97,7 @@ async def main(clients: dict[str, CustomExchange], pairs: set):
                     pg_config, fetch_imbalances_query, False, {"symbol": symbol}
                 )
                 if imbalances is None:
-                    print("No imbalances returned")
+                    print(f"No imbalances for {symbol}")
                 if isinstance(imbalances, DataFrame):
                     # raise Exception("Error returning imbalances from DB")
                     try:
