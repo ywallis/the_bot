@@ -8,6 +8,7 @@ from apps.maker.src.structs import CancellationMessage, OrderMessage
 from apps.shared.src.errors import (
     BadRequest,
     ExchangeError,
+    NetworkError,
     InvalidOrder,
     RequestTimeout,
 )
@@ -46,7 +47,7 @@ async def cancel_order_return_confirmation(
             last_error = e
             await asyncio.sleep(0.2)
 
-        except ExchangeError as e:
+        except (ExchangeError, NetworkError) as e:
             logger.error(
                 f"Cancellation rejected by exchange, attempt num.:{attempt + 1}. Error was: {e}"
             )
@@ -87,7 +88,7 @@ async def create_and_return_order(order: OrderMessage, client: CustomExchange):
             last_error = e
             await asyncio.sleep(0.2)
 
-        except ExchangeError as e:
+        except (ExchangeError, NetworkError) as e:
             logger.error(
                 f"Order rejected by exchange, attempt num.:{attempt + 1}. Error was: {e}"
             )
