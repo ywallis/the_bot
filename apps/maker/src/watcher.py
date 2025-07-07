@@ -6,7 +6,7 @@ from datetime import datetime
 from redis.asyncio import ConnectionPool, Redis
 
 import apps.shared.src.logging_config as logging_config
-from apps.shared.src.errors import NetworkError, UnsubscribeError, ExchangeClosedByUser
+from apps.shared.src.errors import ExchangeClosedByUser, NetworkError, UnsubscribeError
 from apps.shared.src.exchange_clients import authenticated_clients
 from apps.shared.src.structs import CustomExchange
 from apps.shared.src.utils import exchange_and_pair
@@ -25,6 +25,7 @@ async def watch_ob(client: CustomExchange, ticker: str, redis: Redis):
                 f"{datetime.now()} Bid {order_book['bids'][0][0]} and ask {order_book['asks'][0][0]} on {client.name}"
             )
             await redis.set(f"{ticker}-{client.id}", json.dumps(order_book))
+            await redis.publish(f"{ticker}-{client.id}", "ayooo")
         except NetworkError as e:
             logger.error(
                 f" Ignoring NetworkError in watch_ob for client {client.id}: {e}"

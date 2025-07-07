@@ -17,8 +17,6 @@ logger = logging.getLogger(__name__)
 
 # TODO:
 
-# - Small sleep after order send
-
 
 async def take_take(redis: Redis, strategy: dict[str, str]):
     # Defining state
