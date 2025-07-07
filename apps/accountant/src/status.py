@@ -93,7 +93,6 @@ async def main(clients: dict[str, CustomExchange], pairs: set):
                 pairs, authenticated_clients
             )
             for symbol in pairs:
-                print(symbol)
                 imbalances = send_sql_query(
                     pg_config, fetch_imbalances_query, False, {"symbol": symbol}
                 )
@@ -105,8 +104,10 @@ async def main(clients: dict[str, CustomExchange], pairs: set):
                         unaddressed_imbalances(symbol, imbalances, all_open_orders)
                     except KeyError:
                         print(f"No imbalances for {symbol}")
-                    get_daily_performance(daily_overview, symbol)
-            await asyncio.sleep(10)
+
+                get_daily_performance(daily_overview, symbol)
+
+            await asyncio.sleep(15)
         except ExchangeError as e:
             print("Exchange error, retrying.")
             print(e)
