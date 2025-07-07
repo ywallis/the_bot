@@ -13,12 +13,20 @@ from apps.shared.src.exchange_clients import authenticated_clients, symbols
 from apps.shared.src.structs import CustomExchange
 
 
+def currency_picker() -> str:
+    while True:
+        currency = input("Enter the token pair to be matched: ")
+
+        break
+    return currency
+
+
 def date_picker() -> str:
     loop = True
     date_mod = ""
     date = ""
     while loop:
-        date = input("Enter the date (DD/MM/YY) you want to match orders on:")
+        date = input("Enter the date (DD/MM/YY) you want to match orders on: ")
         date_mod = "".join(date.split("/")[::-1])
         print(date_mod)
         if date_mod != "":
@@ -65,8 +73,11 @@ async def main():
 
     taker_client = client_picker(authenticated_clients)
     date = date_picker()
+    currency = currency_picker()
 
-    imbalances = send_sql_query(pg_config, fetch_imbalances)
+    imbalances = send_sql_query(
+        pg_config, fetch_imbalances, False, {"symbol": currency}
+    )
     if not isinstance(imbalances, DataFrame):
         raise Exception("No imbalances returned")
 
