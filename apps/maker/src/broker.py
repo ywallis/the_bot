@@ -169,7 +169,7 @@ async def redis_subscriber(
                             all_open_orders = await fetch_all_open(
                                 authenticated_clients
                             )
-                            print(all_open_orders)
+                            logger.info(all_open_orders)
 
                         except Exception as e:
                             raise Exception(e)
