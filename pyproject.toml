@@ -48,6 +48,7 @@ dependencies = [
 	"propcache>=0.3.0",
 	"pytest-asyncio>=0.25.3",
 	"pytest-mock>=3.14.0",
+	"protobuf==5.29.5",
 ]
 
 [tool.pytest.ini_options]
