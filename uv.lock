@@ -1028,7 +1028,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.2.3" },
     { name = "pluggy", specifier = ">=1.5.0" },
     { name = "propcache", specifier = ">=0.3.0" },
-    { name = "protobuf", specifier = "==5.29.5" },
+    { name = "protobuf", specifier = ">=5.29.5" },
     { name = "psycopg", specifier = ">=3.2.3" },
     { name = "psycopg-binary", specifier = ">=3.2.3" },
     { name = "pycares", specifier = ">=4.5.0" },
