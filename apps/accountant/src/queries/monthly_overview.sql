@@ -25,4 +25,5 @@ GROUP BY
     DATE_TRUNC('month', overview.date)
 ORDER BY
     overview.symbol,
-    month;
+    month
+LIMIT 6;
