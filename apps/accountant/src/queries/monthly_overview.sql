@@ -16,6 +16,8 @@ FROM (
         SUM(CASE WHEN trades.side = 'sell' THEN trades.asset_net_q ELSE 0 END) AS inventory_delta
     FROM
         trades
+    WHERE
+	trades.symbol = {symbol}
     GROUP BY
         trades.symbol,
         DATE(trades.datetime)
@@ -26,4 +28,4 @@ GROUP BY
 ORDER BY
     overview.symbol,
     month DESC
-LIMIT 6;
+LIMIT {range};
