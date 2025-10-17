@@ -6,7 +6,12 @@ from datetime import datetime
 from redis.asyncio import ConnectionPool, Redis
 
 import apps.shared.src.logging_config as logging_config
-from apps.shared.src.errors import ExchangeClosedByUser, NetworkError, UnsubscribeError
+from apps.shared.src.errors import (
+    CancelledError,
+    ExchangeClosedByUser,
+    NetworkError,
+    UnsubscribeError,
+)
 from apps.shared.src.exchange_clients import authenticated_clients
 from apps.shared.src.structs import CustomExchange
 from apps.shared.src.utils import exchange_and_pair
@@ -40,6 +45,12 @@ async def watch_ob(client: CustomExchange, ticker: str, redis: Redis):
         except ExchangeClosedByUser as e:
             logger.error(
                 f" Ignoring ExchangeClosedByUser in watch_ob for client {client.id}: {e}"
+            )
+            await client.close()
+
+        except CancelledError as e:
+            logger.error(
+                f" Ignoring CancelledError in watch_ob for client {client.id}: {e}"
             )
             await client.close()
 
