@@ -25,6 +25,20 @@ logger = logging.getLogger(__name__)
 
 
 async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
+    """Add to the best existing price if it can be offset.
+
+    This allows to "piggy-back" on another market maker, and offer the best
+    available price without entering a bidding war. This strategy is only active if
+    it can immediately be offset by a taker order on another exchange.
+
+    Parameters
+    ----------
+    redis : Redis
+        A redis client instance
+    strategy : dict[str, str]
+        The strategy options to be loaded
+
+    """
     # Defining state
 
     watching: bool = True
