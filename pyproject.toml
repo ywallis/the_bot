@@ -55,3 +55,10 @@ dependencies = [
 pythonpath = ["apps/maker/src"]
 testpaths = ["apps/maker/tests"]
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff.lint]
+select = ["D"]
+ignore = ["D100"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
