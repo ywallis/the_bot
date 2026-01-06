@@ -17,6 +17,16 @@ logger = logging.getLogger(__name__)
 
 
 async def fetch_balance(client: CustomExchange, redis: Redis):
+    """Fetch a balance from an exchange using a CCXT client.
+
+    Parameters
+    ----------
+    client : CustomExchange
+        A CCXT exchange instance
+    redis : Redis
+        A redis client instance
+
+    """
     try:
         balance = await client.fetch_balance()
         balance["timestamp"] = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
@@ -33,6 +43,16 @@ async def fetch_balance(client: CustomExchange, redis: Redis):
 
 
 async def watch_balance(client: CustomExchange, redis: Redis):
+    """Watch changes to the balance on an exchange using a WS CCXT client.
+
+    Parameters
+    ----------
+    client : CustomExchange
+        A CCXT exchange instance
+    redis : Redis
+        A redis client instance
+
+    """
     while True:
         try:
             balance = await client.watch_balance()
@@ -51,6 +71,14 @@ async def watch_balance(client: CustomExchange, redis: Redis):
 
 
 async def main(clients: dict[str, CustomExchange]):
+    """Fetch initial balance then watch changes for multiple clients.
+
+    Parameters
+    ----------
+    clients : dict[str, CustomExchange]
+        A dict mapping CCXT short id to a CCXT exchange client
+
+    """
     pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=20)
     redis = Redis(decode_responses=True, connection_pool=pool)
 
