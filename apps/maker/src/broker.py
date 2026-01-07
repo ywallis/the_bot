@@ -40,6 +40,19 @@ logger = logging.getLogger(__name__)
 
 
 async def fetch_all_open(clients: dict[str, CustomExchange]) -> OrderBatchMessage:
+    """Fetch all currently open orders on all clients.
+
+    Parameters
+    ----------
+    clients : dict[str, CustomExchange]
+        A dict mapping CCXT short id to CCXT client instance
+
+    Returns
+    -------
+    OrderBatchMessage
+        A batch of all retrieved open orders
+
+    """
     all_orders: list[OrderMessage] = []
 
     for name, client in clients.items():
@@ -73,10 +86,22 @@ async def fetch_all_open(clients: dict[str, CustomExchange]) -> OrderBatchMessag
 
 
 async def process_message(
-    message: CancellationMessage | OrderMessage | Any,
+    message: CancellationMessage | OrderMessage,
     results_queue: asyncio.Queue,
     ccxt_client: CustomExchange,
 ):
+    """Process a message coming from the message processor.
+
+    Parameters
+    ----------
+    message : CancellationMessage | OrderMessage
+        The message to be processed
+    results_queue : asyncio.Queue
+        The queue in which results will be placed
+    ccxt_client : CustomExchange
+        A CCXT exchange client instance
+
+    """
     try:
         if is_order_message(message):
             # if message.get("kind") == MessageType.ORDER:
@@ -108,8 +133,18 @@ async def process_message(
 async def worker(
     queue: asyncio.Queue, results_queue: asyncio.Queue, ccxt_client: CustomExchange
 ):
-    """Processes messages from the queue and sends them to the correct ccxt_client."""
+    """Spawn a worker which will process messages destined to a specific exchange.
 
+    Parameters
+    ----------
+    queue : asyncio.Queue
+        The queue for the worker's exchange
+    results_queue : asyncio.Queue
+        The queue the results will be placed in
+    ccxt_client : CustomExchange
+        The CCXT exchange client instance for the exchange
+
+    """
     while True:
         message = await queue.get()
         if message is None:  # Shutdown signal
@@ -127,8 +162,16 @@ async def worker(
 
 
 async def results_worker(redis: Redis, results_queue: asyncio.Queue):
-    """Processes the results queue and publishes responses via Redis."""
+    """Spawn a worker which will send processed messages to the processor.
 
+    Parameters
+    ----------
+    redis : Redis
+        A redis client instance
+    results_queue : asyncio.Queue
+        The results queue the worker will work to empty
+
+    """
     while True:
         order_id, msg_type, message = await results_queue.get()
         if order_id is None:  # Shutdown signal
@@ -144,7 +187,18 @@ async def results_worker(redis: Redis, results_queue: asyncio.Queue):
 async def redis_subscriber(
     redis: Redis, pubsub: PubSub, queues: dict[str, asyncio.Queue]
 ):
-    """Listens to Redis channel and routes messages to the correct queue."""
+    """Listen to a Redis channel and route messages to the right queue.
+
+    Parameters
+    ----------
+    redis : Redis
+        A Redis client instance used to communicate back to processor
+    pubsub : PubSub
+        The pubsub Redis instance used to receive messages
+    queues : dict[str, asyncio.Queue]
+        A dict mapping CCXT short ids to corresponding queues
+
+    """
     await pubsub.subscribe(BROKER_CHANNEL)
 
     logger.debug(f"Subscribed to Redis channel: {BROKER_CHANNEL}")
@@ -187,15 +241,16 @@ async def redis_subscriber(
 
 
 async def main():
+    """Initialize the broker and constantly listen.
+
+    Will run until SIGTERM or an unexpected crash happens.
+    """
     redis = await Redis(host=REDIS_HOSTNAME, port=REDIS_PORT, decode_responses=True)
     pubsub: PubSub = redis.pubsub()
 
     shutdown_event = asyncio.Event()
     loop = asyncio.get_running_loop()
     loop.add_signal_handler(signal.SIGTERM, shutdown_event.set)
-    # loop.add_signal_handler(
-    #     signal.SIGTERM, lambda: asyncio.create_task(handle_sigterm(shutdown_event))
-    # )
 
     worker_queues = {
         exchange: asyncio.Queue() for exchange in authenticated_clients.keys()
