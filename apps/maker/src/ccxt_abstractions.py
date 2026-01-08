@@ -8,8 +8,8 @@ from apps.maker.src.structs import CancellationMessage, OrderMessage
 from apps.shared.src.errors import (
     BadRequest,
     ExchangeError,
-    NetworkError,
     InvalidOrder,
+    NetworkError,
     RequestTimeout,
 )
 from apps.shared.src.structs import CustomExchange
@@ -21,7 +21,26 @@ logger = logging.getLogger(__name__)
 
 async def cancel_order_return_confirmation(
     cancellation: CancellationMessage, client: CustomExchange
-):
+) -> CancellationMessage | dict[str, str]:
+    """Allow the broker to cancel an order with a CCXT client.
+
+    Retry logic and behavior in case the order has been filled prior
+    to cancellation is abstracted away from the user.
+
+    Parameters
+    ----------
+    cancellation : CancellationMessage
+        The cancellation to be executed
+    client : CustomExchange
+        The CCXT exchange client instance to be used
+
+    Returns
+    -------
+    CancellationMessage | dict[str, str]
+        The original cancellation in case the order was fully filled,
+        a CCXT order object otherwise
+
+    """
     last_error: Exception = Exception()
 
     for attempt in range(5):
@@ -64,7 +83,26 @@ async def cancel_order_return_confirmation(
     )
 
 
-async def create_and_return_order(order: OrderMessage, client: CustomExchange):
+async def create_and_return_order(
+    order: OrderMessage, client: CustomExchange
+) -> dict[str, str]:
+    """Allow the broker to place an order with a CCXT client.
+
+    Retry logic is abstracted away from the user.
+
+    Parameters
+    ----------
+    order : OrderMessage
+        The order message to be executed
+    client : CustomExchange
+        The CCXT exchange client instance to be used
+
+    Returns
+    -------
+    dict[str, str]
+        A CCXT order object
+
+    """
     last_error: Exception = Exception()
 
     if order.get("order_type") == OrderType.MARKET:
