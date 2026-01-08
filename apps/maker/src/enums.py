@@ -1,36 +1,80 @@
 from enum import Enum
 
 
-class MessageType(Enum):
+class CustomEnum(Enum):
+    """Custom base enum class."""
+
+    def __str__(self) -> str:
+        """Represent the enum as a string.
+
+        Returns
+        -------
+        str
+            The string representation of the enum
+
+        """
+        return self.value
+
+
+class MessageType(CustomEnum):
+    """A message to or from the message processor.
+
+    Attributes
+    ----------
+    ORDER : A regular order
+    ORDERBATCH : A message containing multiple orders
+    CANCELLATION : A cancellation
+    ERROR : An error
+
+    """
+
     ORDER = "order"
     ORDERBATCH = "orderbatch"
     CANCELLATION = "cancellation"
     ERROR = "error"
 
-    def __str__(self):
-        return self.value
 
+class OrderSide(CustomEnum):
+    """The side of an order.
 
-class OrderSide(Enum):
+    Attributes
+    ----------
+    SELL : A sell order
+    BUY : A buy order
+
+    """
+
     SELL = "sell"
     BUY = "buy"
 
-    def __str__(self):
-        return self.value
 
+class OrderType(CustomEnum):
+    """The type of an order.
 
-class OrderType(Enum):
+    Attributes
+    ----------
+    REPLACE : A hanging limit order meant to be replaced
+    UNIQUE : A limit order meant to be executed once and not cancelled
+    MARKET : An immediate market order
+
+    """
+
     REPLACE = "replace"
     UNIQUE = "unique"
     MARKET = "market"
 
-    def __str__(self):
-        return self.value
 
-class OidComponent(Enum):
+class OidComponent(CustomEnum):
+    """The possible components of the custom oid.
+
+    Attributes
+    ----------
+    TIME : The time at which the order was generated
+    STRATEGY : The strategy the order belongs to
+    ORDER : The unique order identifier
+
+    """
+
     TIME = "time"
     STRATEGY = "strategy"
     ORDER = "order"
-
-    def __str__(self):
-        return self.value
