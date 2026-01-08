@@ -56,7 +56,7 @@ async def test_process_message_unknown_type():
     results_queue = asyncio.Queue()
     ccxt_client = AsyncMock(spec=CustomExchange)
 
-    await process_message(message, results_queue, ccxt_client)
+    await process_message(message, results_queue, ccxt_client)  # pyright: ignore[]
     result = await results_queue.get()
 
     assert result[0] == "789"
