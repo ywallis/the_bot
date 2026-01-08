@@ -7,4 +7,12 @@ class BrokerError(Exception):
         self.code = code
 
     def __str__(self):
+        """Represent the error as a string.
+
+        Returns
+        -------
+        str
+            The string representation of the error
+
+        """
         return f"[Error {self.code}]: {self.message}"
