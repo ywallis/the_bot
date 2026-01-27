@@ -1,3 +1,8 @@
+"""
+This module generates a daily and monthly dashboard overview of the bot's performance.
+It executes SQL queries to aggregate trading data and prints the results.
+"""
+
 from psycopg import sql
 
 from apps.accountant.src.sql_connector import QueryLoader, send_sql_query

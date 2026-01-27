@@ -1,3 +1,9 @@
+"""
+This module implements the 'single_edge_liquidity' strategy.
+It attempts to arbitrage between two exchanges by placing limit orders on the maker exchange
+when the spread conditions are favorable relative to the taker exchange.
+"""
+
 import asyncio
 import logging
 import time
@@ -25,6 +31,19 @@ logger = logging.getLogger(__name__)
 
 
 async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
+    """
+    Execute the single edge liquidity strategy.
+
+    Continuously monitors order books on both exchanges and places/updates/cancels orders
+    on the maker exchange to capture arbitrage opportunities against the taker exchange.
+
+    Parameters
+    ----------
+    redis : Redis
+        The Redis client instance.
+    strategy : dict[str, str]
+        The strategy configuration dictionary.
+    """
     # Defining state
 
     watching: bool = True

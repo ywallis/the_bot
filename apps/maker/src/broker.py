@@ -1,3 +1,8 @@
+"""
+This module acts as the broker service, managing communication between the internal messaging system
+(Redis Pub/Sub) and the external exchanges via CCXT. It handles order creation, cancellation, and retrieval.
+"""
+
 import asyncio
 import json
 import logging
@@ -40,6 +45,24 @@ logger = logging.getLogger(__name__)
 
 
 async def fetch_all_open(clients: dict[str, CustomExchange]) -> OrderBatchMessage:
+    """
+    Fetch all open orders from the configured exchanges and symbols.
+
+    Parameters
+    ----------
+    clients : dict[str, CustomExchange]
+        A dictionary of authenticated exchange clients.
+
+    Returns
+    -------
+    OrderBatchMessage
+        A message containing a batch of all open orders retrieved.
+
+    Raises
+    ------
+    Exception
+        If fetching orders fails after multiple attempts.
+    """
     all_orders: list[OrderMessage] = []
 
     for name, client in clients.items():
@@ -77,6 +100,18 @@ async def process_message(
     results_queue: asyncio.Queue,
     ccxt_client: CustomExchange,
 ):
+    """
+    Process an incoming message (Order or Cancellation) and execute the corresponding action on the exchange.
+
+    Parameters
+    ----------
+    message : CancellationMessage | OrderMessage | Any
+        The message to process.
+    results_queue : asyncio.Queue
+        The queue to put the execution result into.
+    ccxt_client : CustomExchange
+        The exchange client to use for execution.
+    """
     try:
         if is_order_message(message):
             # if message.get("kind") == MessageType.ORDER:
@@ -108,7 +143,18 @@ async def process_message(
 async def worker(
     queue: asyncio.Queue, results_queue: asyncio.Queue, ccxt_client: CustomExchange
 ):
-    """Processes messages from the queue and sends them to the correct ccxt_client."""
+    """
+    Worker coroutine that processes messages from a specific exchange queue.
+
+    Parameters
+    ----------
+    queue : asyncio.Queue
+        The input queue for the specific exchange.
+    results_queue : asyncio.Queue
+        The queue to send results to.
+    ccxt_client : CustomExchange
+        The exchange client associated with this worker.
+    """
 
     while True:
         message = await queue.get()
@@ -127,7 +173,16 @@ async def worker(
 
 
 async def results_worker(redis: Redis, results_queue: asyncio.Queue):
-    """Processes the results queue and publishes responses via Redis."""
+    """
+    Worker coroutine that processes the results queue and publishes responses via Redis.
+
+    Parameters
+    ----------
+    redis : Redis
+        The Redis client instance.
+    results_queue : asyncio.Queue
+        The queue containing execution results.
+    """
 
     while True:
         order_id, msg_type, message = await results_queue.get()
@@ -144,7 +199,18 @@ async def results_worker(redis: Redis, results_queue: asyncio.Queue):
 async def redis_subscriber(
     redis: Redis, pubsub: PubSub, queues: dict[str, asyncio.Queue]
 ):
-    """Listens to Redis channel and routes messages to the correct queue."""
+    """
+    Listens to the Redis broker channel and routes messages to the correct worker queue.
+
+    Parameters
+    ----------
+    redis : Redis
+        The Redis client instance.
+    pubsub : PubSub
+        The Redis PubSub instance.
+    queues : dict[str, asyncio.Queue]
+        A dictionary mapping exchange names to their respective worker queues.
+    """
     await pubsub.subscribe(BROKER_CHANNEL)
 
     logger.debug(f"Subscribed to Redis channel: {BROKER_CHANNEL}")
@@ -187,6 +253,10 @@ async def redis_subscriber(
 
 
 async def main():
+    """
+    Main entry point for the broker service.
+    Sets up Redis connection, queues, workers, and handles graceful shutdown.
+    """
     redis = await Redis(host=REDIS_HOSTNAME, port=REDIS_PORT, decode_responses=True)
     pubsub: PubSub = redis.pubsub()
 

@@ -1,3 +1,8 @@
+"""
+This module provides utility functions for trading strategies, including
+order sizing, order generation, solvency checks, and order book matching.
+"""
+
 import asyncio
 import json
 import logging
@@ -18,6 +23,18 @@ logger = logging.getLogger(__name__)
 async def send_processor_cancellation(
     redis: Redis, strategy: dict[str, str], identifier: str
 ):
+    """
+    Construct and send a cancellation message to the message processor.
+
+    Parameters
+    ----------
+    redis : Redis
+        The Redis client instance.
+    strategy : dict[str, str]
+        The strategy configuration.
+    identifier : str
+        The unique identifier for the order to cancel.
+    """
     cancellation = CancellationMessage(
         kind=MessageType.CANCELLATION,
         strategy=f"{strategy['identifier']}_{identifier}",
@@ -32,6 +49,16 @@ async def send_processor_cancellation(
 
 
 async def send_processor_order(redis: Redis, order: OrderMessage | OrderBatchMessage):
+    """
+    Send an order or order batch to the message processor via Redis.
+
+    Parameters
+    ----------
+    redis : Redis
+        The Redis client instance.
+    order : OrderMessage | OrderBatchMessage
+        The order message to send.
+    """
     flattened = json.dumps(dict(order), default=str)
     await redis.publish(MESSAGE_PROCESSOR_CHANNEL, flattened)
     logger.info(f"Order was sent: {order}")
@@ -40,6 +67,23 @@ async def send_processor_order(redis: Redis, order: OrderMessage | OrderBatchMes
 def min_max_usd_converter(
     price: float, min_size_usdt: float, max_size_usdt: float
 ) -> tuple[float, float]:
+    """
+    Convert min and max size from USDT to base asset quantity.
+
+    Parameters
+    ----------
+    price : float
+        The current price of the asset.
+    min_size_usdt : float
+        The minimum order size in USDT.
+    max_size_usdt : float
+        The maximum order size in USDT.
+
+    Returns
+    -------
+    tuple[float, float]
+        A tuple containing (min_size, max_size) in base asset units.
+    """
     min_size = round(min_size_usdt / price, 4)
     max_size = round(max_size_usdt / price, 4)
 
@@ -59,8 +103,36 @@ async def check_if_solvent(
     pair: str,
     last_order_timestamp: None | int = None,
 ) -> bool:
-    """This function checks if two exchanges have the necessary balances to place
-    two arbitrage orders in their relevant assets."""
+    """
+    Check if two exchanges have sufficient balances to place two arbitrage orders.
+
+    Parameters
+    ----------
+    redis_instance : Redis
+        The Redis client instance.
+    buy_client_id : str
+        The ID of the exchange where the buy order will be placed.
+    sell_client_id : str
+        The ID of the exchange where the sell order will be placed.
+    price : float
+        The price of the order.
+    quantity : float
+        The quantity of the order.
+    pair : str
+        The trading pair symbol (e.g., 'BTC/USDT').
+    last_order_timestamp : None | int, optional
+        Timestamp of the last placed order to check for stale balance data.
+
+    Returns
+    -------
+    bool
+        True if both exchanges have sufficient funds, False otherwise.
+
+    Raises
+    ------
+    Exception
+        If balance data cannot be retrieved from Redis.
+    """
 
     batch = asyncio.gather(
         retrieve_balances_redis(redis_instance, f"balance-{buy_client_id}"),
@@ -108,6 +180,21 @@ async def check_if_solvent(
 
 
 async def retrieve_balances_redis(redis_instance: Redis, key: str):
+    """
+    Retrieve balance data from Redis.
+
+    Parameters
+    ----------
+    redis_instance : Redis
+        The Redis client instance.
+    key : str
+        The Redis key for the balance data.
+
+    Returns
+    -------
+    dict | None
+        The balance data dictionary, or None if not found.
+    """
     # Get the JSON string from Redis
     serialized_balances = await redis_instance.get(key)
     if serialized_balances is None:
@@ -119,6 +206,21 @@ async def retrieve_balances_redis(redis_instance: Redis, key: str):
 async def retrieve_ob_redis(
     redis_instance: Redis, key: str
 ) -> OrderBook | None:
+    """
+    Retrieve order book data from Redis.
+
+    Parameters
+    ----------
+    redis_instance : Redis
+        The Redis client instance.
+    key : str
+        The Redis key for the order book data.
+
+    Returns
+    -------
+    OrderBook | None
+        The order book data, or None if not found.
+    """
     # Get the JSON string from Redis
     serialized_ob = await redis_instance.get(key)
     if serialized_ob is None:
@@ -129,12 +231,34 @@ async def retrieve_ob_redis(
 
 
 def order_time() -> str:
-    """Creates a datetime-based stamp to make unique and custom order numbers."""
+    """
+    Generate a timestamp string for unique order IDs.
+
+    Returns
+    -------
+    str
+        A formatted timestamp string (YYMMDDHHMMSSffffff).
+    """
 
     return datetime.now().strftime("%y%m%d%H%M%S%f")
 
 
 def generate_oid(strategy_identifier: str, order_identifier: str) -> str:
+    """
+    Generate a unique Order ID (OID).
+
+    Parameters
+    ----------
+    strategy_identifier : str
+        The identifier of the strategy.
+    order_identifier : str
+        The identifier of the specific order within the strategy.
+
+    Returns
+    -------
+    str
+        The generated Order ID.
+    """
     return f"t-{order_time()}_{strategy_identifier}_{order_identifier}"
 
 
@@ -147,6 +271,31 @@ def generate_order(
     strategy: dict[str, str],
     identifier: str,
 ) -> OrderMessage:
+    """
+    Create an OrderMessage object.
+
+    Parameters
+    ----------
+    maker_id : str
+        The ID of the exchange where the order will be placed.
+    price : float
+        The order price.
+    amount : float
+        The order amount.
+    pair : str
+        The trading pair symbol.
+    side : OrderSide
+        The side of the order.
+    strategy : dict[str, str]
+        The strategy configuration.
+    identifier : str
+        The order identifier.
+
+    Returns
+    -------
+    OrderMessage
+        The created OrderMessage.
+    """
     order = OrderMessage(
         kind=MessageType.ORDER,
         strategy=f"{strategy['identifier']}_{identifier}",
@@ -174,6 +323,38 @@ async def generate_order_replace(
     identifier: str,
     refresh: bool,
 ) -> OrderMessage | None:
+    """
+    Generate and send a replace order message if the account is solvent.
+    If not solvent and refresh is True, cancels previous orders.
+
+    Parameters
+    ----------
+    redis : Redis
+        The Redis client instance.
+    maker_id : str
+        The maker exchange ID.
+    taker_id : str
+        The taker exchange ID.
+    price : float
+        The order price.
+    amount : float
+        The order amount.
+    pair : str
+        The trading pair symbol.
+    side : OrderSide
+        The side of the order.
+    strategy : dict[str, str]
+        The strategy configuration.
+    identifier : str
+        The order identifier.
+    refresh : bool
+        Whether to cancel previous orders if not solvent.
+
+    Returns
+    -------
+    OrderMessage | None
+        The generated order message, or None if not solvent.
+    """
     if side == OrderSide.SELL:
         sell_client_id = maker_id
         buy_client_id = taker_id
@@ -212,6 +393,37 @@ async def generate_take_take_order(
     identifier: str,
     last_order_timestamp: int,
 ) -> OrderBatchMessage | None:
+    """
+    Generate and send a batch of take-take orders (buy and sell) if solvent.
+
+    Parameters
+    ----------
+    redis : Redis
+        The Redis client instance.
+    buy_exchange : str
+        The exchange to buy from.
+    sell_exchange : str
+        The exchange to sell to.
+    buy_price : float
+        The buy price.
+    sell_price : float
+        The sell price.
+    amount : float
+        The amount to trade.
+    pair : str
+        The trading pair symbol.
+    strategy : dict[str, str]
+        The strategy configuration.
+    identifier : str
+        The order identifier.
+    last_order_timestamp : int
+        Timestamp of the last order.
+
+    Returns
+    -------
+    OrderBatchMessage | None
+        The generated order batch, or None if not solvent.
+    """
     if await check_if_solvent(
         redis,
         buy_exchange,
@@ -279,8 +491,30 @@ def maker_order_sizer(
     max_maker_size: float,
     min_maker_size: float = 0,
 ) -> float:
-    """NEEDS FLESHING OUT!
+    """
+    Calculate the optimal order size based on available liquidity in the taker book.
+    NEEDS FLESHING OUT!
     Goal of function is to watch how much liquidity is available on the taker client within the defined spread.
+
+    Parameters
+    ----------
+    maker_level : float
+        The price level on the maker exchange.
+    taker_book : list[list[float]] | list[list[int]]
+        The order book from the taker exchange.
+    side : OrderSide
+        The side of the order.
+    min_spread : float
+        The minimum required spread.
+    max_maker_size : float
+        The maximum allowed size for the maker order.
+    min_maker_size : float, optional
+        The minimum allowed size for the maker order, by default 0.
+
+    Returns
+    -------
+    float
+        The calculated order size.
     """
 
     cumulative: float = 0
@@ -309,7 +543,23 @@ def maker_order_sizer(
 def within_percentage_range(
     x: float | Decimal, y: float | Decimal, percentage: float
 ) -> bool:
-    """Function checks whether x is within a definable percentage range from y."""
+    """
+    Check if x is within a defined percentage range from y.
+
+    Parameters
+    ----------
+    x : float | Decimal
+        The value to check.
+    y : float | Decimal
+        The reference value.
+    percentage : float
+        The percentage tolerance.
+
+    Returns
+    -------
+    bool
+        True if x is within [y * (1 - p/100), y * (1 + p/100)], False otherwise.
+    """
 
     if type(x) is not float:
         x = float(x)
@@ -330,11 +580,36 @@ def ob_matcher(
     min_order_size: float,
     extend_spread: int = 0,
 ) -> tuple[float, float, float] | None:
-    """This function takes in two order books sides represented by lists.
-    It will then go both lists, and generate a target ask, target bid, and appropriate size to
-    extract maximum value from both books. Other inputs are floats.
-    extend_spread is used to target prices beyond the optimal spread.
-    This can be used to help guarantee execution for limit orders, or increase skew for cost-based market buy orders.
+    """
+    Match bids and asks from two order books to find a viable trade.
+
+    This function takes in two order books sides represented by lists.
+    It will then go through both lists, and generate a target ask, target bid, and appropriate size to
+    extract maximum value from both books.
+
+    Parameters
+    ----------
+    bids : list[list[float]]
+        List of bids from one exchange.
+    asks : list[list[float]]
+        List of asks from another exchange.
+    spread : float
+        The minimum required spread ratio.
+    sizing : float
+        The sizing multiplier.
+    max_order_size : float
+        The maximum allowed order size.
+    min_order_size : float
+        The minimum required order size.
+    extend_spread : int, optional
+        Used to target prices beyond the optimal spread.
+        This can be used to help guarantee execution for limit orders, or increase skew for cost-based market buy orders.
+        By default 0.
+
+    Returns
+    -------
+    tuple[float, float, float] | None
+        A tuple of (target_ask, target_bid, target_order_size) if a match is found, otherwise None.
     """
 
     depth: int = 0

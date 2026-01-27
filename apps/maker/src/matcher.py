@@ -1,3 +1,8 @@
+"""
+This module monitors orders on one exchange and mirrors them (hedges) on another exchange.
+It watches for order updates and sends matching orders to the message processor.
+"""
+
 import asyncio
 import copy
 import json
@@ -31,6 +36,20 @@ logger = logging.getLogger(__name__)
 async def process_order_update(
     redis: Redis, origin_client_id: str, matching_client_id: str, order: dict[str, str]
 ):
+    """
+    Calculate quantity and price for the matching order and send it.
+
+    Parameters
+    ----------
+    redis : Redis
+        The Redis client instance.
+    origin_client_id : str
+        The ID of the exchange where the original order was filled.
+    matching_client_id : str
+        The ID of the exchange where the matching order should be placed.
+    order : dict[str, str]
+        The order details from the origin exchange.
+    """
     native_asset_fee = {"bitget": 0.001, "gate": 0.001}
     quantity = float(order["filled"])
     price = float(order["price"])
@@ -58,6 +77,20 @@ async def send_match_order(
     order: dict[str, str],
     adjusted_quantity: float,
 ):
+    """
+    Construct and publish the matching order message to Redis.
+
+    Parameters
+    ----------
+    redis : Redis
+        The Redis client instance.
+    matching_client_id : str
+        The ID of the exchange where the order will be placed.
+    order : dict[str, str]
+        The original order details.
+    adjusted_quantity : float
+        The calculated quantity for the matching order.
+    """
     if order["side"] == "sell":
         side = OrderSide.BUY
     else:
@@ -84,6 +117,25 @@ async def send_match_order(
 async def watch_orders(
     redis: Redis, client: CustomExchange, ticker: str, should_match: dict[str, str]
 ):
+    """
+    Continuously watch for order updates on a specific exchange and ticker.
+
+    Parameters
+    ----------
+    redis : Redis
+        The Redis client instance.
+    client : CustomExchange
+        The exchange client to watch.
+    ticker : str
+        The trading pair symbol.
+    should_match : dict[str, str]
+        A mapping of strategy identifiers to the target matching exchange ID.
+
+    Raises
+    ------
+    Exception
+        If an unexpected error occurs during watching.
+    """
     since = datetime.now(timezone.utc)
     timestamp = int(since.timestamp() * 1000)
     recently_processed_orders = LimitedSet(100)
@@ -139,6 +191,14 @@ async def watch_orders(
 
 
 async def main(clients: dict[str, CustomExchange]):
+    """
+    Main entry point for the matcher service.
+
+    Parameters
+    ----------
+    clients : dict[str, CustomExchange]
+        A dictionary of authenticated exchange clients.
+    """
     config = load_config()
     exchange_and_pair: set[tuple[str, str]] = set()
 

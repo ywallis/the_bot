@@ -1,3 +1,8 @@
+"""
+This module provides abstraction layers over CCXT exchange operations.
+It handles retry logic for creating and canceling orders, managing common exchange errors.
+"""
+
 import asyncio
 import logging
 
@@ -22,6 +27,26 @@ logger = logging.getLogger(__name__)
 async def cancel_order_return_confirmation(
     cancellation: CancellationMessage, client: CustomExchange
 ):
+    """
+    Attempt to cancel an order on the exchange with retry logic.
+
+    Parameters
+    ----------
+    cancellation : CancellationMessage
+        The cancellation message containing order details.
+    client : CustomExchange
+        The exchange client instance.
+
+    Returns
+    -------
+    dict
+        The confirmation message from the exchange (or the original cancellation message if already filled).
+
+    Raises
+    ------
+    BrokerError
+        If the cancellation fails after all retry attempts.
+    """
     last_error: Exception = Exception()
 
     for attempt in range(5):
@@ -65,6 +90,26 @@ async def cancel_order_return_confirmation(
 
 
 async def create_and_return_order(order: OrderMessage, client: CustomExchange):
+    """
+    Attempt to create an order on the exchange with retry logic.
+
+    Parameters
+    ----------
+    order : OrderMessage
+        The order message containing order details.
+    client : CustomExchange
+        The exchange client instance.
+
+    Returns
+    -------
+    dict
+        The order confirmation from the exchange.
+
+    Raises
+    ------
+    BrokerError
+        If the order creation fails after all retry attempts.
+    """
     last_error: Exception = Exception()
 
     if order.get("order_type") == OrderType.MARKET:

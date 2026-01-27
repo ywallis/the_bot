@@ -1,6 +1,12 @@
+"""
+This module provides utility functions and configuration loading for the application.
+It handles loading configuration from TOML files and setting up environment variables.
+"""
+
 import os
 import tomllib
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -8,7 +14,15 @@ from dotenv import load_dotenv
 # - Separate config for dev and prod
 
 
-def load_config():
+def load_config() -> dict[str, Any]:
+    """
+    Load the application configuration from a TOML file.
+
+    Returns
+    -------
+    dict[str, Any]
+        The configuration dictionary loaded from the TOML file.
+    """
     CONFIG_PATH = Path(__file__).parents[3] / "config" / "config.toml"
     with open(CONFIG_PATH, "rb") as f:
         config = tomllib.load(f)

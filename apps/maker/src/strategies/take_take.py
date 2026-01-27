@@ -1,3 +1,9 @@
+"""
+This module implements the 'take_take' strategy.
+It scans two exchanges for arbitrage opportunities where the bid on one exchange
+overlaps with the ask on another, and executes a taker order on both sides simultaneously.
+"""
+
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta, timezone
@@ -19,6 +25,19 @@ logger = logging.getLogger(__name__)
 
 
 async def take_take(redis: Redis, strategy: dict[str, str]):
+    """
+    Execute the take-take strategy.
+
+    Continuously monitors order books on two exchanges. If a spread arbitrage opportunity is found,
+    it calculates the optimal order size and executes a batch of taker orders on both exchanges.
+
+    Parameters
+    ----------
+    redis : Redis
+        The Redis client instance.
+    strategy : dict[str, str]
+        The strategy configuration dictionary.
+    """
     # Defining state
 
     watching: bool = True

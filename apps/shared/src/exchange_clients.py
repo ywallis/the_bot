@@ -1,3 +1,8 @@
+"""
+This module initializes and manages authenticated exchange clients using CCXT.
+It loads configuration and credentials, and provides a collection of authenticated clients.
+"""
+
 import logging
 import os
 
@@ -15,6 +20,17 @@ logger = logging.getLogger(__name__)
 
 
 async def load_clients():
+    """
+    Load and verify authenticated exchange clients.
+
+    Iterates through the authenticated clients and attempts to load their markets.
+    Retries up to 5 times in case of a RequestTimeout.
+
+    Raises
+    ------
+    RequestTimeout
+        If a client fails to load markets after 5 attempts.
+    """
     for client in authenticated_clients.values():
         attempt: int = 1
         while attempt <= 5:

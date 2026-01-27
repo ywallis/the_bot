@@ -1,3 +1,9 @@
+"""
+This module implements the 'fake_maker' strategy.
+It places orders on a maker exchange based on the order book of a taker exchange,
+aiming to provide liquidity while hedging on the taker side.
+"""
+
 import asyncio
 import logging
 import time
@@ -24,6 +30,19 @@ logger = logging.getLogger(__name__)
 
 
 async def fake_maker(redis: Redis, strategy: dict[str, str]):
+    """
+    Execute the fake maker strategy.
+
+    Continuously monitors order books and updates buy/sell orders on the maker exchange
+    based on the state of the taker exchange and configured parameters.
+
+    Parameters
+    ----------
+    redis : Redis
+        The Redis client instance.
+    strategy : dict[str, str]
+        The strategy configuration dictionary.
+    """
     # Defining state
 
     watching: bool = True

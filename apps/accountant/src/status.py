@@ -1,3 +1,8 @@
+"""
+This module provides a real-time status dashboard for the trading bot.
+It displays open orders, account balances, and daily performance metrics in the terminal.
+"""
+
 import asyncio
 from datetime import datetime
 import os
@@ -23,7 +28,18 @@ from apps.shared.src.structs import CustomExchange
 async def get_order_status(
     clients: dict[str, CustomExchange], ticker: str, details=True
 ):
-    """This function lists all open orders for a client in a terminal format."""
+    """
+    List all open orders for a client in a terminal format.
+
+    Parameters
+    ----------
+    clients : dict[str, CustomExchange]
+        Dictionary of exchange clients.
+    ticker : str
+        The trading pair symbol.
+    details : bool, optional
+        Whether to print detailed information for each order. Default is True.
+    """
 
     for client in clients.values():
         all_open_orders = await client.fetch_open_orders(ticker)
@@ -49,6 +65,14 @@ async def get_order_status(
 
 
 async def fetch_balances(clients: dict[str, CustomExchange]):
+    """
+    Fetch and print account balances for all clients.
+
+    Parameters
+    ----------
+    clients : dict[str, CustomExchange]
+        Dictionary of exchange clients.
+    """
     for client in clients.values():
         balances = await client.fetch_balance()
         assert isinstance(balances["free"], dict)
@@ -57,6 +81,16 @@ async def fetch_balances(clients: dict[str, CustomExchange]):
 
 
 def get_daily_performance(query: sql.Composed, symbol: str):
+    """
+    Fetch and print daily performance metrics.
+
+    Parameters
+    ----------
+    query : sql.Composed
+        The SQL query for daily performance.
+    symbol : str
+        The trading pair symbol.
+    """
     pg_config = load_pg_config()
     daily_performance = send_sql_query(
         pg_config, query, False, {"symbol": symbol, "range": 1}
@@ -66,6 +100,17 @@ def get_daily_performance(query: sql.Composed, symbol: str):
 
 
 async def main(clients: dict[str, CustomExchange], pairs: set):
+    """
+    Main entry point for the status dashboard.
+    Continuously updates the display with order status, balances, and performance.
+
+    Parameters
+    ----------
+    clients : dict[str, CustomExchange]
+        Dictionary of exchange clients.
+    pairs : set
+        Set of trading pairs to monitor.
+    """
     pg_config = load_pg_config()
     # Initialize QueryLoader
 

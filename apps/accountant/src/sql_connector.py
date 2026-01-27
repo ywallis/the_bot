@@ -1,3 +1,9 @@
+"""
+This module handles connections to the PostgreSQL database and query execution.
+It provides a `send_sql_query` function for executing raw SQL and a `QueryLoader` class
+to manage SQL query files.
+"""
+
 import os
 
 import pandas as pd
@@ -14,14 +20,21 @@ def send_sql_query(
     """
     Sends an SQL query to a PostgreSQL database and returns the result.
 
-    Args:
-        pg_config (dict): Configuration for connecting to PostgreSQL.
-        sql_query (str): SQL query to execute.
-        raw (bool): If True, returns raw rows and column names; otherwise, returns a DataFrame.
-        parameters (dict): If any, the variables for the query.
+    Parameters
+    ----------
+    pg_config : dict
+        Configuration for connecting to PostgreSQL.
+    sql_query : SQL | Composed
+        SQL query to execute.
+    raw : bool, optional
+        If True, returns raw rows and column names; otherwise, returns a DataFrame. Default is False.
+    parameters : dict[str, str | int] | tuple | None, optional
+        Variables for the query.
 
-    Returns:
-        pd.DataFrame or tuple: Query result as a DataFrame or raw rows and column names.
+    Returns
+    -------
+    pd.DataFrame | tuple | None
+        Query result as a DataFrame or raw rows and column names.
     """
     if parameters is None:
         parameters = ()
@@ -57,6 +70,9 @@ def send_sql_query(
 
 
 class QueryLoader:
+    """
+    A helper class to load SQL queries from files.
+    """
     def __init__(self, query_dir="apps/accountant/src/queries"):
         self.query_dir = query_dir
         self.queries = {}
@@ -72,5 +88,17 @@ class QueryLoader:
                         self.queries[query_name] = f.read()
 
     def get_query(self, query_name):
-        """Retrieve a query by its name."""
+        """
+        Retrieve a query by its name.
+
+        Parameters
+        ----------
+        query_name : str
+            The name of the query file (without extension).
+
+        Returns
+        -------
+        str | None
+            The SQL query string, or None if not found.
+        """
         return self.queries.get(query_name, None)

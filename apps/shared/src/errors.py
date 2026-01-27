@@ -1,3 +1,7 @@
+"""
+This module re-exports exceptions from ccxt and asyncio for use across the application.
+"""
+
 from asyncio.exceptions import CancelledError as CancelledError
 
 from ccxt.async_support import BadRequest as BadRequest

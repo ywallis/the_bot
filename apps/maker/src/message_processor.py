@@ -1,3 +1,9 @@
+"""
+This module contains the MessageProcessor class, which centralizes the handling of
+order and cancellation messages, manages locks for strategies, and routes messages
+to the broker via Redis.
+"""
+
 import ast
 import asyncio
 import json
@@ -37,6 +43,10 @@ logger = logging.getLogger(__name__)
 
 
 class MessageProcessor:
+    """
+    Handles the processing of order and cancellation messages.
+    Manages state for open orders and ensures sequential processing per strategy using locks.
+    """
     def __init__(self):
         self.pool = ConnectionPool(
             host=REDIS_HOSTNAME, port=REDIS_PORT, db=0, max_connections=20
@@ -54,6 +64,14 @@ class MessageProcessor:
         self.shutdown_event = asyncio.Event()
 
     async def block_and_shutdown(self, tasks_to_cancel: list[asyncio.Task]):
+        """
+        Cancel all running tasks and shutdown gracefully.
+
+        Parameters
+        ----------
+        tasks_to_cancel : list[asyncio.Task]
+            List of tasks to explicitly cancel.
+        """
         logger.info("Cancelling all open tasks")
         # Shut down listener and collector
         for task in tasks_to_cancel:
@@ -66,6 +84,9 @@ class MessageProcessor:
         logger.info("All open tasks sucessfully closed")
 
     async def cancel_all_open(self):
+        """
+        Cancel all currently open orders tracked by the processor.
+        """
         all_cancellation: list[asyncio.Task] = []
 
         for order in self.open_orders.values():
@@ -78,6 +99,14 @@ class MessageProcessor:
         logger.info("All open orders sucessfully cancelled")
 
     async def get_open_orders(self):
+        """
+        Retrieve all open orders from the broker upon initialization.
+
+        Returns
+        -------
+        dict
+            A dictionary of open orders keyed by strategy.
+        """
         open_orders = {}
         trigger = OrderMessage(
             kind=MessageType.ORDER,
@@ -117,6 +146,19 @@ class MessageProcessor:
     def replace_queued_value(
         self, msg: OrderMessage | CancellationMessage | OrderBatchMessage
     ):
+        """
+        Replace an existing message in the queue for a strategy with a new one.
+
+        Parameters
+        ----------
+        msg : OrderMessage | CancellationMessage | OrderBatchMessage
+            The new message to queue.
+
+        Returns
+        -------
+        str
+            The ID of the replaced message.
+        """
         strategy: str = msg["strategy"]
         prior = copy(self.message_queue[strategy])
         logger.debug(f"Replacing {prior['id']} with {msg['id']}")
@@ -124,13 +166,38 @@ class MessageProcessor:
         return prior["id"]
 
     def get_lock(self, strategy: str):
-        """Get or create a lock for a strategy/signal type."""
+        """
+        Get or create a lock for a strategy/signal type.
+
+        Parameters
+        ----------
+        strategy : str
+            The strategy identifier.
+
+        Returns
+        -------
+        asyncio.Lock
+            The lock associated with the strategy.
+        """
         if strategy not in self.locks:
             self.locks[strategy] = asyncio.Lock()
             logger.debug(f"No lock found, creating one for {strategy}")
         return self.locks[strategy]
 
     async def send_to_broker(self, msg: OrderMessage | CancellationMessage) -> Response:
+        """
+        Publish a message to the broker channel and wait for a response.
+
+        Parameters
+        ----------
+        msg : OrderMessage | CancellationMessage
+            The message to send.
+
+        Returns
+        -------
+        Response
+            The response received from the broker.
+        """
         flattened = json.dumps(dict(msg), default=str)
 
         # Now using context manager to ensure redis instances are dropped.
@@ -157,7 +224,24 @@ class MessageProcessor:
         return identify_response(response)
 
     async def place_order(self, msg: OrderMessage) -> OrderMessage:
-        """Sends an order object to the broker and expects a confirmation."""
+        """
+        Send an order object to the broker and expect a confirmation.
+
+        Parameters
+        ----------
+        msg : OrderMessage
+            The order message to place.
+
+        Returns
+        -------
+        OrderMessage
+            The confirmed order message with exchange ID populated.
+
+        Raises
+        ------
+        BrokerError
+            If the broker returns an invalid response.
+        """
 
         logger.debug(f"Sending {msg['id']} to broker")
         confirmation: Response = await self.send_to_broker(msg)
@@ -175,7 +259,24 @@ class MessageProcessor:
             )
 
     async def place_cancellation(self, order: CancellationMessage) -> bool:
-        """Sends an order object to the broker and expects a confirmation."""
+        """
+        Send a cancellation message to the broker and expect a confirmation.
+
+        Parameters
+        ----------
+        order : CancellationMessage
+            The cancellation message.
+
+        Returns
+        -------
+        bool
+            True if cancellation was successful.
+
+        Raises
+        ------
+        BrokerError
+            If the broker returns an invalid response.
+        """
 
         logger.debug(f"Cancelling {order['id']} with broker")
         confirmation: Response = await self.send_to_broker(order)
@@ -189,7 +290,20 @@ class MessageProcessor:
     async def process_message(
         self, msg: OrderMessage | CancellationMessage | OrderBatchMessage | None
     ):
-        """Process the message if the lock is available."""
+        """
+        Process the message if the lock is available.
+        Handles queuing if the lock is busy and recursive processing of queued messages.
+
+        Parameters
+        ----------
+        msg : OrderMessage | CancellationMessage | OrderBatchMessage | None
+            The message to process.
+
+        Returns
+        -------
+        str | None
+            A log message indicating the result of the operation.
+        """
 
         if msg is None:
             logger.error(f"Invalid parsing for message {msg}")
@@ -281,7 +395,9 @@ class MessageProcessor:
         return f"{datetime.now():%M:%S:%f} {msg['id']} was processed"
 
     async def listen_to_redis(self):
-        """Subscribe to Redis and process messages."""
+        """
+        Subscribe to Redis and process incoming messages.
+        """
 
         pubsub = self.redis.pubsub()
         await pubsub.subscribe(
@@ -319,6 +435,9 @@ class MessageProcessor:
 
 
 async def main():
+    """
+    Main entry point for the message processor service.
+    """
     logger.debug("Message processor starting")
     processor = MessageProcessor()
 

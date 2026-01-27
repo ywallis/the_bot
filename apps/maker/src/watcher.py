@@ -1,3 +1,8 @@
+"""
+This module monitors the order book of exchanges and updates Redis with the latest state.
+It connects to exchanges via CCXT and streams order book updates.
+"""
+
 import asyncio
 import json
 import logging
@@ -23,6 +28,23 @@ logger = logging.getLogger(__name__)
 
 
 async def watch_ob(client: CustomExchange, ticker: str, redis: Redis):
+    """
+    Watch the order book for a specific symbol on an exchange and update Redis.
+
+    Parameters
+    ----------
+    client : CustomExchange
+        The exchange client instance.
+    ticker : str
+        The trading pair symbol (e.g., 'BTC/USDT').
+    redis : Redis
+        The Redis client instance.
+
+    Raises
+    ------
+    Exception
+        If an unexpected error occurs during watching.
+    """
     while True:
         try:
             order_book = await client.watch_order_book(ticker)
@@ -60,6 +82,16 @@ async def watch_ob(client: CustomExchange, ticker: str, redis: Redis):
 
 
 async def main(config_tuples: set[tuple[str, str]], clients: dict[str, CustomExchange]):
+    """
+    Main entry point for the order book watcher service.
+
+    Parameters
+    ----------
+    config_tuples : set[tuple[str, str]]
+        A set of tuples containing (exchange_id, symbol) to watch.
+    clients : dict[str, CustomExchange]
+        A dictionary of authenticated exchange clients.
+    """
     pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=20)
     redis = Redis(decode_responses=True, connection_pool=pool)
 

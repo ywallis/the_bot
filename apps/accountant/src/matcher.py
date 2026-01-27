@@ -1,3 +1,9 @@
+"""
+This module identifies and resolves order imbalances.
+It fetches imbalances from the database and allows the user to manually match orders
+to balance the books.
+"""
+
 import asyncio
 from decimal import Decimal
 
@@ -14,6 +20,14 @@ from apps.shared.src.structs import CustomExchange
 
 
 def currency_picker() -> str:
+    """
+    Prompt user to enter the token pair.
+
+    Returns
+    -------
+    str
+        The token pair string.
+    """
     while True:
         currency = input("Enter the token pair to be matched: ")
 
@@ -22,6 +36,14 @@ def currency_picker() -> str:
 
 
 def date_picker() -> str:
+    """
+    Prompt user for a date and format it for order matching.
+
+    Returns
+    -------
+    str
+        The formatted date string (YYMMDD) or empty string.
+    """
     loop = True
     date_mod = ""
     date = ""
@@ -42,6 +64,19 @@ def date_picker() -> str:
 
 
 def client_picker(clients: dict[str, CustomExchange]):
+    """
+    Prompt user to select a client exchange.
+
+    Parameters
+    ----------
+    clients : dict[str, CustomExchange]
+        Available exchange clients.
+
+    Returns
+    -------
+    CustomExchange
+        The selected exchange client.
+    """
     print(f"Available exchanges are: {[name for name in clients]}")
     while True:
         choice = input("Enter name of client you want to match on: ")
@@ -53,11 +88,23 @@ def client_picker(clients: dict[str, CustomExchange]):
 
 
 async def client_closer(clients: dict[str, CustomExchange]):
+    """
+    Close all exchange client connections.
+
+    Parameters
+    ----------
+    clients : dict[str, CustomExchange]
+        The dictionary of clients to close.
+    """
     for client in clients.values():
         await client.close()
 
 
 async def main():
+    """
+    Main entry point for the manual order matcher.
+    Loads imbalances, calculates required matching orders, and prompts user for execution.
+    """
     pg_config = load_pg_config()
 
     # Initialize QueryLoader

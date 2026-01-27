@@ -1,3 +1,8 @@
+"""
+This module handles the export of trading data (orders and trades) from exchanges to the SQL database.
+It continuously runs a loop to fetch recent data and insert it into the database.
+"""
+
 import asyncio
 import logging
 
@@ -19,6 +24,14 @@ logger = logging.getLogger(__name__)
 
 
 async def loop(pg_config: dict[str, str]):
+    """
+    Continuously fetch and export trade/order data to the database.
+
+    Parameters
+    ----------
+    pg_config : dict[str, str]
+        The PostgreSQL configuration dictionary.
+    """
     while True:
         try:
             for exchange_name, pair in exchange_and_pair:
@@ -46,6 +59,14 @@ async def loop(pg_config: dict[str, str]):
 
 
 async def main(pg_config: dict[str, str]):
+    """
+    Main entry point for the export service.
+
+    Parameters
+    ----------
+    pg_config : dict[str, str]
+        The PostgreSQL configuration dictionary.
+    """
     await load_clients()
     await loop(pg_config)
 

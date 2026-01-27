@@ -1,3 +1,10 @@
+"""
+This module serves as the main orchestrator for the application.
+It launches and manages all necessary processes, including the broker, message processor,
+watcher, matcher, balance service, and strategy launchers.
+It also handles signal handling for graceful shutdown.
+"""
+
 import logging
 import os
 import signal
@@ -37,12 +44,32 @@ PROCESS_LIST = [
 
 
 def launch_process(cmd):
-    """Launch a process in its own process group."""
+    """
+    Launch a process in its own process group.
+
+    Parameters
+    ----------
+    cmd : list[str]
+        The command to execute as a list of arguments.
+
+    Returns
+    -------
+    subprocess.Popen
+        The Popen object representing the launched process.
+    """
     return subprocess.Popen(cmd, preexec_fn=os.setpgrp)
 
 
 def cleanup_and_exit(exit_code=1):
-    """Terminate all running processes and exit."""
+    """
+    Terminate all running processes and exit the application.
+    First attempts a graceful termination (SIGTERM), then forces kill (SIGKILL) if needed.
+
+    Parameters
+    ----------
+    exit_code : int, optional
+        The exit code to use when exiting the script, by default 1.
+    """
     print("Cleaning up processes...")
     for _, proc in processes:
         # First pass only to send a signal

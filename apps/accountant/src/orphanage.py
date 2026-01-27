@@ -1,3 +1,10 @@
+"""
+This module identifies and processes "orphan" orders.
+Orphans are orders that exist in the database or strategy logs but might not be fully reconciled.
+It queries the database for potential orphans and attempts to fetch their details from the exchange
+to ensure data consistency.
+"""
+
 import asyncio
 import logging
 
@@ -20,6 +27,22 @@ logger = logging.getLogger(__name__)
 
 
 async def get_orphans(clients: dict[str, CustomExchange]):
+    """
+    Find and process orphan orders.
+
+    Queries the database for orders flagged as orphans (e.g., missing details),
+    fetches their status from the respective exchange, and updates the database.
+
+    Parameters
+    ----------
+    clients : dict[str, CustomExchange]
+        A dictionary of authenticated exchange clients.
+
+    Raises
+    ------
+    Exception
+        If there are errors loading queries, database data, or parsing results.
+    """
     query_loader = QueryLoader()
     query_loader.load_queries()
     orphans = query_loader.get_query("find_orphans")
@@ -64,6 +87,9 @@ async def get_orphans(clients: dict[str, CustomExchange]):
 
 
 async def main():
+    """
+    Main entry point for the orphanage service.
+    """
     await get_orphans(authenticated_clients)
     for client in authenticated_clients.values():
         await client.close()

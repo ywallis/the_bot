@@ -1,3 +1,8 @@
+"""
+This module is responsible for fetching and watching account balances from exchanges.
+It updates the balances in Redis for other components to access.
+"""
+
 import asyncio
 import json
 import logging
@@ -17,6 +22,21 @@ logger = logging.getLogger(__name__)
 
 
 async def fetch_balance(client: CustomExchange, redis: Redis):
+    """
+    Fetch the initial balance from the exchange and update Redis.
+
+    Parameters
+    ----------
+    client : CustomExchange
+        The exchange client instance.
+    redis : Redis
+        The Redis client instance.
+
+    Raises
+    ------
+    Exception
+        If an unexpected error occurs during balance fetching.
+    """
     try:
         balance = await client.fetch_balance()
         balance["timestamp"] = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
@@ -33,6 +53,21 @@ async def fetch_balance(client: CustomExchange, redis: Redis):
 
 
 async def watch_balance(client: CustomExchange, redis: Redis):
+    """
+    Continuously watch for balance updates from the exchange and update Redis.
+
+    Parameters
+    ----------
+    client : CustomExchange
+        The exchange client instance.
+    redis : Redis
+        The Redis client instance.
+
+    Raises
+    ------
+    Exception
+        If an unexpected error occurs during balance watching.
+    """
     while True:
         try:
             balance = await client.watch_balance()
@@ -51,6 +86,15 @@ async def watch_balance(client: CustomExchange, redis: Redis):
 
 
 async def main(clients: dict[str, CustomExchange]):
+    """
+    Main entry point for the balance watcher service.
+    Initializes Redis connection and starts balance fetching/watching tasks for all clients.
+
+    Parameters
+    ----------
+    clients : dict[str, CustomExchange]
+        A dictionary of authenticated exchange clients.
+    """
     pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=20)
     redis = Redis(decode_responses=True, connection_pool=pool)
 

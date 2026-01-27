@@ -1,3 +1,8 @@
+"""
+This module serves as the entry point for launching specific strategy instances.
+It dynamically imports and executes the strategy function based on the provided index.
+"""
+
 import asyncio
 import importlib
 import logging
@@ -14,6 +19,21 @@ logger = logging.getLogger(__name__)
 
 
 async def main(strategy_index: int):
+    """
+    Load and execute the strategy at the specified index.
+
+    Parameters
+    ----------
+    strategy_index : int
+        The index of the strategy configuration in the `strategies` list.
+
+    Raises
+    ------
+    Exception
+        If no strategies are found or the strategy module cannot be loaded.
+    AttributeError
+        If the strategy function is not found in the module.
+    """
     pool = ConnectionPool(
         host=REDIS_HOSTNAME, port=REDIS_PORT, db=0, max_connections=20
     )

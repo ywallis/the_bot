@@ -1,3 +1,8 @@
+"""
+This module allows for downloading historical trade and order data from exchanges.
+It supports pagination and adaptive timeframe sizing to handle rate limits or data volume.
+"""
+
 import asyncio
 from datetime import datetime, timedelta
 import time
@@ -19,6 +24,21 @@ from apps.shared.src.utils import exchange_and_pair
 async def get_history(
     client: CustomExchange, pg_config: dict[str, str], pair: str, start_date_str: str
 ):
+    """
+    Download and export 24 hours of history starting from a given date.
+    Iterates through the day in chunks (initially 30 minutes), resizing if too many results are returned.
+
+    Parameters
+    ----------
+    client : CustomExchange
+        The exchange client instance.
+    pg_config : dict[str, str]
+        The PostgreSQL configuration.
+    pair : str
+        The trading pair symbol.
+    start_date_str : str
+        The start date string in "DD/MM/YY" format.
+    """
     start_date = datetime.strptime(start_date_str, "%d/%m/%y")
     loop_start = start_date
     original_loop_size = timedelta(minutes=30)
@@ -75,6 +95,20 @@ async def loop(
     pg_config: dict[str, str],
     start_date_input: str,
 ):
+    """
+    Iterate through all configured exchange/pair combinations and download history.
+
+    Parameters
+    ----------
+    all_clients : dict[str, CustomExchange]
+        Dictionary of exchange clients.
+    exchange_and_pair : set[tuple[str, str]]
+        Set of (exchange_name, pair) tuples.
+    pg_config : dict[str, str]
+        PostgreSQL configuration.
+    start_date_input : str
+        Start date string "DD/MM/YY".
+    """
     for option in exchange_and_pair:
         try:
             await get_history(
