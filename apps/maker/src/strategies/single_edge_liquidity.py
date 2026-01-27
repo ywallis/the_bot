@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import time
 
 from redis.asyncio import Redis
 
@@ -52,7 +51,7 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
     while watching:
         # Simple throttle
 
-        time.sleep(refresh_speed)
+        await asyncio.sleep(refresh_speed)
 
         batch = asyncio.gather(
             retrieve_ob_redis(redis, f"{symbol}-{maker}"),
