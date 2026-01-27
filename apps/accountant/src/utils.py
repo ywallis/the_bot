@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from copy import deepcopy
@@ -214,10 +215,10 @@ def export_to_sql(
 
 
 def unaddressed_imbalances(
-    pair: str, imbalances: DataFrame, orders: list[dict[str, str]]
+    pair: str, imbalances: DataFrame, orders: list[str]
 ):
     """This function tries to notify of imbalances in an arbitrage setup, similar to the matcher, but designed as a background service.
-    Imbalances are meant to be fed as a pandas DF. Orders are CCXT objects."""
+    Imbalances are meant to be fed as a pandas DF. Orders are client order IDs."""
 
     ticker = pair.split("/")[0]
 
@@ -289,13 +290,18 @@ def unaddressed_imbalances(
 
 async def fetch_all_open_orders_client_order_id(
     tickers: set[str], clients: dict[str, CustomExchange]
-) -> list[dict[str, str]]:
+) -> list[str]:
     """Fetches the clientOrderId for all open orders regardless of client and returns them in a list"""
-    all_orders = []
+    tasks = []
     for client in clients.values():
         for ticker in tickers:
-            orders = await client.fetch_open_orders(ticker)
-            for order in orders:
-                all_orders.append((order["clientOrderId"]))
+            tasks.append(client.fetch_open_orders(ticker))
+
+    results = await asyncio.gather(*tasks)
+
+    all_orders = []
+    for orders in results:
+        for order in orders:
+            all_orders.append((order["clientOrderId"]))
 
     return all_orders
