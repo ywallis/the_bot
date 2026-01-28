@@ -218,7 +218,7 @@ def unaddressed_imbalances(
     pair: str, imbalances: DataFrame, orders: list[str]
 ):
     """This function tries to notify of imbalances in an arbitrage setup, similar to the matcher, but designed as a background service.
-    Imbalances are meant to be fed as a pandas DF. Orders are client order IDs."""
+    Imbalances are meant to be fed as a pandas DF. Orders are custom client order IDs."""
 
     ticker = pair.split("/")[0]
 
