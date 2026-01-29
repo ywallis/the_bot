@@ -215,7 +215,7 @@ async def test_get_open_orders(
     # Define synthetic response
     synthetic_message = {
         "type": "message",
-        "data": json.dumps(order_batch_raw).encode("utf-8"),
+        "data": json.dumps(order_batch_raw),
     }
 
     # Mock listen() method to yield a synthetic response
@@ -225,10 +225,9 @@ async def test_get_open_orders(
     mock_pubsub.listen = mock_listen
 
     mock_redis.pubsub.return_value = mock_pubsub
-    # Mock `Redis` instance inside your function
-    mocker.patch("apps.maker.src.message_processor.Redis", return_value=mock_redis)
 
-    # Create instance of your class
+    # Inject mock into processor
+    processor.redis = mock_redis
 
     # Call the function
     processor.open_orders = await processor.get_open_orders()
@@ -264,7 +263,7 @@ async def test_get_open_orders_empty(
     # Define synthetic response
     synthetic_message = {
         "type": "message",
-        "data": json.dumps(dict(empty_open_orders), default=str).encode("utf-8"),
+        "data": json.dumps(dict(empty_open_orders), default=str),
     }
 
     # Mock listen() method to yield a synthetic response
@@ -274,10 +273,9 @@ async def test_get_open_orders_empty(
     mock_pubsub.listen = mock_listen
 
     mock_redis.pubsub.return_value = mock_pubsub
-    # Mock `Redis` instance inside your function
-    mocker.patch("apps.maker.src.message_processor.Redis", return_value=mock_redis)
 
-    # Create instance of your class
+    # Inject mock into processor
+    processor.redis = mock_redis
 
     # Call the function
     processor.open_orders = await processor.get_open_orders()

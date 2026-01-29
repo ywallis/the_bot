@@ -136,26 +136,25 @@ class MessageProcessor:
             price=Decimal(0),
             amount=Decimal(0),
         )
-        async with Redis(connection_pool=self.pool) as redis:
-            await redis.publish(BROKER_CHANNEL, json.dumps(dict(trigger), default=str))
+        await self.redis.publish(BROKER_CHANNEL, json.dumps(dict(trigger), default=str))
 
-            logger.info("Asking broker for all open orders.")
-            async with redis.pubsub() as pubsub:
-                logger.debug("Waiting for answer on channel INIT")
-                await pubsub.subscribe("INIT")
-                async for message in pubsub.listen():
-                    if message["type"] == "message":
-                        response = message["data"].decode()
-                        logger.debug(f"Received init reply from broker: {response}")
-                        order_batch = cast(OrderBatchMessage, parse_message(response))
-                        for order in order_batch["orders"]:
-                            # No recollection of unique orders
+        logger.info("Asking broker for all open orders.")
+        async with self.redis.pubsub() as pubsub:
+            logger.debug("Waiting for answer on channel INIT")
+            await pubsub.subscribe("INIT")
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    response = message["data"]
+                    logger.debug(f"Received init reply from broker: {response}")
+                    order_batch = cast(OrderBatchMessage, parse_message(response))
+                    for order in order_batch["orders"]:
+                        # No recollection of unique orders
 
-                            if order.get("order_type") == OrderType.UNIQUE:
-                                continue
-                            open_orders[order["strategy"]] = order
-                        break
-                await pubsub.unsubscribe("INIT")
+                        if order.get("order_type") == OrderType.UNIQUE:
+                            continue
+                        open_orders[order["strategy"]] = order
+                    break
+            await pubsub.unsubscribe("INIT")
 
         return open_orders
 
@@ -220,22 +219,21 @@ class MessageProcessor:
 
         response: str = ""
 
-        async with Redis(connection_pool=self.pool) as redis:
-            await redis.publish(BROKER_CHANNEL, flattened)
+        await self.redis.publish(BROKER_CHANNEL, flattened)
 
-            logger.info(
-                f"Sending message with id {msg['id']} and type {msg['kind']} to broker."
-            )
-            async with redis.pubsub() as pubsub:
-                await pubsub.subscribe(msg["id"])
-                async for message in pubsub.listen():
-                    if message["type"] == "message":
-                        response = message["data"].decode()
-                        logger.debug(
-                            f"Received reply from broker for msg {msg['id']}: {response}"
-                        )
-                        break
-                await pubsub.unsubscribe(msg["id"])
+        logger.info(
+            f"Sending message with id {msg['id']} and type {msg['kind']} to broker."
+        )
+        async with self.redis.pubsub() as pubsub:
+            await pubsub.subscribe(msg["id"])
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    response = message["data"]
+                    logger.debug(
+                        f"Received reply from broker for msg {msg['id']}: {response}"
+                    )
+                    break
+            await pubsub.unsubscribe(msg["id"])
 
         return identify_response(response)
 
