@@ -158,6 +158,7 @@ def order_response_positive() -> Callable[
     [OrderMessage | CancellationMessage], Response
 ]:
     """Return a factory for positive responses."""
+
     def _factory(msg: OrderMessage | CancellationMessage):
         order_response_positive: Response = Response(
             kind=MessageType.ORDER, text=f'{{"id": "{msg["id"]}mock_response"}}'
@@ -174,6 +175,7 @@ async def fake_send_to_broker_positive(
     ],
 ) -> Callable[[OrderMessage | CancellationMessage], Awaitable[Awaitable[Response]]]:
     """Return an async callable simulating a positive broker response."""
+
     async def _fake_send_to_broker_positive(msg: OrderMessage | CancellationMessage):
         return order_response_positive(msg)
 
@@ -183,6 +185,7 @@ async def fake_send_to_broker_positive(
 @pytest_asyncio.fixture
 async def fake_send_to_broker_negative() -> Callable[[str], Awaitable[Response]]:
     """Return an async callable simulating a negative broker response."""
+
     async def _fake_send_to_broker_positive(_msg):
         return Response(kind=MessageType.ERROR, text="error")
 
@@ -193,56 +196,9 @@ async def fake_send_to_broker_negative() -> Callable[[str], Awaitable[Response]]
 @pytest_asyncio.fixture
 async def dummy_task() -> Callable[[], Awaitable[str]]:
     """Return a dummy async task."""
+
     async def _dummy_task():
         await asyncio.sleep(0.1)
         return "dummy result"
 
     return _dummy_task
-
-
-@pytest.fixture
-def base_strategy():
-    """Return a base strategy configuration."""
-    return {
-        "refresh_speed": "0.01",
-        "symbol": "BTC/USDT",
-        "identifier": "test_strategy",
-        "maker_exchange": "maker",
-        "taker_exchange": "taker",
-        "spread": "1.005",
-        "min_size_usdt": "10",
-        "max_size_usdt": "100000",
-    }
-
-
-@pytest.fixture
-def base_strategy_fm():
-    """Return a base strategy configuration for Fake Maker."""
-    return {
-        "refresh_speed": "0.01",
-        "symbol": "BTC/USDT",
-        "identifier": "test_strategy",
-        "maker_exchange": "maker",
-        "taker_exchange": "taker",
-        "spread": "1.01",
-        "liquidity_utilization": "1",
-        "min_spread": "1.005",
-        "min_size_usdt": "10",
-        "max_size_usdt": "1000000",
-    }
-
-
-@pytest.fixture
-def base_strategy_tt():
-    """Return a base strategy configuration for Take Take."""
-    return {
-        "refresh_speed": "0.01",
-        "symbol": "BTC/USDT",
-        "identifier": "test_strategy",
-        "exchange_1": "gate",
-        "exchange_2": "coinbase",
-        "spread": "1.005",
-        "sizing": "0.8",
-        "min_size_usdt": "10",
-        "max_size_usdt": "100000",
-    }
