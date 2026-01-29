@@ -1,6 +1,5 @@
 import asyncio
 from datetime import datetime, timedelta
-import time
 
 import pytz
 
@@ -60,7 +59,7 @@ async def get_history(
         if len(orders_in_timeframe) != 0:
             export_to_sql(orders_in_timeframe, pg_config, "orders", client.name)
 
-        time.sleep(1)
+        await asyncio.sleep(1)
 
         loop_start = loop_end
 
