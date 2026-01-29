@@ -65,7 +65,7 @@ async def fake_maker(redis: Redis, strategy: dict[str, str]):
     while watching:
         # Simple throttle
 
-        time.sleep(refresh_speed)
+        await asyncio.sleep(refresh_speed)
 
         batch = asyncio.gather(
             retrieve_ob_redis(redis, f"{symbol}-{maker}"),
