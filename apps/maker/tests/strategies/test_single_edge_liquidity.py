@@ -1,3 +1,5 @@
+"""Tests for the Single Edge Liquidity strategy."""
+
 import asyncio
 import json
 from decimal import Decimal
@@ -404,6 +406,7 @@ async def test_single_edge_liquidity_order(
     taker_side_effects,
     expected_messages,
 ):
+    """Test the single_edge_liquidity strategy logic."""
     mock_redis = AsyncMock()
     mocked_publish = AsyncMock()
     mock_redis.publish = mocked_publish

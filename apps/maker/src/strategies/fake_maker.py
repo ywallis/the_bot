@@ -1,3 +1,5 @@
+"""Strategy: Fake Maker."""
+
 import asyncio
 import logging
 import time
@@ -24,17 +26,17 @@ logger = logging.getLogger(__name__)
 
 
 async def fake_maker(redis: Redis, strategy: dict[str, str]):
-    """Offer a price point x % away from the best bid/ask available on another exchange.
+    """
+    Offer a price point x % away from the best bid/ask available on another exchange.
 
     This allows to constantly offer a price point on an exchange with thinner liquidity.
 
     Parameters
     ----------
     redis : Redis
-        A redis client instance
+        A redis client instance.
     strategy : dict[str, str]
-        The strategy options to be loaded
-
+        The strategy options to be loaded.
     """
     # Defining state
 

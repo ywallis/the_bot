@@ -1,3 +1,6 @@
+"""Module containing errors for the maker application."""
+
+
 class BrokerError(Exception):
     """Error specifically relating to a custom CCXT order broker."""
 

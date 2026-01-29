@@ -1,3 +1,5 @@
+"""Module for abstracting CCXT operations."""
+
 import asyncio
 import logging
 

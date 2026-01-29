@@ -1,3 +1,5 @@
+"""Tests for the Fake Maker strategy."""
+
 import asyncio
 import json
 from decimal import Decimal
@@ -419,6 +421,7 @@ async def test_fake_maker(
     taker_side_effects,
     expected_messages,
 ):
+    """Test the fake_maker strategy logic."""
     mock_redis = AsyncMock()
     mocked_publish = AsyncMock()
     mock_redis.publish = mocked_publish

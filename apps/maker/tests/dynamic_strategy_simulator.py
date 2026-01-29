@@ -1,3 +1,5 @@
+"""Simulator for dynamic strategy order generation."""
+
 from redis import Redis
 from random import randint
 import time
@@ -7,7 +9,7 @@ from datetime import datetime
 from apps.maker.src.constants import MESSAGE_PROCESSOR_CHANNEL, REDIS_HOSTNAME, REDIS_PORT
 
 def fake_order(strategy:str, exchange: str) -> dict[str, str]:
-
+    """Generate a fake order dictionary."""
     order: dict[str, str] = {
         "kind": "order",
         "strategy": strategy,
@@ -22,6 +24,7 @@ def fake_order(strategy:str, exchange: str) -> dict[str, str]:
     
 
 def loop(order:int = 0):
+    """Infinite loop publishing orders to Redis."""
     while True:
 
         # result = r.publish(channel, f'Hi! It\'s {datetime.now()}')

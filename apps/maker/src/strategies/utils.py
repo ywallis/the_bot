@@ -1,3 +1,5 @@
+"""Utility functions for trading strategies."""
+
 import asyncio
 import json
 import logging
@@ -23,16 +25,17 @@ logger = logging.getLogger(__name__)
 async def send_processor_cancellation(
     redis: Redis, strategy: dict[str, str], identifier: str
 ) -> None:
-    """Send a cancellation to the message processor for a strategy.
+    """
+    Send a cancellation to the message processor for a strategy.
 
     Parameters
     ----------
     redis : Redis
-        A redis client instance
+        A redis client instance.
     strategy : dict[str, str]
-        The current strategy item
+        The current strategy item.
     identifier : str
-        The identifier for the order to be cancelled
+        The identifier for the order to be cancelled.
     """
     cancellation = CancellationMessage(
         kind=MessageType.CANCELLATION,
@@ -47,15 +50,15 @@ async def send_processor_cancellation(
 
 
 async def send_processor_order(redis: Redis, order: OrderMessage | OrderBatchMessage):
-    """Send an order to the message processor for a strategy.
+    """
+    Send an order to the message processor for a strategy.
 
     Parameters
     ----------
     redis : Redis
-        A redis client instance
+        A redis client instance.
     order : OrderMessage | OrderBatchMessage
-        The order item to be placed
-
+        The order item to be placed.
     """
     flattened = json.dumps(dict(order), default=str)
     await redis.publish(MESSAGE_PROCESSOR_CHANNEL, flattened)
@@ -65,24 +68,24 @@ async def send_processor_order(redis: Redis, order: OrderMessage | OrderBatchMes
 def min_max_usd_converter(
     price: float, min_size_usdt: float, max_size_usdt: float
 ) -> tuple[float, float]:
-    """Convert the usd bandwith to an asset quantity.
+    """
+    Convert the usd bandwith to an asset quantity.
 
-    For example, if given "2, 10, 100", will return 5, 50
+    For example, if given "2, 10, 100", will return 5, 50.
 
     Parameters
     ----------
     price : float
-        The use price of the asset
+        The use price of the asset.
     min_size_usdt : float
-        The lowest usd value an order can have
+        The lowest usd value an order can have.
     max_size_usdt : float
-        The highest usd value an order can have
+        The highest usd value an order can have.
 
     Returns
     -------
     tuple[float, float]
-        The min and max sizes in asset quantity
-
+        The min and max sizes in asset quantity.
     """
     min_size = round(min_size_usdt / price, 4)
     max_size = round(max_size_usdt / price, 4)
@@ -103,30 +106,30 @@ async def check_if_solvent(
     pair: str,
     last_order_timestamp: None | int = None,
 ) -> bool:
-    """Check if clients have enough balance to execute a balanced order.
+    """
+    Check if clients have enough balance to execute a balanced order.
 
     Parameters
     ----------
     redis_instance : Redis
-        A redis client instance
+        A redis client instance.
     buy_client_id : str
-        The short CCXT id for the buying client
+        The short CCXT id for the buying client.
     sell_client_id : str
-        The short CCXT id for the selling client
+        The short CCXT id for the selling client.
     price : float
-        The current price of an asset
+        The current price of an asset.
     quantity : float
-        The quantity to be executed on both sides
+        The quantity to be executed on both sides.
     pair : str
-        The traded pair
+        The traded pair.
     last_order_timestamp : None | int
-        The timestamp for the last order
+        The timestamp for the last order.
 
     Returns
     -------
     bool
-        Whether enough balance is available on both sides
-
+        Whether enough balance is available on both sides.
     """
     batch = asyncio.gather(
         retrieve_balances_redis(redis_instance, f"balance-{buy_client_id}"),
@@ -174,20 +177,20 @@ async def check_if_solvent(
 
 
 async def retrieve_balances_redis(redis_instance: Redis, key: str) -> dict | None:
-    """Retrieve the balance for a single exchange from redis.
+    """
+    Retrieve the balance for a single exchange from redis.
 
     Parameters
     ----------
     redis_instance : Redis
-        A redis client instance
+        A redis client instance.
     key : str
-        The symbol balance queried
+        The symbol balance queried.
 
     Returns
     -------
     dict | None
-        A dict of balances
-
+        A dict of balances.
     """
     # Get the JSON string from Redis
     serialized_balances = await redis_instance.get(key)
@@ -198,20 +201,20 @@ async def retrieve_balances_redis(redis_instance: Redis, key: str) -> dict | Non
 
 
 async def retrieve_ob_redis(redis_instance: Redis, key: str) -> OrderBook | None:
-    """Retrieve an orderbook snapshot from redis.
+    """
+    Retrieve an orderbook snapshot from redis.
 
     Parameters
     ----------
     redis_instance : Redis
-        A redis client instance
+        A redis client instance.
     key : str
-        The key for the desired orderbook
+        The key for the desired orderbook.
 
     Returns
     -------
     OrderBook | None
-        The returned orderbook
-
+        The returned orderbook.
     """
     # Get the JSON string from Redis
     serialized_ob = await redis_instance.get(key)
@@ -223,32 +226,32 @@ async def retrieve_ob_redis(redis_instance: Redis, key: str) -> OrderBook | None
 
 
 def order_time() -> str:
-    """Create a datetime-based stamp to make unique and custom order numbers.
+    """
+    Create a datetime-based stamp to make unique and custom order numbers.
 
     Returns
     -------
     str
-        The custom timestamp, as a string
-
+        The custom timestamp, as a string.
     """
     return datetime.now().strftime("%y%m%d%H%M%S%f")
 
 
 def generate_oid(strategy_identifier: str, order_identifier: str) -> str:
-    """Generate a unique identifier for an order.
+    """
+    Generate a unique identifier for an order.
 
     Parameters
     ----------
     strategy_identifier : str
-        The identifier for the strategy
+        The identifier for the strategy.
     order_identifier : str
-        The identifier for the order
+        The identifier for the order.
 
     Returns
     -------
     str
-        The custom time-based identifier
-
+        The custom time-based identifier.
     """
     return f"t-{order_time()}_{strategy_identifier}_{order_identifier}"
 
@@ -262,30 +265,30 @@ def generate_order(
     strategy: dict[str, str],
     identifier: str,
 ) -> OrderMessage:
-    """Generate a order item from parameters.
+    """
+    Generate a order item from parameters.
 
     Parameters
     ----------
     maker_id : str
-        The ccxt id for the maker exchange
+        The ccxt id for the maker exchange.
     price : float
-        The order price
+        The order price.
     amount : float
-        The order amount
+        The order amount.
     pair : str
-        The pair for the order
+        The pair for the order.
     side : OrderSide
-        The side of the order
+        The side of the order.
     strategy : dict[str, str]
-        The strategy the order comes from
+        The strategy the order comes from.
     identifier : str
-        The order identifier
+        The order identifier.
 
     Returns
     -------
     OrderMessage
-        A full order message
-
+        A full order message.
     """
     order = OrderMessage(
         kind=MessageType.ORDER,
@@ -314,7 +317,8 @@ async def generate_order_replace(
     identifier: str,
     refresh: bool,
 ) -> OrderMessage | None:
-    """Generate a new order and return it.
+    """
+    Generate a new order and return it.
 
     The function also checks if both sides are solvent.
     If the refresh flag is True, a cancellation will also be sent.
@@ -322,31 +326,30 @@ async def generate_order_replace(
     Parameters
     ----------
     redis : Redis
-        A redis client instance
+        A redis client instance.
     maker_id : str
-        The CCXT short id for the maker side
+        The CCXT short id for the maker side.
     taker_id : str
-        The CCXT short id for the taker side
+        The CCXT short id for the taker side.
     price : float
-        The price for the order
+        The price for the order.
     amount : float
-        The amount for the order
+        The amount for the order.
     pair : str
-        The traded pair
+        The traded pair.
     side : OrderSide
-        The side for the order
+        The side for the order.
     strategy : dict[str, str]
-        The full strategy item
+        The full strategy item.
     identifier : str
-        The identifier for the order
+        The identifier for the order.
     refresh : bool
-        Whether a pre-existing order should be cancelled if any client is insolvent
+        Whether a pre-existing order should be cancelled if any client is insolvent.
 
     Returns
     -------
     OrderMessage | None
-        A full order message if solvent
-
+        A full order message if solvent.
     """
     if side == OrderSide.SELL:
         sell_client_id = maker_id
@@ -386,7 +389,8 @@ async def generate_take_take_order(
     identifier: str,
     last_order_timestamp: int,
 ) -> OrderBatchMessage | None:
-    """Generate an order batch from two concurrent orders.
+    """
+    Generate an order batch from two concurrent orders.
 
     This targets an immediate price discrepancy with two opposing orders.
     The function will increase amount for exchanges requiring the fee to be paid in the asset.
@@ -395,31 +399,30 @@ async def generate_take_take_order(
     Parameters
     ----------
     redis : Redis
-        A Redis client instance
+        A Redis client instance.
     buy_exchange : str
-        The CCXT identifier for the buy-side exchange
+        The CCXT identifier for the buy-side exchange.
     sell_exchange : str
-        The CCXT identifier for the sell-side exchange
+        The CCXT identifier for the sell-side exchange.
     buy_price : float
-        The target buy price
+        The target buy price.
     sell_price : float
-        The target sell price
+        The target sell price.
     amount : float
-        The amount per side
+        The amount per side.
     pair : str
-        The traded pair
+        The traded pair.
     strategy : dict[str, str]
-        The full strategy item
+        The full strategy item.
     identifier : str
-        The common identifier for both orders
+        The common identifier for both orders.
     last_order_timestamp : int
         The timestamp for the last similar order. This is to prevent sending too many orders by accident.
 
     Returns
     -------
     OrderBatchMessage | None
-        The order batch with both orders if solvent
-
+        The order batch with both orders if solvent.
     """
     if await check_if_solvent(
         redis,
@@ -488,30 +491,30 @@ def maker_order_sizer(
     max_maker_size: float,
     min_maker_size: float = 0,
 ) -> float:
-    """Check how much liquidity is available on the taker client for a spread.
+    """
+    Check how much liquidity is available on the taker client for a spread.
 
     This gives us an estimate of how large of an order we can safely make.
 
     Parameters
     ----------
     maker_level : float
-        The intended price of our maker order
+        The intended price of our maker order.
     taker_book : list[list[float]] | list[list[int]]
-        The order book for the taker side
+        The order book for the taker side.
     side : OrderSide
-        The side of our maker order
+        The side of our maker order.
     min_spread : float
-        The minimum spread required by our strategy
+        The minimum spread required by our strategy.
     max_maker_size : float
-        The maximum size allowed by our strategy
+        The maximum size allowed by our strategy.
     min_maker_size : float
-        The minimum size required by our strategy
+        The minimum size required by our strategy.
 
     Returns
     -------
     float
-        The future size of our order
-
+        The future size of our order.
     """
     cumulative: float = 0
     if side == OrderSide.SELL:
@@ -539,22 +542,22 @@ def maker_order_sizer(
 def within_percentage_range(
     x: float | Decimal, y: float | Decimal, percentage: float
 ) -> bool:
-    """Check whether x is within a percentage range from y.
+    """
+    Check whether x is within a percentage range from y.
 
     Parameters
     ----------
     x : float | Decimal
-        Our original value
+        Our original value.
     y : float | Decimal
-        The target value
+        The target value.
     percentage : float
-        The range we allow x to be from y
+        The range we allow x to be from y.
 
     Returns
     -------
     bool
-        The result of the calculation
-
+        The result of the calculation.
     """
     if type(x) is not float:
         x = float(x)
@@ -575,24 +578,25 @@ def ob_matcher(
     min_order_size: float,
     extend_spread: int = 0,
 ) -> tuple[float, float, float] | None:
-    """Go through two order books and return arbitrage values.
+    """
+    Go through two order books and return arbitrage values.
 
-    This targets order books with significant inefficiencies (bid > ask)
+    This targets order books with significant inefficiencies (bid > ask).
 
     Parameters
     ----------
     bids : list[list[float]]
-        The order book for bids
+        The order book for bids.
     asks : list[list[float]]
-        The order book for asks
+        The order book for asks.
     spread : float
-        By how much we want bid to be larger than ask
+        By how much we want bid to be larger than ask.
     sizing : float
-        How much of the current inefficiency we want to target (%)
+        How much of the current inefficiency we want to target (%).
     max_order_size : float
-        The maximum order size allowed by our strategy
+        The maximum order size allowed by our strategy.
     min_order_size : float
-        The minimum order size required by our strategy
+        The minimum order size required by our strategy.
     extend_spread : int
         How many levels beyond the optimal we want to push beyond the optimal spread.
         This can be used to help guarantee execution for limit orders, or increase skew for cost-based market buy orders.
@@ -601,7 +605,6 @@ def ob_matcher(
     -------
     tuple[float, float, float] | None
         The target ask, bid and order size if an efficiency exists.
-
     """
     depth: int = 0
     cumulative_bids: float = 0

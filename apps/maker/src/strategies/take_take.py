@@ -1,3 +1,5 @@
+"""Strategy: Take Take."""
+
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta, timezone
@@ -19,7 +21,8 @@ logger = logging.getLogger(__name__)
 
 
 async def take_take(redis: Redis, strategy: dict[str, str]):
-    """Immediately take 2 opposing profitable orders.
+    """
+    Immediately take 2 opposing profitable orders.
 
     This usually only happens on strong moves in thin markets. Although orders are
     expected to be executed immediately, they are placed as limit orders. This reduces
@@ -28,10 +31,9 @@ async def take_take(redis: Redis, strategy: dict[str, str]):
     Parameters
     ----------
     redis : Redis
-        A redis client instance
+        A redis client instance.
     strategy : dict[str, str]
-        The strategy options to be loaded
-
+        The strategy options to be loaded.
     """
     # Defining state
 

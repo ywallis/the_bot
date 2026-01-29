@@ -1,3 +1,5 @@
+"""Tests for the Take Take strategy."""
+
 import asyncio
 from datetime import datetime, timezone
 import json
@@ -144,6 +146,7 @@ async def test_take_take(
     coinbase_side_effects,
     expected_messages,
 ):
+    """Test the take_take strategy logic."""
     mock_redis = AsyncMock()
     mocked_publish = AsyncMock()
     mock_redis.publish = mocked_publish
@@ -205,6 +208,7 @@ async def test_take_take(
 async def test_take_take_throttle(
     base_strategy_tt: dict[str, str],
 ):
+    """Test that take_take throttles appropriately."""
     mock_redis = AsyncMock()
     mocked_publish = AsyncMock()
     mock_redis.publish = mocked_publish
