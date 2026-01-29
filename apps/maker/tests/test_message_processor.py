@@ -1,3 +1,5 @@
+"""Tests for the message processor."""
+
 import asyncio
 import json
 from typing import Callable
@@ -20,10 +22,12 @@ from apps.maker.src.structs import (
 
 @pytest.fixture
 def processor():
+    """Return a MessageProcessor instance."""
     return MessageProcessor()
 
 
 def test_get_lock_creates_new_lock(processor: MessageProcessor):
+    """Test that a new lock is created if one does not exist."""
     strategy = "test_strategy"
     lock = processor.get_lock(strategy)
     assert isinstance(lock, asyncio.Lock)
@@ -34,6 +38,7 @@ def test_get_lock_creates_new_lock(processor: MessageProcessor):
 def test_replace_queued_value(
     order_1: OrderMessage, order_2: OrderMessage, processor: MessageProcessor
 ):
+    """Test replacing a queued message."""
     strategy = order_1["strategy"]
     # Initial queued order.
     processor.message_queue[strategy] = order_1
@@ -50,6 +55,7 @@ async def test_process_order_message_without_lock(
     monkeypatch: pytest.MonkeyPatch,
     processor: MessageProcessor,
 ):
+    """Test processing an order message when no lock is held."""
     strategy = order_1["strategy"]
 
     # Monkeypatch send_to_broker to simulate a valid broker response.
@@ -72,6 +78,7 @@ async def test_process_cancellation_message_with_open_order(
     monkeypatch: pytest.MonkeyPatch,
     processor: MessageProcessor,
 ):
+    """Test processing a cancellation message when an open order exists."""
     strategy = order_1["strategy"]
     # Pre-populate open_orders to simulate an existing order.
     processor.open_orders[strategy] = order_1
@@ -95,6 +102,7 @@ async def test_unique_order(
     monkeypatch: pytest.MonkeyPatch,
     processor: MessageProcessor,
 ):
+    """Test processing a unique order."""
     strategy = order_unique_1["strategy"]
 
     # Monkeypatch send_to_broker to simulate a valid broker response.
@@ -113,6 +121,7 @@ async def test_order_batch(
     monkeypatch: pytest.MonkeyPatch,
     processor: MessageProcessor,
 ):
+    """Test processing an order batch."""
     strategy = order_batch_1["strategy"]
 
     # Monkeypatch send_to_broker to simulate a valid broker response.
@@ -128,6 +137,7 @@ async def test_order_batch(
 async def test_process_message_queue(
     order_1: OrderMessage, order_2: OrderMessage, processor: MessageProcessor
 ):
+    """Test that messages are queued if a lock is held."""
     strategy = order_1["strategy"]
     # Acquire the lock to simulate it being busy.
     lock = processor.get_lock(strategy)
@@ -149,6 +159,7 @@ async def test_place_order_raises_broker_error(
     monkeypatch: pytest.MonkeyPatch,
     processor: MessageProcessor,
 ):
+    """Test that place_order raises BrokerError on failure."""
     # Simulate an invalid broker response.
     monkeypatch.setattr(processor, "send_to_broker", fake_send_to_broker_negative)
 
@@ -160,6 +171,7 @@ async def test_place_order_raises_broker_error(
 async def test_collect_results_periodically(
     processor: MessageProcessor, dummy_task: Callable
 ):
+    """Test periodic collection of results."""
     # Add a dummy task that should complete quickly.
     processor.tasks.append(asyncio.create_task(dummy_task()))
 
@@ -184,6 +196,7 @@ async def test_collect_results_periodically(
 async def test_get_open_orders(
     processor: MessageProcessor, order_batch_raw: str, mocker: MockerFixture
 ):
+    """Test fetching open orders."""
     # Create a fake Redis pool
     mock_redis = MagicMock()
     mock_pubsub = MagicMock()
@@ -232,6 +245,7 @@ async def test_get_open_orders(
 async def test_get_open_orders_empty(
     processor: MessageProcessor, empty_open_orders: OrderBatchMessage, mocker
 ):
+    """Test fetching open orders when there are none."""
     # Create a fake Redis pool
     mock_redis = MagicMock()
     mock_pubsub = MagicMock()

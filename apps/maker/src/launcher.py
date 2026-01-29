@@ -1,3 +1,5 @@
+"""Launcher for executing trading strategies."""
+
 import asyncio
 import importlib
 import logging
@@ -14,6 +16,20 @@ logger = logging.getLogger(__name__)
 
 
 async def main(strategy_index: int):
+    """Execute the strategy based on the provided index.
+
+    Dynamically imports and runs the strategy function.
+
+    Parameters
+    ----------
+    strategy_index : int
+        The index of the strategy in the configuration.
+
+    Raises
+    ------
+    Exception
+        If no strategies are found or the strategy module/function is missing.
+    """
     pool = ConnectionPool(
         host=REDIS_HOSTNAME, port=REDIS_PORT, db=0, max_connections=20
     )

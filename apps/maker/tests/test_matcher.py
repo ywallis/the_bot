@@ -1,3 +1,5 @@
+"""Tests for the matcher module."""
+
 import asyncio
 import json
 from decimal import Decimal
@@ -14,6 +16,7 @@ from apps.shared.src.structs import CustomExchange
 
 @pytest.mark.asyncio
 async def test_watch_buy_orders_various_order_states_native_fee():
+    """Test watching buy orders with various states and native fees."""
     # AsyncMock for redis
     redis = AsyncMock()
 
@@ -118,6 +121,7 @@ async def test_watch_buy_orders_various_order_states_native_fee():
 
 @pytest.mark.asyncio
 async def test_watch_buy_orders_various_order_states():
+    """Test watching buy orders with various states."""
     # AsyncMock for redis
     redis = AsyncMock()
 
@@ -222,6 +226,7 @@ async def test_watch_buy_orders_various_order_states():
 
 @pytest.mark.asyncio
 async def test_watch_sell_orders_various_order_states():
+    """Test watching sell orders with various states."""
     # AsyncMock for redis
     redis = AsyncMock()
 
@@ -327,6 +332,7 @@ async def test_watch_sell_orders_various_order_states():
 
 @pytest.mark.asyncio
 async def test_watch_sell_orders_match_self():
+    """Test watching orders where the target exchange is the same as the source."""
     # AsyncMock for redis
     redis = AsyncMock()
     publish = AsyncMock()

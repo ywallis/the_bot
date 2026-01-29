@@ -1,3 +1,5 @@
+"""Module for managing exchange client connections."""
+
 import logging
 import os
 
@@ -15,6 +17,12 @@ logger = logging.getLogger(__name__)
 
 
 async def load_clients():
+    """
+    Load markets for all authenticated clients with retry logic.
+
+    Attempts to load markets for each client up to 5 times.
+    Logs success or failure.
+    """
     for client in authenticated_clients.values():
         attempt: int = 1
         while attempt <= 5:

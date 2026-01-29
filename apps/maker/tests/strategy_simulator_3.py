@@ -1,3 +1,5 @@
+"""Simulator script 3 for strategy order generation."""
+
 from decimal import Decimal
 from redis import Redis
 import json

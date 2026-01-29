@@ -1,3 +1,5 @@
+"""Tests for strategy utility functions."""
+
 import asyncio
 import json
 from decimal import Decimal
@@ -24,6 +26,7 @@ from apps.maker.src.utils import info_from_oid
 
 
 def test_info_from_oid():
+    """Test extracting information from an order ID."""
     oid = generate_oid("la", "es")
 
     assert info_from_oid(oid, OidComponent.TIME).startswith("2")
@@ -33,6 +36,7 @@ def test_info_from_oid():
 
 @pytest.mark.asyncio
 async def test_send_processor_init_cancellation():
+    """Test sending an initial cancellation to the processor."""
     redis_mock = AsyncMock(spec=Redis)
     redis_mock.publish = AsyncMock()
     strategy = {
@@ -63,6 +67,7 @@ async def test_send_processor_init_cancellation():
 
 @pytest.mark.asyncio
 async def test_send_processor_order():
+    """Test sending an order to the processor."""
     redis_mock = AsyncMock(spec=Redis)
     redis_mock.publish = AsyncMock()
     order = OrderMessage(
@@ -86,12 +91,14 @@ async def test_send_processor_order():
 
 
 def test_min_max_usd_converter():
+    """Test converting USD limits to asset quantity."""
     min_size, max_size = min_max_usd_converter(50000, 10, 1000)
     assert min_size == 0.0002  # 10 / 50000
     assert max_size == 0.02  # 1000 / 50000
 
 
 def test_order_time():
+    """Test that order_time returns a valid string."""
     timestamp = order_time()
     assert isinstance(timestamp, str)
     assert len(timestamp) > 10  # Basic format check
@@ -99,6 +106,7 @@ def test_order_time():
 
 @pytest.mark.asyncio
 async def test_check_if_solvent_true():
+    """Test solvency check when funds are sufficient."""
     redis_mock = AsyncMock()
 
     buy_client_id = "client1"
@@ -128,6 +136,7 @@ async def test_check_if_solvent_true():
 
 @pytest.mark.asyncio
 async def test_check_if_solvent_false():
+    """Test solvency check when funds are insufficient."""
     redis_mock = AsyncMock()
 
     buy_client_id = "client1"
@@ -156,6 +165,7 @@ async def test_check_if_solvent_false():
 
 @pytest.mark.asyncio
 async def test_check_if_solvent_false_old_timestamp():
+    """Test solvency check with stale balance data."""
     redis_mock = AsyncMock()
 
     buy_client_id = "client1"
@@ -185,6 +195,7 @@ async def test_check_if_solvent_false_old_timestamp():
 
 
 def test_maker_order_sizer():
+    """Test the order sizing logic."""
     taker_book = [[50001, 1], [50002, 2], [50003, 3]]
 
     assert maker_order_sizer(50000, taker_book, OrderSide.BUY, 1.0001, 5, 0.5) == 0.5
@@ -233,12 +244,14 @@ def test_maker_order_sizer():
 def test_ob_matcher(
     bids, asks, spread, sizing, max_size, min_size, extend_spread, expected
 ):
+    """Test the order book matching logic."""
     result = ob_matcher(bids, asks, spread, sizing, max_size, min_size, extend_spread)
     assert result == expected
 
 
 @pytest.mark.asyncio
 async def test_generate_take_take_order():
+    """Test generating a take-take order."""
     mock_redis = AsyncMock()
     mocked_publish = AsyncMock()
     mock_redis.publish = mocked_publish

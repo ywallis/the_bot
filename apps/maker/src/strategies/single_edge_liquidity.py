@@ -1,3 +1,5 @@
+"""Strategy: Single Edge Liquidity."""
+
 import asyncio
 import logging
 
@@ -24,7 +26,8 @@ logger = logging.getLogger(__name__)
 
 
 async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
-    """Add to the best existing price if it can be offset.
+    """
+    Add to the best existing price if it can be offset.
 
     This allows to "piggy-back" on another market maker, and offer the best
     available price without entering a bidding war. This strategy is only active if
@@ -33,10 +36,9 @@ async def single_edge_liquidity(redis: Redis, strategy: dict[str, str]):
     Parameters
     ----------
     redis : Redis
-        A redis client instance
+        A redis client instance.
     strategy : dict[str, str]
-        The strategy options to be loaded
-
+        The strategy options to be loaded.
     """
     # Defining state
 

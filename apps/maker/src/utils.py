@@ -1,3 +1,5 @@
+"""Utility functions for the maker application."""
+
 import json
 from decimal import Decimal
 from typing import Any, TypeGuard, cast
@@ -12,6 +14,26 @@ from apps.maker.src.structs import (
 
 
 def info_from_oid(oid: str, desired_component: OidComponent) -> str:
+    """
+    Extract a component from a custom order ID (OID).
+
+    Parameters
+    ----------
+    oid : str
+        The custom order ID.
+    desired_component : OidComponent
+        The component to extract (TIME, STRATEGY, or ORDER).
+
+    Returns
+    -------
+    str
+        The extracted component.
+
+    Raises
+    ------
+    Exception
+        If the OID is invalid.
+    """
     components = oid.split("-")[1].split("_")
 
     if len(components) != 3:
@@ -29,6 +51,19 @@ def info_from_oid(oid: str, desired_component: OidComponent) -> str:
 def parse_message(
     message_raw: str | dict,
 ) -> OrderMessage | CancellationMessage | OrderBatchMessage | None:
+    """
+    Parse a raw message into a structured message object.
+
+    Parameters
+    ----------
+    message_raw : str | dict
+        The raw message (JSON string or dict).
+
+    Returns
+    -------
+    OrderMessage | CancellationMessage | OrderBatchMessage | None
+        The parsed message, or None if parsing fails.
+    """
     if isinstance(message_raw, dict):
         message = message_raw
     else:
@@ -74,6 +109,19 @@ def parse_message(
 
 
 def cancellation_from_order(order: OrderMessage) -> CancellationMessage:
+    """
+    Create a cancellation message from an order message.
+
+    Parameters
+    ----------
+    order : OrderMessage
+        The order to cancel.
+
+    Returns
+    -------
+    CancellationMessage
+        The cancellation message.
+    """
     return CancellationMessage(
         kind=MessageType.CANCELLATION,
         strategy=order["strategy"],
@@ -84,6 +132,19 @@ def cancellation_from_order(order: OrderMessage) -> CancellationMessage:
 
 
 def identify_response(string: str) -> Response:
+    """
+    Parse a response string from the broker.
+
+    Parameters
+    ----------
+    string : str
+        The raw response string.
+
+    Returns
+    -------
+    Response
+        The parsed response object.
+    """
     if string == "":
         return Response(kind=MessageType.ERROR, text="Redis connection failed")
 
@@ -92,24 +153,78 @@ def identify_response(string: str) -> Response:
 
 
 def is_order_message(message: Any) -> TypeGuard[OrderMessage]:
+    """
+    Check if a message is an OrderMessage.
+
+    Parameters
+    ----------
+    message : Any
+        The message to check.
+
+    Returns
+    -------
+    bool
+        True if the message is an OrderMessage.
+    """
     if not isinstance(message, dict):
         return False
     return message.get("kind") == MessageType.ORDER
 
 
 def is_cancellation_message(message: Any) -> TypeGuard[CancellationMessage]:
+    """
+    Check if a message is a CancellationMessage.
+
+    Parameters
+    ----------
+    message : Any
+        The message to check.
+
+    Returns
+    -------
+    bool
+        True if the message is a CancellationMessage.
+    """
     if not isinstance(message, dict):
         return False
     return message.get("kind") == MessageType.CANCELLATION
 
 
 def is_orderbatch_message(message: Any) -> TypeGuard[OrderBatchMessage]:
+    """
+    Check if a message is an OrderBatchMessage.
+
+    Parameters
+    ----------
+    message : Any
+        The message to check.
+
+    Returns
+    -------
+    bool
+        True if the message is an OrderBatchMessage.
+    """
     if not isinstance(message, dict):
         return False
     return message.get("kind") == MessageType.ORDERBATCH
 
 
 def order_from_ccxt(order: dict[str, str], exchange_name: str) -> OrderMessage:
+    """
+    Convert a CCXT order dictionary to an OrderMessage.
+
+    Parameters
+    ----------
+    order : dict[str, str]
+        The CCXT order dictionary.
+    exchange_name : str
+        The name of the exchange.
+
+    Returns
+    -------
+    OrderMessage
+        The converted OrderMessage.
+    """
     strategy_identifier = info_from_oid(order["clientOrderId"], OidComponent.STRATEGY)
     order_identifier = info_from_oid(order["clientOrderId"], OidComponent.ORDER)
     if order_identifier[-1] == "t":

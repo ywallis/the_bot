@@ -1,3 +1,5 @@
+"""Utility functions for the accountant application."""
+
 import asyncio
 import logging
 import os
@@ -17,6 +19,14 @@ logger = logging.getLogger(__name__)
 
 
 def load_pg_config() -> dict[str, str]:
+    """
+    Load PostgreSQL configuration from environment variables.
+
+    Returns
+    -------
+    dict[str, str]
+        The configuration dictionary.
+    """
     config: dict[str, str] = {}
 
     _ = load_dotenv()
@@ -43,8 +53,23 @@ def prepare_items_for_pg(
     client: CustomExchange,
     raw_items: list[ccxtItem] | ccxtItem,
 ) -> list[dict[str, str]]:
-    """This function prepares CCXT order/trade items for an export to a PG database"""
+    """
+    Prepare CCXT items for export to PostgreSQL.
 
+    Flattens structures and normalizes fields.
+
+    Parameters
+    ----------
+    client : CustomExchange
+        The exchange client.
+    raw_items : list[ccxtItem] | ccxtItem
+        The items to prepare.
+
+    Returns
+    -------
+    list[dict[str, str]]
+        List of prepared items as dictionaries.
+    """
     imported_items = deepcopy(raw_items)
 
     if not isinstance(imported_items, list):
@@ -120,6 +145,19 @@ def prepare_items_for_pg(
 
 
 def dict_to_text(d: ccxtItem) -> dict[str, str]:
+    """
+    Convert dictionary values to strings for SQL storage.
+
+    Parameters
+    ----------
+    d : ccxtItem
+        The item dictionary.
+
+    Returns
+    -------
+    dict[str, str]
+        The dictionary with string values.
+    """
     def convert(i_value: object) -> str:
         if isinstance(i_value, str):
             return i_value
@@ -144,8 +182,25 @@ async def retrieve_and_prepare_orders(
     start: int | None = None,
     end: int | None = None,
 ):
-    """This function downloads all latest orders from a client."""
+    """
+    Fetch and prepare orders from a client.
 
+    Parameters
+    ----------
+    client : CustomExchange
+        The exchange client.
+    ticker : str
+        The trading pair symbol.
+    start : int | None, optional
+        Start timestamp.
+    end : int | None, optional
+        End timestamp.
+
+    Returns
+    -------
+    list[dict[str, str]]
+        List of prepared orders.
+    """
     if client.name == "Bitget":
         orders = await client.fetch_canceled_and_closed_orders(
             symbol=ticker, limit=100, since=start, params={"until": end}
@@ -161,8 +216,25 @@ async def retrieve_and_prepare_orders(
 async def retrieve_and_prepare_trades(
     client: CustomExchange, pair: str, start: int | None = None, end: int | None = None
 ):
-    """This function downloads trades from a CCXT client and prepares them to export to a Postgres server."""
+    """
+    Fetch and prepare trades from a client.
 
+    Parameters
+    ----------
+    client : CustomExchange
+        The exchange client.
+    pair : str
+        The trading pair symbol.
+    start : int | None, optional
+        Start timestamp.
+    end : int | None, optional
+        End timestamp.
+
+    Returns
+    -------
+    list[dict[str, str]]
+        List of prepared trades.
+    """
     trades = await client.fetch_my_trades(
         symbol=pair, limit=100, since=start, params={"until": end}
     )
@@ -176,8 +248,20 @@ def export_to_sql(
     table: str,
     client_name: str,
 ):
-    """Takes in a list of orders or trades in CCXT format, and a dict of PG credentials, and outputs the data to the attached DB."""
+    """
+    Export data to PostgreSQL.
 
+    Parameters
+    ----------
+    data : list[dict[str, str]]
+        The data to export.
+    credentials : dict[str, str]
+        PostgreSQL credentials.
+    table : str
+        The table name.
+    client_name : str
+        The name of the client (for logging).
+    """
     dbname = credentials["POSTGRES_DB"]
     user = credentials["POSTGRES_USER"]
     password = credentials["POSTGRES_PASSWORD"]
@@ -217,9 +301,18 @@ def export_to_sql(
 def unaddressed_imbalances(
     pair: str, imbalances: DataFrame, orders: list[str]
 ):
-    """This function tries to notify of imbalances in an arbitrage setup, similar to the matcher, but designed as a background service.
-    Imbalances are meant to be fed as a pandas DF. Orders are custom client order IDs."""
+    """
+    Identify and report unaddressed imbalances.
 
+    Parameters
+    ----------
+    pair : str
+        The trading pair.
+    imbalances : DataFrame
+        The imbalances dataframe.
+    orders : list[str]
+        List of open client order IDs.
+    """
     ticker = pair.split("/")[0]
 
     # Drops the index from the returned pandas df
@@ -291,7 +384,21 @@ def unaddressed_imbalances(
 async def fetch_all_open_orders_client_order_id(
     tickers: set[str], clients: dict[str, CustomExchange]
 ) -> list[str]:
-    """Fetches the clientOrderId for all open orders regardless of client and returns them in a list"""
+    """
+    Fetch client order IDs for all open orders.
+
+    Parameters
+    ----------
+    tickers : set[str]
+        Set of trading pairs.
+    clients : dict[str, CustomExchange]
+        Dictionary of exchange clients.
+
+    Returns
+    -------
+    list[str]
+        List of client order IDs.
+    """
     tasks = []
     for client in clients.values():
         for ticker in tickers:

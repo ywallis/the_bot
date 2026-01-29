@@ -1,3 +1,5 @@
+"""Tests for the broker module."""
+
 import asyncio
 from unittest.mock import AsyncMock, patch
 
@@ -16,6 +18,7 @@ from apps.shared.src.structs import CustomExchange
 # Need to create a ccxt response fixture
 @pytest.mark.asyncio
 async def test_process_message_order(order_1):
+    """Test processing an order message."""
     results_queue = asyncio.Queue()
     ccxt_client = AsyncMock()  # Mock the exchange client
 
@@ -32,6 +35,7 @@ async def test_process_message_order(order_1):
 
 @pytest.mark.asyncio
 async def test_process_message_cancellation(cancellation_1):
+    """Test processing a cancellation message."""
     results_queue = asyncio.Queue()
     ccxt_client = AsyncMock()  # Mock the exchange client
 
@@ -52,6 +56,7 @@ async def test_process_message_cancellation(cancellation_1):
 
 @pytest.mark.asyncio
 async def test_process_message_unknown_type():
+    """Test processing a message with an unknown type."""
     message = {"id": "789", "kind": "INVALID"}
     results_queue = asyncio.Queue()
     ccxt_client = AsyncMock(spec=CustomExchange)
@@ -68,6 +73,7 @@ async def test_process_message_unknown_type():
 
 @pytest.mark.asyncio
 async def test_worker(order_1):
+    """Test the worker function."""
     queue = asyncio.Queue()
     results_queue = asyncio.Queue()
     ccxt_client = AsyncMock(spec=CustomExchange)
@@ -86,6 +92,7 @@ async def test_worker(order_1):
 
 @pytest.mark.asyncio
 async def test_results_worker_order():
+    """Test the results worker with an order result."""
     results_queue = asyncio.Queue()
     mock_redis = AsyncMock()
     mocked_publish = AsyncMock()
@@ -101,6 +108,7 @@ async def test_results_worker_order():
 
 @pytest.mark.asyncio
 async def test_results_worker_cancellation():
+    """Test the results worker with a cancellation result."""
     results_queue = asyncio.Queue()
     mock_redis = AsyncMock()
     mocked_publish = AsyncMock()
@@ -116,6 +124,7 @@ async def test_results_worker_cancellation():
 
 @pytest.mark.asyncio
 async def test_redis_subscriber_valid_message(order_1, order_raw_string):
+    """Test the redis subscriber with a valid message."""
     # Create a queue for the "binance" exchange.
     queue = asyncio.Queue()
     redis_mock = AsyncMock()

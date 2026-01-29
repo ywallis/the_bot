@@ -1,3 +1,5 @@
+"""Module for managing multiple trading processes."""
+
 import logging
 import os
 import signal
@@ -37,12 +39,31 @@ PROCESS_LIST = [
 
 
 def launch_process(cmd):
-    """Launch a process in its own process group."""
+    """
+    Launch a process in its own process group.
+
+    Parameters
+    ----------
+    cmd : list[str]
+        The command to execute.
+
+    Returns
+    -------
+    subprocess.Popen
+        The process handle.
+    """
     return subprocess.Popen(cmd, preexec_fn=os.setpgrp)
 
 
 def cleanup_and_exit(exit_code=1):
-    """Terminate all running processes and exit."""
+    """
+    Terminate all running processes and exit.
+
+    Parameters
+    ----------
+    exit_code : int, optional
+        The exit code. Defaults to 1.
+    """
     print("Cleaning up processes...")
     for _, proc in processes:
         # First pass only to send a signal
@@ -65,6 +86,7 @@ def cleanup_and_exit(exit_code=1):
 
 # Register signal handlers for manual termination (Ctrl+C)
 def handle_exit(_sig, _frame):
+    """Handle exit signals (SIGINT, SIGTERM)."""
     cleanup_and_exit(0)  # Normal exit on SIGINT/SIGTERM
 
 

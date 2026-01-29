@@ -1,3 +1,5 @@
+"""Module for retrieving historical data from exchanges."""
+
 import asyncio
 from datetime import datetime, timedelta
 
@@ -18,6 +20,23 @@ from apps.shared.src.utils import exchange_and_pair
 async def get_history(
     client: CustomExchange, pg_config: dict[str, str], pair: str, start_date_str: str
 ):
+    """
+    Retrieve and export historical data for a specific client and pair.
+
+    Iterates through time windows to fetch orders and trades, adjusting the
+    window size if too many items are returned.
+
+    Parameters
+    ----------
+    client : CustomExchange
+        The exchange client.
+    pg_config : dict[str, str]
+        PostgreSQL configuration.
+    pair : str
+        The trading pair symbol.
+    start_date_str : str
+        The start date in "DD/MM/YY" format.
+    """
     start_date = datetime.strptime(start_date_str, "%d/%m/%y")
     loop_start = start_date
     original_loop_size = timedelta(minutes=30)
@@ -74,6 +93,20 @@ async def loop(
     pg_config: dict[str, str],
     start_date_input: str,
 ):
+    """
+    Iterate through all configured pairs and fetch history.
+
+    Parameters
+    ----------
+    all_clients : dict[str, CustomExchange]
+        Dictionary of authenticated exchange clients.
+    exchange_and_pair : set[tuple[str, str]]
+        Set of (exchange_name, pair) tuples.
+    pg_config : dict[str, str]
+        PostgreSQL configuration.
+    start_date_input : str
+        The start date in "DD/MM/YY" format.
+    """
     for option in exchange_and_pair:
         try:
             await get_history(
