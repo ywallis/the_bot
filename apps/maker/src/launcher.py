@@ -9,7 +9,7 @@ from redis.asyncio import ConnectionPool, Redis
 
 import apps.shared.src.logging_config as logging_config
 from apps.maker.src.constants import REDIS_HOSTNAME, REDIS_PORT
-from apps.shared.src.utils import strategies 
+from apps.shared.src.utils import strategies
 
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ async def main(strategy_index: int):
 
     function_name = strategy["type"]
     # Dynamically import the module
-    module = importlib.import_module(f"apps.maker.src.strategies.{function_name}")
+    module = importlib.import_module(f"apps.strategies.src.{function_name}")
 
     # Ensure the function exists in the module
     if not hasattr(module, function_name):

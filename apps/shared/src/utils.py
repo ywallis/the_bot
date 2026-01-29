@@ -19,7 +19,9 @@ def load_config():
     dict
         The configuration dictionary.
     """
-    CONFIG_PATH = Path(__file__).parents[3] / "config" / "config.toml"
+    CONFIG_PATH = (
+        Path(__file__).parents[3] / "apps" / "strategies" / "config" / "config.toml"
+    )
     with open(CONFIG_PATH, "rb") as f:
         config = tomllib.load(f)
         return config
