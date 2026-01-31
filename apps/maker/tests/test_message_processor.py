@@ -234,7 +234,7 @@ async def test_get_open_orders(
     processor.open_orders = await processor.get_open_orders()
 
     # Validate response
-    assert "ALPH_gate" in processor.open_orders
+    assert "TEST_exchange_b" in processor.open_orders
     # Ensure correct Redis calls
     mock_redis.publish.assert_called_once()
     mock_pubsub.subscribe.assert_called_once_with("INIT")
@@ -283,7 +283,7 @@ async def test_get_open_orders_empty(
     processor.open_orders = await processor.get_open_orders()
 
     # Validate response
-    assert "ALPH_gate" not in processor.open_orders
+    assert "TEST_exchange_b" not in processor.open_orders
     assert processor.open_orders == {}
     # Ensure correct Redis calls
     mock_redis.publish.assert_called_once()

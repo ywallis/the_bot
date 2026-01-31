@@ -19,11 +19,11 @@ channel: str = MESSAGE_PROCESSOR_CHANNEL
 
 order_1 = OrderMessage(
     kind=MessageType.ORDER,
-    strategy="ALPH_es",
-    exchange="bitget",
-    id=f"t-{datetime.now()::%M:%S:%f}_ALPH_es",
+    strategy="TEST_es",
+    exchange="exchange_a",
+    id=f"t-{datetime.now()::%M:%S:%f}_TEST_es",
     exchange_id="_",
-    pair="ALPH/USDT",
+    pair="TEST/USDT",
     side=OrderSide.SELL,
     order_type=OrderType.REPLACE,
     price=Decimal(100),

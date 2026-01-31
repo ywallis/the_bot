@@ -15,11 +15,11 @@ order_no: int = 0
 
 order_1: dict[str, str] = {
     "kind": "order",
-    "strategy": "ALPH_gate",
-    "exchange": "gate",
-    "id": f"t-{datetime.now().strftime("%y%m%d%H%M%S%f")}_ALPH_tt",
+    "strategy": "TEST_exchange_b",
+    "exchange": "exchange_b",
+    "id": f"t-{datetime.now().strftime("%y%m%d%H%M%S%f")}_TEST_tt",
     "exchange_id": "_",
-    "pair": "ALPH/USDT",
+    "pair": "TEST/USDT",
     "side": "sell",
     "order_type": "replace",
     "price": "100",
@@ -28,11 +28,11 @@ order_1: dict[str, str] = {
 
 order_2: dict[str, str] = {
     "kind": "order",
-    "strategy": "ALPH_gate",
-    "exchange": "gate",
-    "id": f"t-{datetime.now().strftime("%y%m%d%H%M%S%f")}_ALPH_tt",
+    "strategy": "TEST_exchange_b",
+    "exchange": "exchange_b",
+    "id": f"t-{datetime.now().strftime("%y%m%d%H%M%S%f")}_TEST_tt",
     "exchange_id": "_",
-    "pair": "ALPH/USDT",
+    "pair": "TEST/USDT",
     "side": "sell",
     "order_type": "replace",
     "price": "100",
@@ -41,10 +41,10 @@ order_2: dict[str, str] = {
 
 cancellation_1: dict[str, str] = {
     "kind": "cancellation",
-    "strategy": "ALPH_gate",
-    "exchange": "gate",
+    "strategy": "TEST_exchange_b",
+    "exchange": "exchange_b",
     "id": order_1["id"],
-    "pair": "ALPH/USDT",
+    "pair": "TEST/USDT",
 }
 
 r.publish(channel, json.dumps(order_1))

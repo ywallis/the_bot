@@ -20,7 +20,7 @@ async def test_create_and_return_order_type(order_kind, expected_type):
     order = OrderMessage(
         kind=MessageType.ORDER,
         strategy="matching",
-        exchange="gate",
+        exchange="exchange_b",
         id="t-prefix_strategy123_suffix",
         exchange_id="_",
         pair="BTC/USDT",

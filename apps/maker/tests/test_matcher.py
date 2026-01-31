@@ -22,8 +22,8 @@ async def test_watch_buy_orders_various_order_states_native_fee():
 
     # Create a mock CustomExchange client
     client = AsyncMock(spec=CustomExchange)
-    client.name = "gate.io"
-    client.id = "gate"
+    client.name = "exchange_b.io"
+    client.id = "exchange_b"
 
     expected_matching_order = OrderMessage(
         kind=MessageType.ORDER,
@@ -133,7 +133,7 @@ async def test_watch_buy_orders_various_order_states():
     expected_matching_order = OrderMessage(
         kind=MessageType.ORDER,
         strategy="matching",
-        exchange="gate",
+        exchange="exchange_b",
         id="t-prefix_strategy123_suffix",
         exchange_id="_",
         pair="BTC/USDT",
@@ -204,7 +204,7 @@ async def test_watch_buy_orders_various_order_states():
         asyncio.CancelledError("stop test loop"),  # force loop exit
     ]
 
-    should_match = {"strategy123": "gate"}
+    should_match = {"strategy123": "exchange_b"}
 
     # Launch the watcher
     task = asyncio.create_task(watch_orders(redis, client, "BTC/USDT", should_match))
@@ -220,7 +220,7 @@ async def test_watch_buy_orders_various_order_states():
     redis.publish.assert_called_once()
     channel, message = redis.publish.call_args[0]
     assert channel == MESSAGE_PROCESSOR_CHANNEL
-    assert '"exchange": "gate"' in message
+    assert '"exchange": "exchange_b"' in message
     assert message == json.dumps(dict(expected_matching_order), default=str)
 
 
@@ -238,7 +238,7 @@ async def test_watch_sell_orders_various_order_states():
     expected_matching_order = OrderMessage(
         kind=MessageType.ORDER,
         strategy="matching",
-        exchange="gate",
+        exchange="exchange_b",
         id="t-prefix_strategy123_suffix",
         exchange_id="_",
         pair="BTC/USDT",
@@ -246,7 +246,7 @@ async def test_watch_sell_orders_various_order_states():
         order_type=OrderType.MARKET,
         price=Decimal(50000),
         # amount=Decimal("0.01"),
-        amount=Decimal("2.0020"),
+        amount=Decimal("2.0000"),
     )
     # Configure the mock's watch_orders method to return a mix of orders
     client.watch_orders.side_effect = [
@@ -310,7 +310,7 @@ async def test_watch_sell_orders_various_order_states():
         asyncio.CancelledError("stop test loop"),  # force loop exit
     ]
 
-    should_match = {"strategy123": "gate"}
+    should_match = {"strategy123": "exchange_b"}
 
     # Launch the watcher
     task = asyncio.create_task(watch_orders(redis, client, "BTC/USDT", should_match))
@@ -326,7 +326,7 @@ async def test_watch_sell_orders_various_order_states():
     redis.publish.assert_called_once()
     channel, message = redis.publish.call_args[0]
     assert channel == MESSAGE_PROCESSOR_CHANNEL
-    assert '"exchange": "gate"' in message
+    assert '"exchange": "exchange_b"' in message
     assert message == json.dumps(dict(expected_matching_order), default=str)
 
 
@@ -340,8 +340,8 @@ async def test_watch_sell_orders_match_self():
 
     # Create a mock CustomExchange client
     client = AsyncMock(spec=CustomExchange)
-    client.name = "gate"
-    client.id = "gate"
+    client.name = "exchange_b"
+    client.id = "exchange_b"
 
     # Configure the mock's watch_orders method to return a mix of orders
     client.watch_orders.side_effect = [
@@ -405,7 +405,7 @@ async def test_watch_sell_orders_match_self():
         asyncio.CancelledError("stop test loop"),  # force loop exit
     ]
 
-    should_match = {"strategy123": "gate"}
+    should_match = {"strategy123": "exchange_b"}
 
     # Launch the watcher
     task = asyncio.create_task(watch_orders(redis, client, "BTC/USDT", should_match))

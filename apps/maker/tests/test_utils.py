@@ -56,11 +56,11 @@ def test_is_orderbatch_message(order_batch_1: OrderBatchMessage):
 
 def test_order_from_ccxt(order_1: OrderMessage):
     """Test conversion from CCXT order to OrderMessage."""
-    exchange_name = "gate"
+    exchange_name = "exchange_b"
     order_ccxt = {
         "id": "_",
         "clientOrderId": "t-2025_lab_eb",
-        "symbol": "ALPH/USDT",
+        "symbol": "TEST/USDT",
         "side": "sell",
         "price": "100",
         "amount": "10",

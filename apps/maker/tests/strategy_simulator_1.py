@@ -22,11 +22,11 @@ order_no: int = 0
 
 order_1: dict[str, str] = {
     "kind": "order",
-    "strategy": "ALPH",
-    "exchange": "bitget",
-    "id": f"gate_{datetime.now():%M:%S:%f}",
+    "strategy": "TEST",
+    "exchange": "exchange_a",
+    "id": f"exchange_b_{datetime.now():%M:%S:%f}",
     "exchange_id": "_",
-    "pair": "ALPH/USDT",
+    "pair": "TEST/USDT",
     "side": "sell",
     "order_type": "replace",
     "price": "100",
@@ -35,18 +35,18 @@ order_1: dict[str, str] = {
 
 cancellation_1: dict[str, str] = {
     "kind": "cancellation",
-    "strategy": "ALPH",
-    "exchange": "bitget",
+    "strategy": "TEST",
+    "exchange": "exchange_a",
     "id": order_1["id"],
-    "pair": "ALPH/USDT",
+    "pair": "TEST/USDT",
 }
 order_2: dict[str, str] = {
     "kind": "order",
-    "strategy": "ALPH2",
-    "exchange": "bitget",
-    "id": f"gate_{datetime.now():%M:%S:%f}",
+    "strategy": "TEST2",
+    "exchange": "exchange_a",
+    "id": f"exchange_b_{datetime.now():%M:%S:%f}",
     "exchange_id": "_",
-    "pair": "ALPH/USDT",
+    "pair": "TEST/USDT",
     "side": "buy",
     "order_type": "replace",
     "price": "0.01",
@@ -55,19 +55,19 @@ order_2: dict[str, str] = {
 
 cancellation_2: dict[str, str] = {
     "kind": "cancellation",
-    "strategy": "ALPH2",
-    "exchange": "bitget",
+    "strategy": "TEST2",
+    "exchange": "exchange_a",
     "id": order_2["id"],
-    "pair": "ALPH/USDT",
+    "pair": "TEST/USDT",
 }
 
 order_3 = OrderMessage(
     kind=MessageType.ORDER,
-    strategy="ALPH_es",
-    exchange="bitget",
-    id=f"t-{datetime.now()::%M:%S:%f}_ALPH_es",
+    strategy="TEST_es",
+    exchange="exchange_a",
+    id=f"t-{datetime.now()::%M:%S:%f}_TEST_es",
     exchange_id="_",
-    pair="ALPH/USDT",
+    pair="TEST/USDT",
     side=OrderSide.SELL,
     order_type=OrderType.REPLACE,
     price=Decimal(100),
@@ -76,19 +76,19 @@ order_3 = OrderMessage(
 
 cancellation_3 = CancellationMessage(
     kind=MessageType.CANCELLATION,
-    strategy="ALPH_eb",
-    exchange="bitget",
+    strategy="TEST_eb",
+    exchange="exchange_a",
     id=order_3["id"],
-    pair="ALPH/USDT",
+    pair="TEST/USDT",
 )
 
 order_4 = OrderMessage(
     kind=MessageType.ORDER,
-    strategy="ALPH_es",
-    exchange="bitget",
-    id=f"t-{datetime.now()::%M:%S:%f}_ALPH_es",
+    strategy="TEST_es",
+    exchange="exchange_a",
+    id=f"t-{datetime.now()::%M:%S:%f}_TEST_es",
     exchange_id="_",
-    pair="ALPH/USDT",
+    pair="TEST/USDT",
     side=OrderSide.SELL,
     order_type=OrderType.REPLACE,
     price=Decimal(100.00001),
@@ -97,10 +97,10 @@ order_4 = OrderMessage(
 
 cancellation_4 = CancellationMessage(
     kind=MessageType.CANCELLATION,
-    strategy="ALPH_es",
-    exchange="bitget",
+    strategy="TEST_es",
+    exchange="exchange_a",
     id=order_3["id"],
-    pair="ALPH/USDT",
+    pair="TEST/USDT",
 )
 
 r.publish(channel, json.dumps(dict(order_1), default=str))
