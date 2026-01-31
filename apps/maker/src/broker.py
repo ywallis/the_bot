@@ -1,5 +1,3 @@
-"""Module for handling broker operations and order execution."""
-
 import asyncio
 import json
 import logging

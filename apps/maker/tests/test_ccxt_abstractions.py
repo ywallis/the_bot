@@ -1,5 +1,3 @@
-"""Tests for CCXT abstraction functions."""
-
 from decimal import Decimal
 import pytest
 from unittest.mock import AsyncMock
@@ -14,7 +12,6 @@ from apps.maker.src.ccxt_abstractions import create_and_return_order
     (OrderType.REPLACE, "limit"),
 ])
 async def test_create_and_return_order_type(order_kind, expected_type):
-    """Test creating an order with different order types."""
     # Mock order
 
     order = OrderMessage(

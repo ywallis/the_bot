@@ -1,3 +1,0 @@
-[submodule "apps/strategies"]
-	path = apps/strategies
-	url = git@github.com:ywallis/htf-strategies.git

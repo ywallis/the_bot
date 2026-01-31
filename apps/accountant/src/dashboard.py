@@ -1,9 +1,3 @@
-"""
-Dashboard module for displaying daily and monthly performance.
-
-This module executes SQL queries to fetch performance metrics for each trading pair.
-"""
-
 from psycopg import sql
 
 from apps.accountant.src.sql_connector import QueryLoader, send_sql_query

@@ -1,19 +1,9 @@
-"""Module for configuring logging."""
-
 import logging
 
 from pythonjsonlogger.json import JsonFormatter
 
 
 def setup_logging(log_file="app.log"):
-    """
-    Set up logging with JSON formatting for console and file output.
-
-    Parameters
-    ----------
-    log_file : str, optional
-        The path to the log file. Defaults to "app.log".
-    """
     logger = logging.getLogger()
 
     # Prevent duplicate handlers

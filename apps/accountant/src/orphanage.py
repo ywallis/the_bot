@@ -1,5 +1,3 @@
-"""Module for handling orphan orders."""
-
 import asyncio
 import logging
 
@@ -22,17 +20,6 @@ logger = logging.getLogger(__name__)
 
 
 async def get_orphans(clients: dict[str, CustomExchange]):
-    """
-    Identify and reconcile orphan orders.
-
-    Queries the database for orphans, fetches their status from the exchange,
-    and updates the database.
-
-    Parameters
-    ----------
-    clients : dict[str, CustomExchange]
-        Authenticated exchange clients.
-    """
     query_loader = QueryLoader()
     query_loader.load_queries()
     orphans = query_loader.get_query("find_orphans")
@@ -77,7 +64,6 @@ async def get_orphans(clients: dict[str, CustomExchange]):
 
 
 async def main():
-    """Execute the orphan reconciliation process."""
     await get_orphans(authenticated_clients)
     for client in authenticated_clients.values():
         await client.close()

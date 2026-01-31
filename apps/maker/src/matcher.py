@@ -1,5 +1,3 @@
-"""Module for matching orders across exchanges."""
-
 import asyncio
 import copy
 import json
@@ -33,21 +31,6 @@ logger = logging.getLogger(__name__)
 async def process_order_update(
     redis: Redis, origin_client_id: str, matching_client_id: str, order: dict[str, str]
 ):
-    """Calculate and trigger a matching order.
-
-    Adjusts quantity based on fees and minimum order size.
-
-    Parameters
-    ----------
-    redis : Redis
-        The Redis client.
-    origin_client_id : str
-        The ID of the client where the order originated.
-    matching_client_id : str
-        The ID of the client to place the matching order on.
-    order : dict[str, str]
-        The order details.
-    """
     native_asset_fee = {"bitget": 0.001, "gate": 0.001}
     quantity = float(order["filled"])
     price = float(order["price"])
@@ -75,19 +58,6 @@ async def send_match_order(
     order: dict[str, str],
     adjusted_quantity: float,
 ):
-    """Publish the matching order to Redis.
-
-    Parameters
-    ----------
-    redis : Redis
-        The Redis client.
-    matching_client_id : str
-        The ID of the client to place the order on.
-    order : dict[str, str]
-        The original order details.
-    adjusted_quantity : float
-        The calculated quantity for the matching order.
-    """
     if order["side"] == "sell":
         side = OrderSide.BUY
     else:
@@ -114,19 +84,6 @@ async def send_match_order(
 async def watch_orders(
     redis: Redis, client: CustomExchange, ticker: str, should_match: dict[str, str]
 ):
-    """Monitor orders on an exchange and trigger matching if conditions are met.
-
-    Parameters
-    ----------
-    redis : Redis
-        The Redis client.
-    client : CustomExchange
-        The exchange client to watch.
-    ticker : str
-        The trading pair symbol.
-    should_match : dict[str, str]
-        A mapping of strategy identifiers to target matching exchanges.
-    """
     since = datetime.now(timezone.utc)
     timestamp = int(since.timestamp() * 1000)
     recently_processed_orders = LimitedSet(100)
@@ -182,13 +139,6 @@ async def watch_orders(
 
 
 async def main(clients: dict[str, CustomExchange]):
-    """Initialize and run the order matching service.
-
-    Parameters
-    ----------
-    clients : dict[str, CustomExchange]
-        Dictionary of authenticated exchange clients.
-    """
     config = load_config()
     exchange_and_pair: set[tuple[str, str]] = set()
 

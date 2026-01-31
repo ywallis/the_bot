@@ -1,5 +1,3 @@
-"""Module for matching imbalances by placing orders."""
-
 import asyncio
 from decimal import Decimal
 
@@ -16,14 +14,6 @@ from apps.shared.src.structs import CustomExchange
 
 
 def currency_picker() -> str:
-    """
-    Prompt the user to select a currency pair.
-
-    Returns
-    -------
-    str
-        The selected currency pair.
-    """
     while True:
         currency = input("Enter the token pair to be matched: ")
 
@@ -32,14 +22,6 @@ def currency_picker() -> str:
 
 
 def date_picker() -> str:
-    """
-    Prompt the user to select a date for matching orders.
-
-    Returns
-    -------
-    str
-        The selected date string modified for matching.
-    """
     loop = True
     date_mod = ""
     date = ""
@@ -60,19 +42,6 @@ def date_picker() -> str:
 
 
 def client_picker(clients: dict[str, CustomExchange]):
-    """
-    Prompt the user to select an exchange client.
-
-    Parameters
-    ----------
-    clients : dict[str, CustomExchange]
-        Available exchange clients.
-
-    Returns
-    -------
-    CustomExchange
-        The selected client.
-    """
     print(f"Available exchanges are: {[name for name in clients]}")
     while True:
         choice = input("Enter name of client you want to match on: ")
@@ -84,25 +53,11 @@ def client_picker(clients: dict[str, CustomExchange]):
 
 
 async def client_closer(clients: dict[str, CustomExchange]):
-    """
-    Close all exchange client connections.
-
-    Parameters
-    ----------
-    clients : dict[str, CustomExchange]
-        The exchange clients to close.
-    """
     for client in clients.values():
         await client.close()
 
 
 async def main():
-    """
-    Execute the matcher module.
-
-    Loads configuration, identifies imbalances, constructs remedial orders,
-    and executes them after user confirmation.
-    """
     pg_config = load_pg_config()
 
     # Initialize QueryLoader

@@ -1,5 +1,3 @@
-"""Module for tracking exchange balances."""
-
 import asyncio
 import json
 import logging

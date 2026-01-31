@@ -1,5 +1,3 @@
-"""Simulator script 1 for strategy order generation."""
-
 from decimal import Decimal
 import time
 from redis import Redis

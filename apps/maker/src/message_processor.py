@@ -1,5 +1,3 @@
-"""Module for processing and routing messages."""
-
 import ast
 import asyncio
 import json
@@ -39,33 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 class MessageProcessor:
-    """
-    Central message processor for the maker application.
-
-    Handles message routing, locking strategies, and communicating with the broker.
-
-    Attributes
-    ----------
-    pool : ConnectionPool
-        Redis connection pool.
-    redis : Redis
-        Redis client.
-    redis_pubsub : PubSub
-        Redis PubSub client.
-    locks : dict
-        Locks for each strategy to prevent race conditions.
-    message_queue : dict
-        Queued messages for each strategy.
-    open_orders : dict[str, OrderMessage]
-        Tracked open orders by strategy.
-    tasks : list
-        List of running asyncio tasks.
-    shutdown_event : asyncio.Event
-        Event to signal shutdown.
-    """
-
     def __init__(self):
-        """Initialize the MessageProcessor."""
         self.pool = ConnectionPool(
             host=REDIS_HOSTNAME, port=REDIS_PORT, db=0, max_connections=20
         )
@@ -82,14 +54,6 @@ class MessageProcessor:
         self.shutdown_event = asyncio.Event()
 
     async def block_and_shutdown(self, tasks_to_cancel: list[asyncio.Task]):
-        """
-        Cancel all open tasks and shutdown.
-
-        Parameters
-        ----------
-        tasks_to_cancel : list[asyncio.Task]
-            List of tasks to explicitly cancel.
-        """
         logger.info("Cancelling all open tasks")
         # Shut down listener and collector
         for task in tasks_to_cancel:
@@ -102,7 +66,6 @@ class MessageProcessor:
         logger.info("All open tasks sucessfully closed")
 
     async def cancel_all_open(self):
-        """Cancel all open orders tracked by the processor."""
         all_cancellation: list[asyncio.Task] = []
 
         for order in self.open_orders.values():
@@ -115,14 +78,6 @@ class MessageProcessor:
         logger.info("All open orders sucessfully cancelled")
 
     async def get_open_orders(self):
-        """
-        Fetch all open orders from the broker.
-
-        Returns
-        -------
-        dict[str, OrderMessage]
-            Dictionary of open orders keyed by strategy.
-        """
         open_orders = {}
         trigger = OrderMessage(
             kind=MessageType.ORDER,
@@ -136,12 +91,13 @@ class MessageProcessor:
             price=Decimal(0),
             amount=Decimal(0),
         )
-        await self.redis.publish(BROKER_CHANNEL, json.dumps(dict(trigger), default=str))
-
         logger.info("Asking broker for all open orders.")
         async with self.redis.pubsub() as pubsub:
             logger.debug("Waiting for answer on channel INIT")
             await pubsub.subscribe("INIT")
+
+            await self.redis.publish(BROKER_CHANNEL, json.dumps(dict(trigger), default=str))
+
             async for message in pubsub.listen():
                 if message["type"] == "message":
                     response = message["data"]
@@ -161,19 +117,6 @@ class MessageProcessor:
     def replace_queued_value(
         self, msg: OrderMessage | CancellationMessage | OrderBatchMessage
     ):
-        """
-        Replace a message in the queue for a strategy.
-
-        Parameters
-        ----------
-        msg : OrderMessage | CancellationMessage | OrderBatchMessage
-            The new message to queue.
-
-        Returns
-        -------
-        str
-            The ID of the replaced message.
-        """
         strategy: str = msg["strategy"]
         prior = copy(self.message_queue[strategy])
         logger.debug(f"Replacing {prior['id']} with {msg['id']}")
@@ -181,51 +124,28 @@ class MessageProcessor:
         return prior["id"]
 
     def get_lock(self, strategy: str):
-        """
-        Get or create a lock for a strategy/signal type.
-
-        Parameters
-        ----------
-        strategy : str
-            The strategy identifier.
-
-        Returns
-        -------
-        asyncio.Lock
-            The lock for the strategy.
-        """
+        """Get or create a lock for a strategy/signal type."""
         if strategy not in self.locks:
             self.locks[strategy] = asyncio.Lock()
             logger.debug(f"No lock found, creating one for {strategy}")
         return self.locks[strategy]
 
     async def send_to_broker(self, msg: OrderMessage | CancellationMessage) -> Response:
-        """
-        Send a message to the broker via Redis and wait for a response.
-
-        Parameters
-        ----------
-        msg : OrderMessage | CancellationMessage
-            The message to send.
-
-        Returns
-        -------
-        Response
-            The response from the broker.
-        """
         flattened = json.dumps(dict(msg), default=str)
 
         # Now using context manager to ensure redis instances are dropped.
 
         response: str = ""
 
-        await self.redis.publish(BROKER_CHANNEL, flattened)
-
-        logger.info(
-            f"Sending message with id {msg['id']} and type {msg['kind']} to broker."
-        )
         async with self.redis.pubsub() as pubsub:
             await pubsub.subscribe(msg["id"])
+
+            await self.redis.publish(BROKER_CHANNEL, flattened)
+
+            logger.info(
+                f"Sending message with id {msg['id']} and type {msg['kind']} to broker."
+            )
+
             async for message in pubsub.listen():
                 if message["type"] == "message":
                     response = message["data"]
@@ -238,24 +158,8 @@ class MessageProcessor:
         return identify_response(response)
 
     async def place_order(self, msg: OrderMessage) -> OrderMessage:
-        """
-        Send an order object to the broker and expect a confirmation.
+        """Sends an order object to the broker and expects a confirmation."""
 
-        Parameters
-        ----------
-        msg : OrderMessage
-            The order message.
-
-        Returns
-        -------
-        OrderMessage
-            The confirmed order message.
-
-        Raises
-        ------
-        BrokerError
-            If the broker returns an invalid response.
-        """
         logger.debug(f"Sending {msg['id']} to broker")
         confirmation: Response = await self.send_to_broker(msg)
 
@@ -272,24 +176,8 @@ class MessageProcessor:
             )
 
     async def place_cancellation(self, order: CancellationMessage) -> bool:
-        """
-        Send a cancellation to the broker and expect a confirmation.
+        """Sends an order object to the broker and expects a confirmation."""
 
-        Parameters
-        ----------
-        order : CancellationMessage
-            The cancellation message.
-
-        Returns
-        -------
-        bool
-            True if successful.
-
-        Raises
-        ------
-        BrokerError
-            If the broker returns an invalid response.
-        """
         logger.debug(f"Cancelling {order['id']} with broker")
         confirmation: Response = await self.send_to_broker(order)
 
@@ -302,19 +190,8 @@ class MessageProcessor:
     async def process_message(
         self, msg: OrderMessage | CancellationMessage | OrderBatchMessage | None
     ):
-        """
-        Process the message if the lock is available.
+        """Process the message if the lock is available."""
 
-        Parameters
-        ----------
-        msg : OrderMessage | CancellationMessage | OrderBatchMessage | None
-            The message to process.
-
-        Returns
-        -------
-        str | None
-            Status string or None if message is invalid.
-        """
         if msg is None:
             logger.error(f"Invalid parsing for message {msg}")
             return
@@ -406,6 +283,7 @@ class MessageProcessor:
 
     async def listen_to_redis(self):
         """Subscribe to Redis and process messages."""
+
         pubsub = self.redis.pubsub()
         await pubsub.subscribe(
             MESSAGE_PROCESSOR_CHANNEL
@@ -442,11 +320,6 @@ class MessageProcessor:
 
 
 async def main():
-    """
-    Execute the message processor service.
-
-    Initializes the processor, loads existing orders, and starts listeners.
-    """
     logger.debug("Message processor starting")
     processor = MessageProcessor()
 

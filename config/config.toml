@@ -1,0 +1,197 @@
+refresh_speed = 0.01
+
+[[strategies]]
+symbol = "ALPH/USDT"
+type = "single_edge_liquidity"
+identifier = "lam"
+exchange_1 = "gate"
+exchange_2 = "mexc"
+taker_exchange = "gate"
+maker_exchange = "mexc"
+should_match = true
+spread = 1.0025
+min_size_usdt = 11
+max_size_usdt = 100
+production = true
+
+[[strategies]]
+symbol = "ALPH/USDT"
+type = "single_edge_liquidity"
+identifier = "lab"
+exchange_1 = "gate"
+exchange_2 = "bitget"
+taker_exchange = "gate"
+maker_exchange = "bitget"
+should_match = true
+spread = 1.0035
+min_size_usdt = 11
+max_size_usdt = 100
+production = true
+
+[[strategies]]
+symbol = "ALPH/USDT"
+type = "fake_maker"
+identifier = "fam"
+exchange_1 = "gate"
+exchange_2 = "mexc"
+taker_exchange = "gate"
+maker_exchange = "mexc"
+should_match = true
+min_spread = 1.0025
+spread = 1.005
+liquidity_utilization = 0.9
+min_size_usdt = 11
+max_size_usdt = 100
+production = true
+
+[[strategies]]
+symbol = "ALPH/USDT"
+type = "fake_maker"
+identifier = "fab"
+exchange_1 = "gate"
+exchange_2 = "bitget"
+taker_exchange = "gate"
+maker_exchange = "bitget"
+should_match = true
+min_spread = 1.0035
+spread = 1.005
+liquidity_utilization = 0.9
+min_size_usdt = 11
+max_size_usdt = 100
+production = true
+
+[[strategies]]
+symbol = "ALPH/USDT"
+type = "take_take"
+identifier = "tam"
+exchange_1 = "gate"
+exchange_2 = "mexc"
+spread = 1.0035
+sizing = 0.8
+min_size_usdt = 11
+max_size_usdt = 50
+production = true
+
+[[strategies]]
+symbol = "ALPH/USDT"
+type = "take_take"
+identifier = "tab"
+exchange_1 = "gate"
+exchange_2 = "bitget"
+spread = 1.0035
+sizing = 0.8
+min_size_usdt = 11
+max_size_usdt = 50
+production = true
+
+[[strategies]]
+symbol = "HYPE/USDT"
+type = "single_edge_liquidity"
+identifier = "lhb"
+exchange_1 = "gate"
+exchange_2 = "bitget"
+taker_exchange = "gate"
+maker_exchange = "bitget"
+should_match = true
+spread = 1.0030
+min_size_usdt = 11
+max_size_usdt = 50
+production = true
+
+[[strategies]]
+symbol = "HYPE/USDT"
+type = "single_edge_liquidity"
+identifier = "lhm"
+exchange_1 = "gate"
+exchange_2 = "mexc"
+taker_exchange = "gate"
+maker_exchange = "mexc"
+should_match = true
+spread = 1.0025
+min_size_usdt = 11
+max_size_usdt = 50
+production = true
+
+[[strategies]]
+symbol = "HYPE/USDT"
+type = "take_take"
+identifier = "thb"
+exchange_1 = "gate"
+exchange_2 = "bitget"
+spread = 1.0035
+sizing = 1
+min_size_usdt = 11
+max_size_usdt = 11
+production = true
+
+[[strategies]]
+symbol = "HYPE/USDT"
+type = "take_take"
+identifier = "thm"
+exchange_1 = "gate"
+exchange_2 = "mexc"
+spread = 1.0035
+sizing = 1
+min_size_usdt = 11
+max_size_usdt = 11
+production = true
+
+[[strategies]]
+symbol = "HYPE/USDT"
+type = "fake_maker"
+identifier = "fhb"
+exchange_1 = "gate"
+exchange_2 = "bitget"
+taker_exchange = "gate"
+maker_exchange = "bitget"
+should_match = true
+min_spread = 1.0035
+spread = 1.004
+liquidity_utilization = 1
+min_size_usdt = 11
+max_size_usdt = 50
+production = true
+
+[[strategies]]
+symbol = "HYPE/USDT"
+type = "fake_maker"
+identifier = "fhm"
+exchange_1 = "gate"
+exchange_2 = "mexc"
+taker_exchange = "gate"
+maker_exchange = "mexc"
+should_match = true
+min_spread = 1.0035
+spread = 1.004
+liquidity_utilization = 1
+min_size_usdt = 11
+max_size_usdt = 50
+production = true
+
+[[strategies]]
+symbol = "ALPH/USDT"
+type = "fake_maker"
+identifier = "fhm"
+exchange_1 = "gate"
+exchange_2 = "bitget"
+taker_exchange = "gate"
+maker_exchange = "bitget"
+should_match = true
+min_spread = 1.0035
+spread = 1.02
+liquidity_utilization = 1
+min_size_usdt = 11
+max_size_usdt = 11
+production = false
+
+[[exchanges]]
+name = "Gate.io"
+id = "gate"
+
+[[exchanges]]
+name = "Mexc"
+id = "mexc"
+
+[[exchanges]]
+name = "Bitget"
+id = "bitget"

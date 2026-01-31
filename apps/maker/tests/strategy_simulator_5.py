@@ -1,5 +1,3 @@
-"""Simulator script 5 for strategy order generation."""
-
 from decimal import Decimal
 from redis import Redis
 import json

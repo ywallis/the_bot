@@ -1,1 +1,0 @@
-"""Accountant application package."""

@@ -1,5 +1,3 @@
-"""Module for watching order books."""
-
 import asyncio
 import json
 import logging
@@ -25,18 +23,6 @@ logger = logging.getLogger(__name__)
 
 
 async def watch_ob(client: CustomExchange, ticker: str, redis: Redis):
-    """
-    Watch the order book for a given ticker and update Redis.
-
-    Parameters
-    ----------
-    client : CustomExchange
-        The exchange client.
-    ticker : str
-        The trading pair symbol.
-    redis : Redis
-        The Redis client.
-    """
     while True:
         try:
             order_book = await client.watch_order_book(ticker)
@@ -74,16 +60,6 @@ async def watch_ob(client: CustomExchange, ticker: str, redis: Redis):
 
 
 async def main(config_tuples: set[tuple[str, str]], clients: dict[str, CustomExchange]):
-    """
-    Initialize watchers for all configured pairs.
-
-    Parameters
-    ----------
-    config_tuples : set[tuple[str, str]]
-        Set of (exchange_name, ticker) tuples.
-    clients : dict[str, CustomExchange]
-        Dictionary of exchange clients.
-    """
     pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=20)
     redis = Redis(decode_responses=True, connection_pool=pool)
 

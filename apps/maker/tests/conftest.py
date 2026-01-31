@@ -1,5 +1,3 @@
-"""Fixtures for the maker app tests."""
-
 import asyncio
 import json
 from collections.abc import Awaitable
@@ -21,7 +19,6 @@ from apps.maker.src.structs import (
 
 @pytest.fixture
 def order_raw_item():
-    """Return a raw dictionary representation of an order."""
     order_raw_item: dict[str, str] = {
         "kind": "order",
         "strategy": "ALPH_gate",
@@ -39,20 +36,18 @@ def order_raw_item():
 
 @pytest.fixture
 def order_raw(order_raw_item: dict[str, str]):
-    """Return a copy of the raw order item."""
     return deepcopy(order_raw_item)
 
 
 @pytest.fixture
 def order_raw_string(order_raw_item: dict[str, str]):
-    """Return a JSON string representation of the raw order item."""
     order_raw_string = json.dumps(order_raw_item)
     return deepcopy(order_raw_string)
 
 
 @pytest.fixture
 def order_1():
-    """Return a deepcopy of an OrderMessage."""
+    """This fixture returns a deepcopy of an OrderMessage"""
     order_1: OrderMessage = OrderMessage(
         kind=MessageType.ORDER,
         strategy="lab_eb",
@@ -70,7 +65,6 @@ def order_1():
 
 @pytest.fixture
 def order_2():
-    """Return a deepcopy of a second OrderMessage."""
     order_2: OrderMessage = OrderMessage(
         kind=MessageType.ORDER,
         strategy="lab_eb",
@@ -88,7 +82,6 @@ def order_2():
 
 @pytest.fixture
 def order_unique_1():
-    """Return a deepcopy of a unique OrderMessage."""
     order_unique_1: OrderMessage = OrderMessage(
         kind=MessageType.ORDER,
         strategy="ALPH_gate",
@@ -106,7 +99,6 @@ def order_unique_1():
 
 @pytest.fixture
 def order_batch_1(order_1: OrderMessage, order_2: OrderMessage):
-    """Return a deepcopy of an OrderBatchMessage."""
     order_batch_1: OrderBatchMessage = OrderBatchMessage(
         kind=MessageType.ORDERBATCH,
         strategy="ALPH_gate",
@@ -118,7 +110,6 @@ def order_batch_1(order_1: OrderMessage, order_2: OrderMessage):
 
 @pytest.fixture
 def empty_open_orders():
-    """Return a deepcopy of an empty OrderBatchMessage."""
     order_batch_empty: OrderBatchMessage = OrderBatchMessage(
         kind=MessageType.ORDERBATCH,
         strategy="INIT",
@@ -130,7 +121,6 @@ def empty_open_orders():
 
 @pytest.fixture
 def order_batch_raw(order_raw_string: str):
-    """Return a raw dictionary representation of an order batch."""
     order_batch_1 = {
         "kind": "orderbatch",
         "strategy": "ALPH_gate",
@@ -142,7 +132,6 @@ def order_batch_raw(order_raw_string: str):
 
 @pytest.fixture
 def cancellation_1():
-    """Return a deepcopy of a CancellationMessage."""
     cancellation_1: CancellationMessage = CancellationMessage(
         kind=MessageType.CANCELLATION,
         strategy="lab_eb",
@@ -157,8 +146,6 @@ def cancellation_1():
 def order_response_positive() -> Callable[
     [OrderMessage | CancellationMessage], Response
 ]:
-    """Return a factory for positive responses."""
-
     def _factory(msg: OrderMessage | CancellationMessage):
         order_response_positive: Response = Response(
             kind=MessageType.ORDER, text=f'{{"id": "{msg["id"]}mock_response"}}'
@@ -174,8 +161,6 @@ async def fake_send_to_broker_positive(
         [OrderMessage | CancellationMessage], Awaitable[Response]
     ],
 ) -> Callable[[OrderMessage | CancellationMessage], Awaitable[Awaitable[Response]]]:
-    """Return an async callable simulating a positive broker response."""
-
     async def _fake_send_to_broker_positive(msg: OrderMessage | CancellationMessage):
         return order_response_positive(msg)
 
@@ -184,8 +169,6 @@ async def fake_send_to_broker_positive(
 
 @pytest_asyncio.fixture
 async def fake_send_to_broker_negative() -> Callable[[str], Awaitable[Response]]:
-    """Return an async callable simulating a negative broker response."""
-
     async def _fake_send_to_broker_positive(_msg):
         return Response(kind=MessageType.ERROR, text="error")
 
@@ -195,10 +178,53 @@ async def fake_send_to_broker_negative() -> Callable[[str], Awaitable[Response]]
 # A dummy asynchronous task that completes quickly.
 @pytest_asyncio.fixture
 async def dummy_task() -> Callable[[], Awaitable[str]]:
-    """Return a dummy async task."""
-
     async def _dummy_task():
         await asyncio.sleep(0.1)
         return "dummy result"
 
     return _dummy_task
+
+
+@pytest.fixture
+def base_strategy():
+    return {
+        "refresh_speed": "0.01",
+        "symbol": "BTC/USDT",
+        "identifier": "test_strategy",
+        "maker_exchange": "maker",
+        "taker_exchange": "taker",
+        "spread": "1.005",
+        "min_size_usdt": "10",
+        "max_size_usdt": "100000",
+    }
+
+
+@pytest.fixture
+def base_strategy_fm():
+    return {
+        "refresh_speed": "0.01",
+        "symbol": "BTC/USDT",
+        "identifier": "test_strategy",
+        "maker_exchange": "maker",
+        "taker_exchange": "taker",
+        "spread": "1.01",
+        "liquidity_utilization": "1",
+        "min_spread": "1.005",
+        "min_size_usdt": "10",
+        "max_size_usdt": "1000000",
+    }
+
+
+@pytest.fixture
+def base_strategy_tt():
+    return {
+        "refresh_speed": "0.01",
+        "symbol": "BTC/USDT",
+        "identifier": "test_strategy",
+        "exchange_1": "gate",
+        "exchange_2": "coinbase",
+        "spread": "1.005",
+        "sizing": "0.8",
+        "min_size_usdt": "10",
+        "max_size_usdt": "100000",
+    }

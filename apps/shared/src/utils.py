@@ -1,5 +1,3 @@
-"""Utility functions for the shared application."""
-
 import os
 import tomllib
 from pathlib import Path
@@ -11,17 +9,7 @@ from dotenv import load_dotenv
 
 
 def load_config():
-    """
-    Load the configuration from the TOML file.
-
-    Returns
-    -------
-    dict
-        The configuration dictionary.
-    """
-    CONFIG_PATH = (
-        Path(__file__).parents[3] / "apps" / "strategies" / "config" / "config.toml"
-    )
+    CONFIG_PATH = Path(__file__).parents[3] / "config" / "config.toml"
     with open(CONFIG_PATH, "rb") as f:
         config = tomllib.load(f)
         return config

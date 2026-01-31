@@ -1,5 +1,3 @@
-"""Module containing enumerations for the maker application."""
-
 from enum import Enum
 
 

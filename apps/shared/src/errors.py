@@ -1,9 +1,3 @@
-"""
-Module re-exporting common exceptions for shared use.
-
-This module aggregates exceptions from `asyncio` and `ccxt` to provide a single import point.
-"""
-
 from asyncio.exceptions import CancelledError as CancelledError
 
 from ccxt.async_support import BadRequest as BadRequest

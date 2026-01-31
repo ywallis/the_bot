@@ -1,5 +1,3 @@
-"""Module for exporting order and trade data to SQL."""
-
 import asyncio
 import logging
 
@@ -21,17 +19,6 @@ logger = logging.getLogger(__name__)
 
 
 async def loop(pg_config: dict[str, str]):
-    """
-    Continuously retrieve and export data from exchanges.
-
-    Fetches orders and trades for configured pairs and exports them to SQL.
-    Also handles orphans.
-
-    Parameters
-    ----------
-    pg_config : dict[str, str]
-        PostgreSQL configuration dictionary.
-    """
     while True:
         try:
             for exchange_name, pair in exchange_and_pair:
@@ -59,14 +46,6 @@ async def loop(pg_config: dict[str, str]):
 
 
 async def main(pg_config: dict[str, str]):
-    """
-    Initialize clients and start the export loop.
-
-    Parameters
-    ----------
-    pg_config : dict[str, str]
-        PostgreSQL configuration dictionary.
-    """
     await load_clients()
     await loop(pg_config)
 
