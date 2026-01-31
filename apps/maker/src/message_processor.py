@@ -52,6 +52,7 @@ class MessageProcessor:
         ] = {}  # Keep track of last open order (could be cleaned up by the websocket watcher?)
         self.tasks = []
         self.shutdown_event = asyncio.Event()
+        self.processing_semaphore = asyncio.Semaphore(5)
 
     async def block_and_shutdown(self, tasks_to_cancel: list[asyncio.Task]):
         logger.info("Cancelling all open tasks")
@@ -66,15 +67,14 @@ class MessageProcessor:
         logger.info("All open tasks sucessfully closed")
 
     async def cancel_all_open(self):
-        all_cancellation: list[asyncio.Task] = []
-
         for order in self.open_orders.values():
             cancellation_message = cancellation_from_order(order)
             logger.info(f"Winding down, cancelling order {order}")
-            all_cancellation.append(
-                asyncio.create_task(self.place_cancellation(cancellation_message))
-            )
-        await asyncio.gather(*all_cancellation)
+            try:
+                await self.place_cancellation(cancellation_message)
+            except Exception as e:
+                logger.error(f"Failed to cancel order {order}: {e}")
+
         logger.info("All open orders sucessfully cancelled")
 
     async def get_open_orders(self):
@@ -191,95 +191,95 @@ class MessageProcessor:
         self, msg: OrderMessage | CancellationMessage | OrderBatchMessage | None
     ):
         """Process the message if the lock is available."""
+        async with self.processing_semaphore:
+            if msg is None:
+                logger.error(f"Invalid parsing for message {msg}")
+                return
 
-        if msg is None:
-            logger.error(f"Invalid parsing for message {msg}")
-            return
+            strategy: str = msg["strategy"]
+            lock: asyncio.Lock = self.get_lock(strategy)
 
-        strategy: str = msg["strategy"]
-        lock: asyncio.Lock = self.get_lock(strategy)
+            # Checking for lock (order confirmation pending) first
 
-        # Checking for lock (order confirmation pending) first
+            if lock.locked():
+                logger.debug(
+                    f"Order already processing, queuing order: {msg['id']} for strategy {strategy}"
+                )
 
-        if lock.locked():
-            logger.debug(
-                f"Order already processing, queuing order: {msg['id']} for strategy {strategy}"
-            )
+                if strategy in self.message_queue:
+                    replaced_value = self.replace_queued_value(msg)
+
+                    return f"{datetime.now():%M:%S:%f} {msg['id']} replaced {replaced_value} in queue"
+
+                else:
+                    self.message_queue[strategy] = msg
+
+                    return f"{datetime.now():%M:%S:%f} {msg['id']} was queued"
+
+            async with lock:
+                logger.debug(f"Processing {strategy} message: {msg['id']}")
+
+                # This is where the order / cancellation happens.
+
+                # If an open order exists for the relevant strategy, cancel it. If it doesn't, do nothing but note it.
+
+                if msg["kind"] == MessageType.ORDERBATCH:
+                    order_batch = cast(OrderBatchMessage, msg)
+                    logger.debug(f"Processing order batch {msg['id']}")
+                    order_tasks: list[Awaitable] = []
+                    for order in order_batch["orders"]:
+                        order_tasks.append(self.place_order(order))
+
+                    await asyncio.gather(*order_tasks)
+
+                if msg["kind"] == MessageType.CANCELLATION:
+                    if strategy in self.open_orders:
+                        logger.debug(
+                            f"Cancelling order {self.open_orders[strategy]['id']} for strategy {strategy}"
+                        )
+
+                        cancellation = cancellation_from_order(self.open_orders[strategy])
+                        if await self.place_cancellation(cancellation):
+                            del self.open_orders[strategy]
+
+                    else:
+                        logger.warning("Received cancellation but no open order to cancel")
+
+                # If an open order exists, cancel it and replace it with the new one. If it doesn't, create a new one.
+                elif msg["kind"] == MessageType.ORDER:
+                    order_msg: OrderMessage = cast(OrderMessage, msg)
+
+                    if strategy in self.open_orders:
+                        logger.debug(
+                            f"Cancelling order {self.open_orders[strategy]['id']} for strategy {strategy} and replacing with order {msg['id']}"
+                        )
+
+                        cancellation = cancellation_from_order(self.open_orders[strategy])
+                        if await self.place_cancellation(cancellation):
+                            del self.open_orders[strategy]
+
+                    else:
+                        logger.debug(f"Placing order {msg['id']}")
+
+                    confirmed_order = await self.place_order(order_msg)
+                    if confirmed_order["order_type"] == OrderType.REPLACE:
+                        self.open_orders[strategy] = confirmed_order
+
+                logger.debug(f"Finished processing {strategy} message: {msg['id']}")
+
+            # This recursively starts processing for any message pending from the queue
 
             if strategy in self.message_queue:
-                replaced_value = self.replace_queued_value(msg)
+                logger.debug(
+                    f"{self.message_queue[strategy]['id']} in the queue, processing."
+                )
+                task = asyncio.create_task(
+                    self.process_message(self.message_queue[strategy])
+                )
+                self.tasks.append(task)
+                del self.message_queue[strategy]
 
-                return f"{datetime.now():%M:%S:%f} {msg['id']} replaced {replaced_value} in queue"
-
-            else:
-                self.message_queue[strategy] = msg
-
-                return f"{datetime.now():%M:%S:%f} {msg['id']} was queued"
-
-        async with lock:
-            logger.debug(f"Processing {strategy} message: {msg['id']}")
-
-            # This is where the order / cancellation happens.
-
-            # If an open order exists for the relevant strategy, cancel it. If it doesn't, do nothing but note it.
-
-            if msg["kind"] == MessageType.ORDERBATCH:
-                order_batch = cast(OrderBatchMessage, msg)
-                logger.debug(f"Processing order batch {msg['id']}")
-                order_tasks: list[Awaitable] = []
-                for order in order_batch["orders"]:
-                    order_tasks.append(self.place_order(order))
-
-                await asyncio.gather(*order_tasks)
-
-            if msg["kind"] == MessageType.CANCELLATION:
-                if strategy in self.open_orders:
-                    logger.debug(
-                        f"Cancelling order {self.open_orders[strategy]['id']} for strategy {strategy}"
-                    )
-
-                    cancellation = cancellation_from_order(self.open_orders[strategy])
-                    if await self.place_cancellation(cancellation):
-                        del self.open_orders[strategy]
-
-                else:
-                    logger.warning("Received cancellation but no open order to cancel")
-
-            # If an open order exists, cancel it and replace it with the new one. If it doesn't, create a new one.
-            elif msg["kind"] == MessageType.ORDER:
-                order_msg: OrderMessage = cast(OrderMessage, msg)
-
-                if strategy in self.open_orders:
-                    logger.debug(
-                        f"Cancelling order {self.open_orders[strategy]['id']} for strategy {strategy} and replacing with order {msg['id']}"
-                    )
-
-                    cancellation = cancellation_from_order(self.open_orders[strategy])
-                    if await self.place_cancellation(cancellation):
-                        del self.open_orders[strategy]
-
-                else:
-                    logger.debug(f"Placing order {msg['id']}")
-
-                confirmed_order = await self.place_order(order_msg)
-                if confirmed_order["order_type"] == OrderType.REPLACE:
-                    self.open_orders[strategy] = confirmed_order
-
-            logger.debug(f"Finished processing {strategy} message: {msg['id']}")
-
-        # This recursively starts processing for any message pending from the queue
-
-        if strategy in self.message_queue:
-            logger.debug(
-                f"{self.message_queue[strategy]['id']} in the queue, processing."
-            )
-            task = asyncio.create_task(
-                self.process_message(self.message_queue[strategy])
-            )
-            self.tasks.append(task)
-            del self.message_queue[strategy]
-
-        return f"{datetime.now():%M:%S:%f} {msg['id']} was processed"
+            return f"{datetime.now():%M:%S:%f} {msg['id']} was processed"
 
     async def listen_to_redis(self):
         """Subscribe to Redis and process messages."""
