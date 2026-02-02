@@ -212,9 +212,8 @@ async def test_get_open_orders(
     mock_pubsub.listen = mock_listen
 
     mock_redis.pubsub.return_value = mock_pubsub
-
-    # Inject mock into processor
-    processor.redis = mock_redis
+    # Mock `Redis` instance inside your function
+    mocker.patch("apps.maker.src.message_processor.Redis", return_value=mock_redis)
 
     # Call the function
     processor.open_orders = await processor.get_open_orders()
@@ -259,9 +258,8 @@ async def test_get_open_orders_empty(
     mock_pubsub.listen = mock_listen
 
     mock_redis.pubsub.return_value = mock_pubsub
-
-    # Inject mock into processor
-    processor.redis = mock_redis
+    # Mock `Redis` instance inside your function
+    mocker.patch("apps.maker.src.message_processor.Redis", return_value=mock_redis)
 
     # Call the function
     processor.open_orders = await processor.get_open_orders()
