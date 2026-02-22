@@ -1,9 +1,10 @@
 """Simulator script 4 for strategy order generation."""
 
-from decimal import Decimal
-from redis import Redis
 import json
 from datetime import datetime
+from decimal import Decimal
+
+from redis import Redis
 
 from apps.maker.src.constants import (
     MESSAGE_PROCESSOR_CHANNEL,
@@ -19,13 +20,13 @@ channel: str = MESSAGE_PROCESSOR_CHANNEL
 order_1 = {
     "kind": MessageType.ORDERBATCH,
     "strategy": "test_strategy_tt",
-    "id": f"t-{datetime.now().strftime("%y%m%d%H%M%S%f")}_ALPH_tt",
+    "id": f"t-{datetime.now().strftime('%y%m%d%H%M%S%f')}_ALPH_tt",
     "orders": [
         {
             "kind": MessageType.ORDER,
             "strategy": "test_strategy_tt",
-            "exchange": "gate",
-            "id": f"t-{datetime.now().strftime("%y%m%d%H%M%S%f")}_ALPH_tt",
+            "exchange": "bitget",
+            "id": f"t-{datetime.now().strftime('%y%m%d%H%M%S%f')}_ALPH_tt",
             # "id": "t-1234",
             "exchange_id": "_",
             "pair": "ALPH/USDT",
@@ -37,8 +38,8 @@ order_1 = {
         {
             "kind": MessageType.ORDER,
             "strategy": "test_strategy_tt",
-            "exchange": "gate",
-            "id": f"t-{datetime.now().strftime("%y%m%d%H%M%S%f")}_ALPH_tt",
+            "exchange": "bitget",
+            "id": f"t-{datetime.now().strftime('%y%m%d%H%M%S%f')}_ALPH_tt",
             # "id": "t-2345",
             "exchange_id": "_",
             "pair": "ALPH/USDT",
