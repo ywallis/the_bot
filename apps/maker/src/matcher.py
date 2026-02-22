@@ -135,7 +135,7 @@ async def watch_orders(
             orders: list[dict[str, str]] = await client.watch_orders(
                 ticker, since=timestamp
             )
-            orders_copy = copy.deepcopy(orders)
+            orders_copy = list(orders)
 
         except NetworkError as e:
             logger.error(
@@ -150,7 +150,7 @@ async def watch_orders(
                 logger.debug(f"Processing orders from {client.name}")
                 logger.debug(order)
 
-                order_copy = copy.deepcopy(order)
+                order_copy = order.copy()
 
                 if order_copy["status"] == "open" or order_copy["filled"] == 0:
                     logger.debug(f"Order did not meet fill conditions: {order_copy}")
