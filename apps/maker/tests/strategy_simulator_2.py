@@ -1,23 +1,28 @@
 """Simulator script 2 for strategy order generation."""
 
-from redis import Redis
 import json
 import time
 from datetime import datetime
 
-from apps.maker.src.constants import MESSAGE_PROCESSOR_CHANNEL, REDIS_HOSTNAME, REDIS_PORT
+from redis import Redis
+
+from apps.maker.src.constants import (
+    MESSAGE_PROCESSOR_CHANNEL,
+    REDIS_HOSTNAME,
+    REDIS_PORT,
+)
 
 r: Redis = Redis(host=REDIS_HOSTNAME, port=REDIS_PORT, decode_responses=True)
 
-channel: str = MESSAGE_PROCESSOR_CHANNEL 
+channel: str = MESSAGE_PROCESSOR_CHANNEL
 
 order_no: int = 0
 
 order_1: dict[str, str] = {
     "kind": "order",
-    "strategy": "ALPH_gate",
-    "exchange": "gate",
-    "id": f"t-{datetime.now().strftime("%y%m%d%H%M%S%f")}_ALPH_tt",
+    "strategy": "ALPH",
+    "exchange": "bitget",
+    "id": f"t-{datetime.now().strftime('%y%m%d%H%M%S%f')}_ALPH_tt",
     "exchange_id": "_",
     "pair": "ALPH/USDT",
     "side": "sell",
@@ -28,9 +33,9 @@ order_1: dict[str, str] = {
 
 order_2: dict[str, str] = {
     "kind": "order",
-    "strategy": "ALPH_gate",
-    "exchange": "gate",
-    "id": f"t-{datetime.now().strftime("%y%m%d%H%M%S%f")}_ALPH_tt",
+    "strategy": "ALPH",
+    "exchange": "bitget",
+    "id": f"t-{datetime.now().strftime('%y%m%d%H%M%S%f')}_ALPH_tt",
     "exchange_id": "_",
     "pair": "ALPH/USDT",
     "side": "sell",
@@ -41,8 +46,8 @@ order_2: dict[str, str] = {
 
 cancellation_1: dict[str, str] = {
     "kind": "cancellation",
-    "strategy": "ALPH_gate",
-    "exchange": "gate",
+    "strategy": "ALPH",
+    "exchange": "bitget",
     "id": order_1["id"],
     "pair": "ALPH/USDT",
 }
