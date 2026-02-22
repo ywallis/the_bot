@@ -220,7 +220,7 @@ class MessageProcessor:
 
         response: str = ""
 
-        async with Redis(connection_pool=self.pool) as redis:
+        async with self.redis as redis:
             await redis.publish(BROKER_CHANNEL, flattened)
 
             logger.info(
