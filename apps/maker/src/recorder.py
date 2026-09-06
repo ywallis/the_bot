@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 import os
+import signal
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
@@ -345,8 +346,18 @@ async def main(config: AppConfig) -> None:
         host=config.redis.host, port=config.redis.port, db=0, max_connections=4
     )
     redis = Redis(decode_responses=False, connection_pool=pool)
+
+    # The orchestrator stops processes with SIGTERM. Turn it into a task
+    # cancellation so ``Recorder.run`` reaches its ``finally`` and flushes the
+    # last buffered lines instead of dying with them in memory.
+    task = asyncio.current_task()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, lambda: task.cancel() if task else None)
     try:
         await recorder.run(redis)
+    except asyncio.CancelledError:
+        logger.info(f"Recorder stopped after {recorder.entries_written} entries")
     finally:
         await redis.aclose()
 
