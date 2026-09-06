@@ -1,52 +1,51 @@
-"""Utility functions for the shared application."""
+"""Backwards-compatible views over the typed configuration.
 
-import os
-import tomllib
+Everything here is derived from ``apps.shared.src.config``. New code should
+import ``load_app_config`` from there instead of these module globals.
+"""
+
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
-# TODO:
-# - Separate config for dev and prod
+from apps.shared.src.config import (
+    AppConfig,
+    load_app_config,
+    load_raw_config,
+    production_mode,
+)
 
 
-def load_config():
+def load_config(path: Path | None = None) -> dict[str, Any]:
     """
-    Load the configuration from the TOML file.
+    Load the configuration from the TOML file without validation.
+
+    Parameters
+    ----------
+    path : Path | None
+        Path to the TOML file. Defaults to the strategies submodule config.
 
     Returns
     -------
     dict
         The configuration dictionary.
     """
-    CONFIG_PATH = (
-        Path(__file__).parents[3] / "apps" / "strategies" / "config" / "config.toml"
-    )
-    with open(CONFIG_PATH, "rb") as f:
-        config = tomllib.load(f)
-        return config
+    return load_raw_config(path)
 
 
 # Load environment variables
 load_dotenv()
-production = os.getenv("TESTING", False) != "True"
+production: bool = production_mode()
 if production:
     print("WARNING: USING PROD STRATEGIES")
 
-exchange_and_pair: set[tuple[str, str]] = set()
-pairs: set[str] = set()
+app_config: AppConfig = load_app_config()
 
-refresh_speed: str | None = load_config().get("refresh_speed")
+refresh_speed: float | None = app_config.refresh_speed
 
-if refresh_speed is None:
-    raise Exception("Refresh speed is not defined")
-
-strategies: list[dict[str, str]] | None = load_config().get("strategies")
-if strategies is None:
-    raise Exception("No strategy found")
-strategies = list(filter(lambda x: x["production"] == production, strategies))
-for strategy in strategies:
-    exchange_and_pair.add((strategy["exchange_1"], strategy["symbol"]))
-    exchange_and_pair.add((strategy["exchange_2"], strategy["symbol"]))
-    pairs.add(strategy["symbol"])
-    strategy["refresh_speed"] = refresh_speed
+strategies: list[dict[str, Any]] = [
+    s.to_legacy_dict(refresh_speed) for s in app_config.active_strategies(production)
+]
+exchange_and_pair: set[tuple[str, str]] = app_config.venue_symbol_pairs(production)
+pairs: set[str] = app_config.symbols(production)

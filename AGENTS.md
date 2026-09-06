@@ -208,11 +208,22 @@ apps/
 │   ├── src/           # Source code
 │   └── tests/         # Test files
 ├── shared/
-│   └── src/           # Shared utilities
+│   ├── src/           # Shared utilities
+│   │   ├── config.py  # Typed config loader (msgspec). Single source of truth for config.toml
+│   │   ├── events.py  # Event schemas, JSON codec and Redis Stream names (cross-language contract)
+│   │   └── utils.py   # Backwards-compatible module globals derived from config.py
+│   └── tests/
 └── accountant/
     ├── src/
     └── tests/
 ```
+
+### Configuration and events
+
+- Read config through `apps.shared.src.config.load_app_config()`; do not parse `config.toml` elsewhere.
+- Strategies may declare `subscriptions` explicitly; legacy `exchange_1`/`exchange_2`/`symbol` keys are still derived.
+- New inter-process messages are `msgspec.Struct` events in `apps.shared.src.events` and travel on Redis Streams.
+- Design and migration plan: `docs/design/event-driven-framework.md`.
 
 ### Misc
 
