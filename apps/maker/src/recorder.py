@@ -311,7 +311,9 @@ class Recorder:
                     block=self.settings.block_ms,
                 )
                 if response:
-                    self.record_batch(response)
+                    # redis-py types XREAD as list or dict (RESP3); the client
+                    # is RESP2 here so it is always the list form.
+                    self.record_batch(cast(list[Any], response))
         finally:
             flusher.cancel()
             self.close()
