@@ -72,6 +72,14 @@ Every arrow between processes is a Redis Stream carrying a typed event. Redis
 is local to the trading host, so hop latency is around 100 microseconds and
 not a concern.
 
+The system spans two hosts. The **trading host** runs everything in the
+diagram above: watchers, OMS, strategies, Redis and the recorder. It is
+colocated with the venue for latency, so its disk, CPU and egress are all
+treated as scarce. The **archive host** holds the long-term recording and
+runs research and backtests. The two are connected over the public internet,
+not a LAN, which makes egress volume a real cost and rules out a shared
+filesystem. Section 7 describes the link between them.
+
 ### 3.1 Streams and naming
 
 | Stream                       | Producer            | Consumers                       | Notes                                   |
@@ -226,22 +234,74 @@ The order watcher (today inside `matcher.py`) becomes a feed handler that
 turns CCXT `watch_orders` updates into `OrderEvent`s. The matching logic
 consumes `oms:events` like any strategy and moves to the strategies repo.
 
-## 7. Recorder
+## 7. Recording tier
+
+Recording is two tiers on two hosts: the recorder writes a short, hot,
+uncompressed window on the trading host, and a shipper moves sealed files to
+the archive host, which is what research and the backtester read. The
+trading host is never the long-term store.
+
+### 7.1 Recorder
 
 A single process (`apps/maker/src/recorder.py`) that `XREAD`s every
 configured stream and appends entries to files partitioned by stream and UTC
-day, for example `data/md/book/gate/ALPH-USDT/2026-09-06.jsonl`. Each line is
-`{"id": <redis stream id>, "type": <tag>, "data": <payload>}`; the payload is
-copied verbatim without decoding, so the recorder never rejects an event and
-stays cheap. The day partition comes from the stream id's millisecond prefix.
-On start the recorder resumes every stream from the last id in its newest
-file, so a restart neither duplicates nor drops what Redis still holds.
+hour, for example `data/md/book/gate/ALPH-USDT/2026-09-06T14.jsonl`. Each
+line is `{"id": <redis stream id>, "type": <tag>, "data": <payload>}`; the
+payload is copied verbatim without decoding, so the recorder never rejects an
+event and stays cheap. The bucket comes from the stream id's millisecond
+prefix. On start the recorder resumes every stream from the last id in its
+newest file, so a restart neither duplicates nor drops what Redis still
+holds.
 
-Files are uncompressed for now (Python 3.12 has no zstd in the standard
-library and tailing the last line must stay trivial); compressing closed days
-offline is a separate step. Parquet can replace JSONL once the schemas are
-stable. The recorder is the only durable store for market data and is what
-research notebooks and the backtester read.
+Hourly rather than daily buckets, because the partition size sets how long
+data sits unshipped on the trading host, and because it makes a backtest over
+a sub-day range a filename filter rather than a seek. It costs nothing in
+compression: measured on real book data, the zstd ratio is flat above roughly
+300 KB per file (33.9x at 689 KB, 34.1x at 344 KB) and only degrades on
+inputs far smaller than an hour of any active feed.
+
+### 7.2 Sealed files
+
+**The newest file in a stream directory is never touched by anything but the
+recorder.** Rotation is driven by entry arrival, so a quiet stream can hold
+its file open long after the bucket elapsed; a later file existing in the
+directory is the only proof that an earlier one was closed. This single
+invariant is what keeps three separate things correct:
+
+- the recorder's open append fd is never unlinked underneath it, which would
+  send every subsequent write to an unlinked inode with no error,
+- `last_recorded_id` always has an uncompressed file to tail, so resume never
+  falls back to `0-0` and re-records what Redis still holds,
+- the shipper never transfers a file that is still being appended to.
+
+Because three components depend on it, it is one tested predicate in
+`streams.py` (`sealed_files`), not a rule each of them reimplements. The
+recorder also seals on a timer, closing a file whose bucket elapsed more than
+a grace period ago, so an idle stream does not pin its data on the trading
+host. A lagging recorder can still receive an entry belonging to a sealed
+bucket; it reopens the file in append mode, and the shipper detects the
+change by checksum rather than by existence.
+
+### 7.3 Shipper
+
+Sealed files are compressed with zstd `-3` on the trading host and
+transferred to the archive host, which recompresses to `-19` for long-term
+storage. The split follows from the measurements: `-3` is effectively free
+and already achieves 25.1x, `-10` runs at 77.6 MB/s per core, and `-19` runs
+at 2.8 MB/s for 40.3x. Spending `-19` on the trading host would cost hours of
+a core per day; spending nothing and shipping raw would cost 25x the egress
+on a metered link. Compressing cheaply before the wire and thoroughly after
+it is the only option that keeps both scarce resources bounded.
+
+A file is deleted from the trading host only once the archive host confirms
+it by checksum, so local retention is "transferred", not an age. Until the
+shipper exists there is no second copy, so nothing may be deleted and the
+trading host grows without bound: see the precondition in section 11.
+
+Uncompressed JSONL is the hot format because Python 3.12 has no stdlib zstd
+and tailing the last line must stay trivial. Parquet can replace JSONL in the
+archive tier once the schemas are stable; compaction is the natural place to
+convert.
 
 ## 8. Strategy runtime
 
@@ -266,7 +326,13 @@ Backtesting is replay plus simulation, reusing the live components:
 
 - A replayer reads recorder files and `XADD`s them into streams under a
   separate key prefix (`bt:{run_id}:`), preserving relative `ts_recv`
-  spacing or running as fast as possible.
+  spacing or running as fast as possible. It runs on the archive host and
+  resolves files through a helper that opens `.jsonl` and `.jsonl.zst`
+  interchangeably, so it never hardcodes a tier's layout. Selecting a time
+  range is a filename filter over hourly buckets; ordering across streams is
+  a merge on `ts_recv`, not on the Redis entry id, which carries publish
+  jitter and would desynchronise the merge from the `Clock`. A replay that
+  crosses a `seq` gap or reset is reported, never silently spliced.
 - A simulated broker consumes `bt:{run_id}:oms:intents`. For each intent it
   draws an arrival delay from the per-venue latency model built from
   `oms:latency` records, looks up the recorded book at `ts_created + delay`,
@@ -304,6 +370,15 @@ version, and `XADD` intents. No shared code is required. The Python
 
 Each phase leaves the system runnable with the current strategies.
 
+The shipper and the archive host (section 7.3) are not part of this sequence.
+They depend on nothing in phases 3 to 5 and block nothing in them, so they
+are scheduled against a different trigger: **the shipper must exist before
+any busy feed is added to `subscriptions`.** Until it does there is no second
+copy of the recording, so nothing on the trading host may be deleted, and the
+disk is bounded only by feed volume. At the two feeds running today that is
+roughly 250 MB/day and over a year of headroom; at ten feeds on active pairs
+it is roughly 15 GB/day and about a week.
+
 ## 12. Decisions
 
 - Redis Streams over pubsub: persistence, ordering, replay and consumer
@@ -318,10 +393,18 @@ Each phase leaves the system runnable with the current strategies.
   milliseconds, so millisecond resolution would hide the distribution.
 - Recorder as the durable store, streams trimmed: keeps Redis memory bounded
   and decouples retention from the bus.
+- Recording split across two hosts: the trading host is colocated and its
+  disk, CPU and egress are scarce, so it holds hours of data rather than
+  years. Everything durable lives on the archive host.
+- Hourly buckets and zstd `-3` local, `-19` remote: chosen from measurements
+  on real book data, see sections 7.1 and 7.3. Both follow from the link
+  between the hosts being a metered WAN rather than a LAN.
+- JSON Lines with the payload spliced in verbatim: the recorder never decodes
+  an event, so a producer can add a field without the recording tier knowing
+  about it, and a replay is byte-identical to what was on the bus.
 
 ## 13. Open questions
 
-- Retention and compression format for recorder files once volumes are known.
 - Whether the orchestrator should restart crashed processes in production
   once intents are durable and replayable.
 - Whether balances should also be published as deltas for strategies that
