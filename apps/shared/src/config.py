@@ -97,6 +97,36 @@ class RecorderConfig(msgspec.Struct, frozen=True):
     batch: int = 1000
 
 
+class OmsConfig(msgspec.Struct, frozen=True):
+    """
+    Settings for the order manager.
+
+    Attributes
+    ----------
+    consumer : str
+        Consumer name inside the ``oms`` consumer group. It is deliberately
+        stable across restarts: a restarted order manager then reclaims the
+        entries its previous incarnation read but never acknowledged, which
+        a per-process name would strand as another consumer's pending list.
+    block_ms : int
+        How long a blocking ``XREADGROUP`` waits when no intent is available.
+    batch : int
+        Maximum intents fetched per read.
+    stream_maxlen : int
+        Approximate maximum length of ``oms:events`` and ``oms:latency``.
+    max_intent_age_s : float
+        Intents older than this are rejected instead of sent to a venue.
+        Bounds the damage of a replay after a crash and of a strategy that
+        stalled between building an intent and publishing it.
+    """
+
+    consumer: str = "oms"
+    block_ms: int = 1000
+    batch: int = 100
+    stream_maxlen: int = 10_000
+    max_intent_age_s: float = 5.0
+
+
 class VenueConfig(msgspec.Struct, frozen=True):
     """
     A trading venue.
@@ -229,6 +259,8 @@ class AppConfig(msgspec.Struct, frozen=True):
         Polling interval for strategies that still read snapshot keys.
     recorder : RecorderConfig
         Stream recorder settings.
+    oms : OmsConfig
+        Order manager settings.
     """
 
     redis: RedisConfig
@@ -237,6 +269,7 @@ class AppConfig(msgspec.Struct, frozen=True):
     strategies: tuple[StrategyConfig, ...]
     refresh_speed: float | None = None
     recorder: RecorderConfig = RecorderConfig()
+    oms: OmsConfig = OmsConfig()
 
     @property
     def venue_ids(self) -> set[str]:
@@ -507,6 +540,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
         redis = msgspec.convert(raw.get("redis", {}), RedisConfig)
         market_data = msgspec.convert(raw.get("market_data", {}), MarketDataConfig)
         recorder = msgspec.convert(raw.get("recorder", {}), RecorderConfig)
+        oms = msgspec.convert(raw.get("oms", {}), OmsConfig)
         venues = msgspec.convert(raw.get("venues", []), tuple[VenueConfig, ...])
     except msgspec.ValidationError as e:
         raise ConfigError(str(e)) from e
@@ -525,6 +559,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
         strategies=tuple(_parse_strategy(s) for s in raw_strategies),
         refresh_speed=refresh_speed,
         recorder=recorder,
+        oms=oms,
     )
     _validate(config)
     return config

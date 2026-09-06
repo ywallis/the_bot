@@ -1,222 +1,354 @@
-"""Module for matching orders across exchanges."""
+"""Taker hedge for maker fills.
+
+When an order placed by a matching strategy fills on its maker venue, this
+process buys or sells the same quantity on the taker venue to flatten the
+position. Its input is ``oms:events`` and its output is an ``OrderIntent`` on
+``oms:intents``, so it is an ordinary consumer of the bus rather than a
+component wired into the exchange websocket.
+
+Until phase 3 this module also owned the ``watch_orders`` loop and was the
+only thing in the system that could see a fill. That half now lives in
+``order_watcher.py``, which leaves this file as pure hedging logic and makes
+it the natural candidate to move into the strategies repo. See
+``docs/design/event-driven-framework.md`` section 6.
+"""
 
 import asyncio
-import copy
-import json
 import logging
-from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any, cast
 
 from redis.asyncio import ConnectionPool, Redis
 
 import apps.shared.src.logging_config as logging_config
-from apps.maker.src.constants import (
-    MESSAGE_PROCESSOR_CHANNEL,
-    REDIS_HOSTNAME,
-    REDIS_PORT,
+from apps.maker.src.order_watcher import STRATEGY_TAG
+from apps.maker.src.structs import LimitedSet
+from apps.shared.src.config import AppConfig, load_app_config
+from apps.shared.src.events import (
+    ORDER_EVENTS_STREAM,
+    OrderEvent,
+    OrderIntent,
+    OrderKind,
+    OrderState,
+    Side,
+    from_stream_fields,
+    now_ns,
 )
-from apps.maker.src.enums import MessageType, OidComponent, OrderSide, OrderType
-from apps.maker.src.structs import LimitedSet, OrderMessage
-from apps.maker.src.utils import info_from_oid
-from apps.shared.src.errors import NetworkError
-from apps.shared.src.exchange_clients import authenticated_clients
-from apps.shared.src.structs import CustomExchange
-from apps.shared.src.config import load_app_config
+from apps.shared.src.streams import StreamPublisher, stream_tail
+from apps.shared.src.utils import production
 
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
 # TODO:
 # - Make fee fetching dynamic
+NATIVE_ASSET_FEE: dict[str, float] = {"bitget": 0.001, "gate": 0.001}
+
+# Smallest notional a venue will accept, and the notional to bump a hedge to
+# when the fill was smaller than that.
+MIN_NOTIONAL = 3.0
+TARGET_NOTIONAL = 3.1
+
+# An order is worth hedging once it can no longer fill any further. A
+# cancelled or expired order that filled in part still leaves a position.
+HEDGEABLE_STATES: frozenset[OrderState] = frozenset(
+    {OrderState.FILLED, OrderState.CANCELLED, OrderState.EXPIRED}
+)
+
+# Orders remembered so a repeated terminal event does not hedge twice.
+HEDGE_MEMORY = 1000
 
 
-async def process_order_update(
-    redis: Redis, origin_client_id: str, matching_client_id: str, order: dict[str, str]
-):
-    """Calculate and trigger a matching order.
+def hedge_quantity(
+    origin_venue: str, matching_venue: str, side: Side, filled: float, price: float
+) -> float:
+    """
+    Size the hedge for a fill.
 
-    Adjusts quantity based on fees and minimum order size.
+    Venues that charge their fee in the asset rather than the quote leave us
+    with less base than we sold, or require more base than we bought, so the
+    quantity is adjusted on whichever leg pays in kind. A fill below the
+    venue's minimum notional is rounded up to a size the venue will accept:
+    an unhedged position is worse than a slightly oversized hedge.
 
     Parameters
     ----------
-    redis : Redis
-        The Redis client.
-    origin_client_id : str
-        The ID of the client where the order originated.
-    matching_client_id : str
-        The ID of the client to place the matching order on.
-    order : dict[str, str]
-        The order details.
+    origin_venue : str
+        Venue the fill happened on.
+    matching_venue : str
+        Venue the hedge will be placed on.
+    side : Side
+        Side of the filled order.
+    filled : float
+        Quantity filled.
+    price : float
+        Price the fill executed at.
+
+    Returns
+    -------
+    float
+        Quantity to trade on the matching venue.
     """
-    native_asset_fee = {"bitget": 0.001, "gate": 0.001}
-    quantity = float(order["filled"])
-    price = float(order["price"])
-    side = order["side"]
+    quantity = filled
+    if side is Side.BUY and origin_venue in NATIVE_ASSET_FEE:
+        quantity = quantity * (1 - NATIVE_ASSET_FEE[origin_venue])
 
-    if side == "buy":
-        if origin_client_id in native_asset_fee:
-            quantity = quantity * (1 - native_asset_fee[origin_client_id])
+    if price * quantity <= MIN_NOTIONAL:
+        quantity = TARGET_NOTIONAL / price
 
-    if price * quantity <= 3:
-        quantity = 3.1 / float(order["price"])
+    if side is Side.SELL and matching_venue in NATIVE_ASSET_FEE:
+        quantity = quantity / (1 - NATIVE_ASSET_FEE[matching_venue])
 
-    if side == "sell":
-        if matching_client_id in native_asset_fee:
-            fee_ratio = 1 / (1 - native_asset_fee[matching_client_id])
-
-            quantity = quantity * fee_ratio
-
-    await send_match_order(redis, matching_client_id, order, quantity)
+    return quantity
 
 
-async def send_match_order(
-    redis: Redis,
-    matching_client_id: str,
-    order: dict[str, str],
-    adjusted_quantity: float,
-):
-    """Publish the matching order to Redis.
+def hedge_price(event: OrderEvent) -> float | None:
+    """
+    Return the price a fill executed at.
 
     Parameters
     ----------
-    redis : Redis
-        The Redis client.
-    matching_client_id : str
-        The ID of the client to place the order on.
-    order : dict[str, str]
-        The original order details.
-    adjusted_quantity : float
-        The calculated quantity for the matching order.
-    """
-    if order["side"] == "sell":
-        side = OrderSide.BUY
-    else:
-        side = OrderSide.SELL
+    event : OrderEvent
+        The order event.
 
-    matching_order = OrderMessage(
-        kind=MessageType.ORDER,
+    Returns
+    -------
+    float | None
+        The average fill price, falling back to the price of the last fill
+        the event carried, or None if the event reports neither. An event
+        with a fill but no price is a venue reporting something we cannot
+        size a hedge from, and is skipped rather than guessed at.
+    """
+    if event.avg_price is not None:
+        return float(event.avg_price)
+    if event.last_fill is not None:
+        return float(event.last_fill.price)
+    return None
+
+
+def hedge_intent(
+    event: OrderEvent, matching_venue: str, quantity: float, price: float
+) -> OrderIntent:
+    """
+    Build the market order that flattens a fill.
+
+    Parameters
+    ----------
+    event : OrderEvent
+        The order event that reported the fill.
+    matching_venue : str
+        Venue to place the hedge on.
+    quantity : float
+        Quantity to trade.
+    price : float
+        Price the fill executed at, passed through for venues that size a
+        market order by cost.
+
+    Returns
+    -------
+    OrderIntent
+        The intent. It reuses the filled order's client id, which is unique
+        per venue and makes the hedge traceable back to what it hedges.
+    """
+    side = Side.BUY if event.side is Side.SELL else Side.SELL
+    return OrderIntent(
+        ts_recv=now_ns(),
+        intent_id=event.intent_id,
         strategy="matching",
-        exchange=matching_client_id,
-        id=order["clientOrderId"],
-        exchange_id="_",
-        pair=order["symbol"],
+        venue=matching_venue,
+        symbol=event.symbol,
         side=side,
-        order_type=OrderType.MARKET,
-        price=Decimal(order["price"]),
-        amount=Decimal(adjusted_quantity).quantize(Decimal("0.0000")),
+        order_type=OrderKind.MARKET,
+        amount=Decimal(quantity).quantize(Decimal("0.0000")),
+        price=Decimal(price),
+        tags={"hedge_of": event.intent_id, "origin_venue": event.venue},
     )
 
-    flattened = json.dumps(dict(matching_order), default=str)
-    await redis.publish(MESSAGE_PROCESSOR_CHANNEL, flattened)
-    logger.info(f"Matching order was sent: {matching_order}")
+
+def should_hedge(
+    event: OrderEvent, should_match: dict[str, str], hedged: LimitedSet
+) -> str | None:
+    """
+    Decide whether an order event calls for a hedge, and where.
+
+    Parameters
+    ----------
+    event : OrderEvent
+        The order event.
+    should_match : dict[str, str]
+        Taker venue per strategy identifier.
+    hedged : LimitedSet
+        Orders already hedged.
+
+    Returns
+    -------
+    str | None
+        The venue to hedge on, or None if the event needs no hedge.
+    """
+    if event.state not in HEDGEABLE_STATES or event.filled <= 0:
+        return None
+    if event.side is None:
+        logger.warning(f"Order event {event.intent_id} carries no side, not hedging")
+        return None
+
+    strategy_identifier = event.tags.get(STRATEGY_TAG, "")
+    matching_venue = should_match.get(strategy_identifier)
+    if matching_venue is None:
+        logger.debug(f"{event.intent_id} belongs to no matching strategy")
+        return None
+    if matching_venue == event.venue:
+        logger.debug("Cannot match self.")
+        return None
+
+    key = (event.venue, event.intent_id)
+    if key in hedged:
+        logger.warning(f"The order no {event.intent_id} tried getting matched twice.")
+        return None
+    hedged.add(key)
+    return matching_venue
 
 
-async def watch_orders(
-    redis: Redis, client: CustomExchange, ticker: str, should_match: dict[str, str]
-):
-    """Monitor orders on an exchange and trigger matching if conditions are met.
+async def handle_order_event(
+    redis: Redis,
+    publisher: StreamPublisher,
+    event: OrderEvent,
+    should_match: dict[str, str],
+    hedged: LimitedSet,
+) -> OrderIntent | None:
+    """
+    Hedge one order event, if it needs hedging.
 
     Parameters
     ----------
     redis : Redis
         The Redis client.
-    client : CustomExchange
-        The exchange client to watch.
-    ticker : str
-        The trading pair symbol.
+    publisher : StreamPublisher
+        Publisher writing to ``oms:intents``.
+    event : OrderEvent
+        The order event.
     should_match : dict[str, str]
-        A mapping of strategy identifiers to target matching exchanges.
+        Taker venue per strategy identifier.
+    hedged : LimitedSet
+        Orders already hedged.
+
+    Returns
+    -------
+    OrderIntent | None
+        The hedge that was published, if any.
     """
-    since = datetime.now(timezone.utc)
-    timestamp = int(since.timestamp() * 1000)
-    recently_processed_orders = LimitedSet(100)
-    while True:
-        try:
-            orders: list[dict[str, str]] = await client.watch_orders(
-                ticker, since=timestamp
-            )
-            orders_copy = list(orders)
+    matching_venue = should_hedge(event, should_match, hedged)
+    if matching_venue is None:
+        return None
 
-        except NetworkError as e:
-            logger.error(
-                f" Ignoring NetworkError in watch_balance for client {client.id}: {e}"
-            )
-        except Exception as e:
-            logger.error(f"Error in watch_balance for client {client.id}: {e}")
-            raise
+    price = hedge_price(event)
+    if price is None or price <= 0:
+        logger.error(f"Cannot price a hedge for {event.intent_id}, skipping")
+        return None
 
-        else:
-            for order in orders_copy:
-                logger.debug(f"Processing orders from {client.name}")
-                logger.debug(order)
-
-                order_copy = order.copy()
-
-                if order_copy["status"] == "open" or order_copy["filled"] == 0:
-                    logger.debug(f"Order did not meet fill conditions: {order_copy}")
-                    continue
-
-                strategy_identifier = info_from_oid(
-                    order_copy["clientOrderId"], OidComponent.STRATEGY
-                )
-                if strategy_identifier not in should_match:
-                    logger.debug(f"Order did not meet match conditions: {order_copy}")
-                    continue
-                if should_match[strategy_identifier] == client.id:
-                    logger.debug("Cannot match self.")
-                    continue
-                if order_copy.get("clientOrderId") not in recently_processed_orders:
-                    recently_processed_orders.add(order_copy.get("clientOrderId"))
-                    asyncio.create_task(
-                        process_order_update(
-                            redis=redis,
-                            origin_client_id=client.id,
-                            matching_client_id=should_match[strategy_identifier],
-                            order=order_copy,
-                        )
-                    )
-                else:
-                    logger.warning(
-                        f"The order no {order_copy['clientOrderId']} tried getting matched multiple times."
-                    )
+    quantity = hedge_quantity(
+        event.venue, matching_venue, event.side or Side.BUY, float(event.filled), price
+    )
+    intent = hedge_intent(event, matching_venue, quantity, price)
+    await publisher.publish(redis, intent)
+    logger.info(f"Matching order was sent: {intent}")
+    return intent
 
 
-async def main(clients: dict[str, CustomExchange]):
-    """Initialize and run the order matching service.
+async def consume_order_events(
+    redis: Redis,
+    publisher: StreamPublisher,
+    should_match: dict[str, str],
+    block_ms: int,
+    batch: int,
+) -> None:
+    """
+    Read ``oms:events`` and hedge every fill that calls for one.
+
+    Reading starts at the tail of the stream as it stands when this begins:
+    a fill from before then has either been hedged already or is old enough
+    that hedging it now would open a new position rather than close one.
+    The tail is resolved once rather than passed as ``$`` on every read,
+    which would silently drop a fill published between two reads.
 
     Parameters
     ----------
-    clients : dict[str, CustomExchange]
-        Dictionary of authenticated exchange clients.
+    redis : Redis
+        The Redis client.
+    publisher : StreamPublisher
+        Publisher writing to ``oms:intents``.
+    should_match : dict[str, str]
+        Taker venue per strategy identifier.
+    block_ms : int
+        How long a blocking read waits when no event is available.
+    batch : int
+        Maximum events fetched per read.
     """
-    config = load_app_config()
-    exchange_and_pair: set[tuple[str, str]] = set()
+    hedged = LimitedSet(HEDGE_MEMORY)
+    cursor = await stream_tail(redis, ORDER_EVENTS_STREAM)
+    while True:
+        response = await redis.xread(
+            {ORDER_EVENTS_STREAM: cursor}, count=batch, block=block_ms
+        )
+        # redis-py types the reply as list or dict (RESP3); the client is
+        # RESP2 here so it is always the list form.
+        for _stream, entries in cast(list[Any], response or []):
+            for entry_id, fields in entries:
+                cursor = str(entry_id)
+                try:
+                    event = from_stream_fields(fields)
+                except Exception as error:  # noqa: BLE001, keep consuming
+                    logger.error(f"Undecodable order event {entry_id}: {error}")
+                    continue
+                if not isinstance(event, OrderEvent):
+                    continue
+                await handle_order_event(redis, publisher, event, should_match, hedged)
 
+
+def matching_venues(config: AppConfig) -> dict[str, str]:
+    """
+    Read the taker venue of every strategy that hedges.
+
+    Parameters
+    ----------
+    config : AppConfig
+        The application configuration.
+
+    Returns
+    -------
+    dict[str, str]
+        Taker venue per strategy identifier. Matching applies to every
+        strategy regardless of its production flag.
+    """
     should_match: dict[str, str] = {}
-
-    # Matching applies to every strategy regardless of production flag.
     for strategy in config.strategies:
-        params = strategy.params
-        if params.get("should_match"):
-            should_match[strategy.identifier] = params["taker_exchange"]
-            exchange_and_pair.add((params["maker_exchange"], params["symbol"]))
-    # Init Redis
+        if strategy.params.get("should_match"):
+            should_match[strategy.identifier] = strategy.params["taker_exchange"]
+    return should_match
+
+
+async def main(config: AppConfig) -> None:
+    """
+    Run the matcher until cancelled.
+
+    Parameters
+    ----------
+    config : AppConfig
+        The application configuration.
+    """
+    should_match = matching_venues(config)
     pool = ConnectionPool(
-        host=REDIS_HOSTNAME, port=REDIS_PORT, db=0, max_connections=20
+        host=config.redis.host, port=config.redis.port, db=0, max_connections=20
     )
     redis = Redis(decode_responses=True, connection_pool=pool)
-    while True:
-        try:
-            await asyncio.gather(
-                *[
-                    watch_orders(redis, clients[tup[0]], tup[1], should_match)
-                    for tup in exchange_and_pair
-                ]
-            )
-        finally:
-            for client in clients.values():
-                await client.close()
+    publisher = StreamPublisher(maxlen=config.oms.stream_maxlen)
+    logger.info(f"Matching fills for {sorted(should_match)} (production={production})")
+    try:
+        await consume_order_events(
+            redis, publisher, should_match, config.oms.block_ms, config.oms.batch
+        )
+    finally:
+        await redis.aclose()
 
 
 if __name__ == "__main__":
-    asyncio.run(main(authenticated_clients))
+    asyncio.run(main(load_app_config()))
