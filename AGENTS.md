@@ -234,6 +234,7 @@ apps/
 - New inter-process messages are `msgspec.Struct` events in `apps.shared.src.events` and travel on Redis Streams.
 - Feed handlers (`apps/maker/src/watcher.py`, `balance.py`) publish through `StreamPublisher` and keep writing the legacy snapshot keys.
 - `apps/maker/src/recorder.py` tails every configured stream into `data/<stream path>/<UTC day>.jsonl`; it is the durable copy of market data.
+- Before adding a venue, after a CCXT upgrade, or when a feed misbehaves: run `uv run -m apps.maker.src.tools.venue_conformance <venue> <SYMBOL>` and follow `docs/runbooks/new-venue.md`. Venue websocket behaviour (checksums, trade ids, cache replay, error types) is not covered by unit tests.
 - Design and migration plan: `docs/design/event-driven-framework.md`.
 
 ### Misc
