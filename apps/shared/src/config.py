@@ -102,10 +102,14 @@ class VenueConfig(msgspec.Struct, frozen=True):
         CCXT short id, e.g. ``gate``.
     name : str
         Human readable name.
+    options : dict[str, Any]
+        CCXT ``options`` passed to the client constructor, e.g.
+        ``{"watchOrderBook": {"checksum": False}}``.
     """
 
     id: str
     name: str
+    options: dict[str, Any] = {}
 
 
 class Subscription(msgspec.Struct, frozen=True):

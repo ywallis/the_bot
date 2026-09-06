@@ -8,7 +8,7 @@ from fakeredis import aioredis as fakeredis
 from apps.maker.src import watcher
 from apps.shared.src import events
 from apps.shared.src.config import parse_app_config
-from apps.shared.src.errors import NetworkError
+from apps.shared.src.errors import ChecksumError, NetworkError, UnsubscribeError
 from apps.shared.src.events import BookEvent, TradeEvent
 from apps.shared.src.streams import StreamPublisher
 
@@ -87,8 +87,9 @@ async def test_watch_ob_publishes_event_and_snapshot():
 
 
 @pytest.mark.asyncio
-async def test_watch_ob_recovers_from_network_errors():
+async def test_watch_ob_recovers_from_network_errors(monkeypatch):
     """A NetworkError closes the client and the loop continues."""
+    monkeypatch.setattr(watcher, "RETRY_DELAY_S", 0)
     redis = fakeredis.FakeRedis(decode_responses=True)
     publisher = StreamPublisher(maxlen=100)
     client = FakeClient(
@@ -103,6 +104,49 @@ async def test_watch_ob_recovers_from_network_errors():
 
 
 @pytest.mark.asyncio
+async def test_watch_ob_resubscribes_without_closing(monkeypatch):
+    """Checksum and unsubscribe errors retry but leave the shared client open."""
+    monkeypatch.setattr(watcher, "RETRY_DELAY_S", 0)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+    client = FakeClient(
+        "bitget",
+        [ChecksumError("bad"), UnsubscribeError("bitget orderbook"), order_book(1.0)],
+    )
+    with pytest.raises(StopWatching):
+        await watcher.watch_ob(client, "ALPH/USDT", redis, publisher, depth=20)
+    assert client.closed == 0
+    assert await redis.xlen("md:book:bitget:ALPH/USDT") == 1
+
+
+@pytest.mark.asyncio
+async def test_watch_trades_drops_replayed_cache(monkeypatch):
+    """Trades replayed after a resubscription are published only once."""
+    monkeypatch.setattr(watcher, "RETRY_DELAY_S", 0)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+    cache = [
+        {"id": str(i), "timestamp": i, "side": "buy", "price": 1.0, "amount": 1.0}
+        for i in range(50)
+    ]
+    newer = {"id": "50", "timestamp": 50, "side": "sell", "price": 1.0, "amount": 1.0}
+    client = FakeClient("bitget", [cache, UnsubscribeError("x"), cache + [newer]])
+    with pytest.raises(StopWatching):
+        await watcher.watch_trades(client, "ALPH/USDT", redis, publisher)
+    entries = await redis.xrange("md:trade:bitget:ALPH/USDT")
+    ids = [events.from_stream_fields(f).trade_id for _, f in entries]
+    assert ids == [str(i) for i in range(51)]
+
+
+def test_trade_key_falls_back_without_id():
+    """Venues without trade ids are keyed on timestamp, price and amount."""
+    assert watcher.trade_key({"id": 7}) == ("id", "7")
+    assert watcher.trade_key({"timestamp": 1, "price": 2.0, "amount": 3.0}) == (
+        "fields", 1, 2.0, 3.0
+    )
+
+
+@pytest.mark.asyncio
 async def test_watch_ob_reraises_unknown_errors():
     """Anything not in the recoverable list crashes the handler."""
     redis = fakeredis.FakeRedis(decode_responses=True)
@@ -113,7 +157,7 @@ async def test_watch_ob_reraises_unknown_errors():
 
 @pytest.mark.asyncio
 async def test_watch_trades_publishes_one_event_per_trade():
-    """A CCXT batch becomes consecutive TradeEvents sharing ts_recv."""
+    """A CCXT batch becomes consecutive TradeEvents; a replayed trade is dropped."""
     redis = fakeredis.FakeRedis(decode_responses=True)
     publisher = StreamPublisher(maxlen=100)
     batch = [
@@ -127,10 +171,10 @@ async def test_watch_trades_publishes_one_event_per_trade():
 
     entries = await redis.xrange("md:trade:mexc:ALPH/USDT")
     decoded = [events.from_stream_fields(f) for _, f in entries]
-    assert [e.seq for e in decoded] == [1, 2, 3]
+    assert [e.seq for e in decoded] == [1, 2]
     assert all(isinstance(e, TradeEvent) for e in decoded)
     assert decoded[0].ts_recv == decoded[1].ts_recv
-    assert [e.trade_id for e in decoded] == ["1", "2", "2"]
+    assert [e.trade_id for e in decoded] == ["1", "2"]
 
 
 def test_build_tasks_follows_subscriptions():

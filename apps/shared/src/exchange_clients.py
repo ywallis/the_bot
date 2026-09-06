@@ -8,8 +8,8 @@ from dotenv import load_dotenv
 
 import apps.shared.src.logging_config as logging_config
 from apps.shared.src.errors import RequestTimeout
+from apps.shared.src.config import VenueConfig, load_app_config
 from apps.shared.src.structs import CustomExchange
-from apps.shared.src.config import load_app_config
 
 # Initializing centralized logging
 logging_config.setup_logging()
@@ -37,6 +37,42 @@ async def load_clients():
                 attempt += 1
 
 
+def ccxt_params(
+    venue: VenueConfig,
+    key: str | None,
+    secret: str | None,
+    password: str | None,
+    requires_password: bool,
+) -> dict[str, object]:
+    """
+    Build the constructor arguments for a CCXT client.
+
+    Parameters
+    ----------
+    venue : VenueConfig
+        The venue, whose ``options`` are forwarded to CCXT.
+    key : str | None
+        API key.
+    secret : str | None
+        API secret.
+    password : str | None
+        API passphrase, used only if the venue requires one.
+    requires_password : bool
+        Whether the venue's ``requiredCredentials`` lists a password.
+
+    Returns
+    -------
+    dict[str, object]
+        Keyword arguments for the CCXT exchange class.
+    """
+    params: dict[str, object] = {"apiKey": key, "secret": secret}
+    if requires_password:
+        params["password"] = password
+    if venue.options:
+        params["options"] = dict(venue.options)
+    return params
+
+
 load_dotenv()
 # Load typed config. Symbols cover every strategy, production or not, so the
 # broker can recollect open orders regardless of the mode it runs in.
@@ -53,20 +89,14 @@ for venue in config.venues:
     exchange_password = os.getenv(f"{id.upper()}_PASSWORD")
 
     client = getattr(ccxt, id)()
+    requires_password = bool(client.requiredCredentials["password"])
 
-    if client.requiredCredentials["password"]:
-        auth_client = getattr(ccxt, id)(
-            {
-                "apiKey": exchange_key,
-                "secret": exchange_secret,
-                "password": exchange_password,
-            }
+    auth_client = getattr(ccxt, id)(
+        ccxt_params(
+            venue, exchange_key, exchange_secret, exchange_password, requires_password
         )
-    else:
-        auth_client = getattr(ccxt, id)(
-            {"apiKey": exchange_key, "secret": exchange_secret}
-        )
+    )
+    if not requires_password:
         auth_client.options["maxRetriesOnFailure"] = 1
         auth_client.timeout = 30000
-        # auth_client.verbose = True
     authenticated_clients[id] = auth_client

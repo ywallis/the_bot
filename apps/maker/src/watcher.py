@@ -17,8 +17,10 @@ from redis.asyncio import ConnectionPool, Redis
 import apps.shared.src.logging_config as logging_config
 from apps.shared.src.ccxt_events import book_event_from_ccxt, trade_event_from_ccxt
 from apps.shared.src.config import BOOK_FEED, TRADE_FEED, AppConfig, load_app_config
+from apps.maker.src.structs import LimitedSet
 from apps.shared.src.errors import (
     CancelledError,
+    ChecksumError,
     ExchangeClosedByUser,
     NetworkError,
     UnsubscribeError,
@@ -32,13 +34,22 @@ from apps.shared.src.utils import production
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
-# CCXT errors that mean "reconnect and carry on" rather than "crash".
-RECOVERABLE_ERRORS: tuple[type[BaseException], ...] = (
-    NetworkError,
+# Errors after which the next ``watch_*`` call simply resubscribes. CCXT
+# raises these itself when it drops a subscription (for example on a book
+# checksum failure) or when a sibling loop closed the shared client. The
+# client must not be closed here: the book and trade loops of one venue share
+# it, and closing it from one loop cancels the other, which would loop forever.
+RESUBSCRIBE_ERRORS: tuple[type[BaseException], ...] = (
     UnsubscribeError,
+    ChecksumError,
     ExchangeClosedByUser,
     CancelledError,
 )
+# Errors that mean the connection is dead and the client should be recycled.
+RECONNECT_ERRORS: tuple[type[BaseException], ...] = (NetworkError,)
+RETRY_DELAY_S = 0.5
+# Trades remembered per stream to drop the cache CCXT replays on resubscribe.
+TRADE_DEDUPE_SIZE = 2000
 
 
 async def publish_book(
@@ -86,6 +97,27 @@ async def publish_book(
         await pipe.execute()
 
 
+def trade_key(trade: dict[str, Any]) -> tuple[Any, ...]:
+    """
+    Return the identity of a CCXT trade for deduplication.
+
+    Parameters
+    ----------
+    trade : dict[str, Any]
+        CCXT unified trade.
+
+    Returns
+    -------
+    tuple[Any, ...]
+        The venue trade id if present, otherwise timestamp, price and
+        amount. Venues that send no ids (MEXC) fall back to the latter.
+    """
+    trade_id = trade.get("id")
+    if trade_id is not None:
+        return ("id", str(trade_id))
+    return ("fields", trade.get("timestamp"), trade.get("price"), trade.get("amount"))
+
+
 async def publish_trades(
     redis: Redis,
     publisher: StreamPublisher,
@@ -93,7 +125,8 @@ async def publish_trades(
     symbol: str,
     trades: list[dict[str, Any]],
     ts_recv: int,
-) -> None:
+    seen: LimitedSet | None = None,
+) -> int:
     """
     Publish a batch of trades as one ``TradeEvent`` each.
 
@@ -111,17 +144,68 @@ async def publish_trades(
         CCXT unified trades, oldest first.
     ts_recv : int
         Local receive time in nanoseconds, shared by the whole batch.
+    seen : LimitedSet | None
+        Recently published trade keys. Trades already in it are skipped and
+        new ones are added. None disables deduplication.
+
+    Returns
+    -------
+    int
+        Number of trades published.
     """
-    if not trades:
-        return
+    fresh: list[dict[str, Any]] = []
+    for trade in trades:
+        if seen is not None:
+            key = trade_key(trade)
+            if key in seen:
+                continue
+            seen.add(key)
+        fresh.append(trade)
+    if not fresh:
+        return 0
     stream = trade_stream(venue, symbol)
     async with redis.pipeline(transaction=False) as pipe:
-        for trade in trades:
+        for trade in fresh:
             event = trade_event_from_ccxt(
                 venue, symbol, trade, seq=publisher.next_seq(stream), ts_recv=ts_recv
             )
             publisher.xadd(pipe, event)
         await pipe.execute()
+    return len(fresh)
+
+
+async def handle_feed_error(
+    error: BaseException, client: CustomExchange, feed: str, ticker: str
+) -> None:
+    """
+    Log a recoverable feed error and prepare the client for the next call.
+
+    Parameters
+    ----------
+    error : BaseException
+        The caught error.
+    client : CustomExchange
+        The exchange client.
+    feed : str
+        Feed name for the log line.
+    ticker : str
+        Symbol for the log line.
+
+    Raises
+    ------
+    BaseException
+        The same error, if it is not recoverable.
+    """
+    name = type(error).__name__
+    if isinstance(error, RESUBSCRIBE_ERRORS):
+        logger.warning(f"{name} in {feed} for {client.id} {ticker}, resubscribing: {error}")
+    elif isinstance(error, RECONNECT_ERRORS):
+        logger.error(f"{name} in {feed} for {client.id} {ticker}, reconnecting: {error}")
+        await client.close()
+    else:
+        logger.error(f"Error in {feed} for {client.id} {ticker}: {error}")
+        raise error
+    await asyncio.sleep(RETRY_DELAY_S)
 
 
 async def watch_ob(
@@ -158,14 +242,8 @@ async def watch_ob(
             await publish_book(
                 redis, publisher, client.id, ticker, order_book, ts_recv, depth
             )
-        except RECOVERABLE_ERRORS as e:
-            logger.error(
-                f"Ignoring {type(e).__name__} in watch_ob for client {client.id}: {e}"
-            )
-            await client.close()
-        except Exception as e:
-            logger.error(f"Error in watch_ob for client {client.id}: {e}")
-            raise
+        except BaseException as e:  # noqa: B036, narrowed in handle_feed_error
+            await handle_feed_error(e, client, "watch_ob", ticker)
 
 
 async def watch_trades(
@@ -178,7 +256,9 @@ async def watch_trades(
     Watch public trades for a given ticker and publish every new trade.
 
     Relies on CCXT's default ``newUpdates`` behaviour, where each call
-    resolves with only the trades received since the previous call.
+    resolves with only the trades received since the previous call. After a
+    resubscription some venues replay their cached trades, so recently
+    published trades are remembered and dropped.
 
     Parameters
     ----------
@@ -191,21 +271,19 @@ async def watch_trades(
     publisher : StreamPublisher
         Publisher holding sequence numbers and trimming settings.
     """
+    seen = LimitedSet(TRADE_DEDUPE_SIZE)
     while True:
         try:
             trades = await client.watch_trades(ticker)
             ts_recv = now_ns()
-            logger.debug(f"{len(trades)} trades on {client.name} {ticker}")
-            await publish_trades(redis, publisher, client.id, ticker, trades, ts_recv)
-        except RECOVERABLE_ERRORS as e:
-            logger.error(
-                f"Ignoring {type(e).__name__} in watch_trades for client "
-                f"{client.id}: {e}"
+            published = await publish_trades(
+                redis, publisher, client.id, ticker, trades, ts_recv, seen
             )
-            await client.close()
-        except Exception as e:
-            logger.error(f"Error in watch_trades for client {client.id}: {e}")
-            raise
+            logger.debug(
+                f"{published}/{len(trades)} new trades on {client.name} {ticker}"
+            )
+        except BaseException as e:  # noqa: B036, narrowed in handle_feed_error
+            await handle_feed_error(e, client, "watch_trades", ticker)
 
 
 def build_tasks(
