@@ -1,13 +1,36 @@
 """Module for configuring logging."""
 
 import logging
+import os
 
 from pythonjsonlogger.json import JsonFormatter
+
+from apps.shared.src.config import production_mode
+
+
+def default_log_level() -> int:
+    """
+    Pick the root log level from the environment.
+
+    ``LOG_LEVEL`` wins if set (e.g. ``DEBUG``). Otherwise the level is
+    ``INFO`` when ``TESTING=True`` and ``ERROR`` in production.
+
+    Returns
+    -------
+    int
+        A ``logging`` level constant.
+    """
+    override = os.getenv("LOG_LEVEL")
+    if override:
+        return logging.getLevelNamesMapping()[override.upper()]
+    return logging.ERROR if production_mode() else logging.INFO
 
 
 def setup_logging(log_file="app.log"):
     """
     Set up logging with JSON formatting for console and file output.
+
+    The level comes from ``default_log_level``.
 
     Parameters
     ----------
@@ -35,4 +58,4 @@ def setup_logging(log_file="app.log"):
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
-    logger.setLevel(logging.ERROR)
+    logger.setLevel(default_log_level())

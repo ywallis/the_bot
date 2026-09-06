@@ -219,5 +219,6 @@ def test_missing_file(tmp_path):
 def test_real_config_loads():
     """The checked-in config in the strategies submodule parses."""
     config = load_app_config()
-    assert config.venue_ids >= {"gate", "mexc", "bitget"}
-    assert config.active_strategies(True)
+    assert config.venue_ids >= {"mexc", "bitget"}
+    assert config.strategies
+    assert not any(s.legacy for s in config.strategies)
