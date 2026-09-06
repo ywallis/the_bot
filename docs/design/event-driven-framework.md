@@ -198,9 +198,10 @@ Rules
 
 - `subscriptions` is the only source of truth for which venue and symbol
   feeds the watchers run. Nothing is inferred from strategy parameters.
-- Legacy strategies that still carry `exchange_1`, `exchange_2` and `symbol`
-  get their subscriptions derived at load time, with a deprecation warning.
-  This keeps the private strategies repo untouched until it is migrated.
+- There is no fallback from strategy parameters to subscriptions. The
+  strategies repo was migrated to this shape on 2026-09-06, so a strategy
+  without `subscriptions`, or with a parameter outside `[strategies.params]`,
+  is a config error.
 - Strategy parameters are free-form and passed through untouched. The
   strategy validates them.
 - The existing module-level globals in `apps/shared/src/utils.py`
@@ -227,11 +228,20 @@ consumes `oms:events` like any strategy and moves to the strategies repo.
 
 ## 7. Recorder
 
-A single process that `XREAD`s every configured stream and appends entries to
-files partitioned by stream and UTC day, for example
-`data/md/book/gate/ALPH-USDT/2026-09-06.jsonl.zst`. Parquet can replace JSONL
-once the schemas are stable. The recorder is the only durable store for
-market data and is what research notebooks and the backtester read.
+A single process (`apps/maker/src/recorder.py`) that `XREAD`s every
+configured stream and appends entries to files partitioned by stream and UTC
+day, for example `data/md/book/gate/ALPH-USDT/2026-09-06.jsonl`. Each line is
+`{"id": <redis stream id>, "type": <tag>, "data": <payload>}`; the payload is
+copied verbatim without decoding, so the recorder never rejects an event and
+stays cheap. The day partition comes from the stream id's millisecond prefix.
+On start the recorder resumes every stream from the last id in its newest
+file, so a restart neither duplicates nor drops what Redis still holds.
+
+Files are uncompressed for now (Python 3.12 has no zstd in the standard
+library and tailing the last line must stay trivial); compressing closed days
+offline is a separate step. Parquet can replace JSONL once the schemas are
+stable. The recorder is the only durable store for market data and is what
+research notebooks and the backtester read.
 
 ## 8. Strategy runtime
 
@@ -282,7 +292,10 @@ version, and `XADD` intents. No shared code is required. The Python
    preserved as views. This document.
 2. Watcher publishes `BookEvent`s to streams alongside the current snapshot
    keys. Add the trade watcher. Add the recorder. Move Redis host and port
-   to config.
+   to config. Done 2026-09-06: the balance watcher also publishes
+   `BalanceEvent`s, feed handlers are driven by declared `subscriptions`
+   (a `trade` feed starts a `watch_trades` loop), and unknown feed names
+   are a config error.
 3. Message processor and broker move to `oms:intents` and `oms:events`.
    Order watcher publishes `OrderEvent`s. Matcher consumes them. Latency
    records start flowing.

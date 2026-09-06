@@ -1,12 +1,8 @@
 """Typed application configuration.
 
 This module is the single place where ``config.toml`` is read and validated.
-It supports two strategy shapes:
-
-- The target shape, where a strategy declares ``subscriptions`` explicitly.
-- The legacy shape, where a strategy carries ``exchange_1``, ``exchange_2``,
-  ``maker_exchange``, ``taker_exchange`` and ``symbol``. Subscriptions are
-  derived from those keys so existing strategies keep working unchanged.
+Every strategy declares its market data ``subscriptions`` explicitly and keeps
+its free-form parameters under ``[strategies.params]``.
 
 See ``docs/design/event-driven-framework.md`` section 5.
 """
@@ -28,16 +24,13 @@ DEFAULT_CONFIG_PATH = (
     Path(__file__).parents[3] / "apps" / "strategies" / "config" / "config.toml"
 )
 
-LEGACY_VENUE_KEYS: tuple[str, ...] = (
-    "exchange_1",
-    "exchange_2",
-    "maker_exchange",
-    "taker_exchange",
+STRATEGY_KEYS: frozenset[str] = frozenset(
+    {"identifier", "type", "production", "subscriptions", "params"}
 )
 
-RESERVED_STRATEGY_KEYS: frozenset[str] = frozenset(
-    {"identifier", "type", "production", "subscriptions"}
-)
+BOOK_FEED = "book"
+TRADE_FEED = "trade"
+KNOWN_FEEDS: frozenset[str] = frozenset({BOOK_FEED, TRADE_FEED})
 
 
 class ConfigError(Exception):
@@ -74,6 +67,29 @@ class MarketDataConfig(msgspec.Struct, frozen=True):
 
     book_depth: int = 20
     stream_maxlen: int = 10_000
+
+
+class RecorderConfig(msgspec.Struct, frozen=True):
+    """
+    Settings for the stream recorder.
+
+    Attributes
+    ----------
+    root : str
+        Directory under which recorded streams are written. Relative paths
+        are resolved against the current working directory.
+    flush_interval_s : float
+        Seconds between forced flushes of open files.
+    block_ms : int
+        How long a blocking ``XREAD`` waits when no entry is available.
+    batch : int
+        Maximum entries fetched per stream per ``XREAD``.
+    """
+
+    root: str = "data"
+    flush_interval_s: float = 1.0
+    block_ms: int = 1000
+    batch: int = 1000
 
 
 class VenueConfig(msgspec.Struct, frozen=True):
@@ -127,8 +143,6 @@ class StrategyConfig(msgspec.Struct, frozen=True):
         Market data the strategy needs.
     params : dict[str, Any]
         Free-form strategy parameters, passed through untouched.
-    legacy : bool
-        True if subscriptions were derived from legacy keys.
     """
 
     identifier: str
@@ -136,7 +150,6 @@ class StrategyConfig(msgspec.Struct, frozen=True):
     production: bool
     subscriptions: tuple[Subscription, ...]
     params: dict[str, Any]
-    legacy: bool = False
 
     @property
     def symbols(self) -> set[str]:
@@ -162,9 +175,9 @@ class StrategyConfig(msgspec.Struct, frozen=True):
         """
         return {(sub.venue, sub.symbol) for sub in self.subscriptions}
 
-    def to_legacy_dict(self, refresh_speed: float | None) -> dict[str, Any]:
+    def to_strategy_dict(self, refresh_speed: float | None) -> dict[str, Any]:
         """
-        Flatten the strategy into the dict shape existing strategies expect.
+        Flatten the strategy into the dict passed to ``strategy(redis, config)``.
 
         Parameters
         ----------
@@ -174,8 +187,8 @@ class StrategyConfig(msgspec.Struct, frozen=True):
         Returns
         -------
         dict[str, Any]
-            Flat dict with identifier, type, production, all params and,
-            unless legacy, the subscriptions as a list of dicts.
+            Flat dict with identifier, type, production, all params and the
+            subscriptions as a list of dicts.
         """
         flat: dict[str, Any] = {
             "identifier": self.identifier,
@@ -183,8 +196,7 @@ class StrategyConfig(msgspec.Struct, frozen=True):
             "production": self.production,
         }
         flat.update(self.params)
-        if not self.legacy:
-            flat["subscriptions"] = [msgspec.to_builtins(s) for s in self.subscriptions]
+        flat["subscriptions"] = [msgspec.to_builtins(s) for s in self.subscriptions]
         if refresh_speed is not None:
             flat["refresh_speed"] = refresh_speed
         return flat
@@ -205,7 +217,9 @@ class AppConfig(msgspec.Struct, frozen=True):
     strategies : tuple[StrategyConfig, ...]
         All strategies, production and test alike.
     refresh_speed : float | None
-        Polling interval for legacy strategies.
+        Polling interval for strategies that still read snapshot keys.
+    recorder : RecorderConfig
+        Stream recorder settings.
     """
 
     redis: RedisConfig
@@ -213,6 +227,7 @@ class AppConfig(msgspec.Struct, frozen=True):
     venues: tuple[VenueConfig, ...]
     strategies: tuple[StrategyConfig, ...]
     refresh_speed: float | None = None
+    recorder: RecorderConfig = RecorderConfig()
 
     @property
     def venue_ids(self) -> set[str]:
@@ -262,6 +277,30 @@ class AppConfig(msgspec.Struct, frozen=True):
         for strategy in self.active_strategies(production):
             subs.update(strategy.subscriptions)
         return subs
+
+    def feed_pairs(
+        self, feed: str, production: bool | None = None
+    ) -> set[tuple[str, str]]:
+        """
+        Return distinct (venue, symbol) tuples that subscribe to a feed.
+
+        Parameters
+        ----------
+        feed : str
+            Feed name, e.g. ``"book"`` or ``"trade"``.
+        production : bool | None
+            Production filter, see ``active_strategies``.
+
+        Returns
+        -------
+        set[tuple[str, str]]
+            Venue and symbol tuples whose subscription lists ``feed``.
+        """
+        return {
+            (s.venue, s.symbol)
+            for s in self.subscriptions(production)
+            if feed in s.feeds
+        }
 
     def venue_symbol_pairs(self, production: bool | None = None) -> set[tuple[str, str]]:
         """
@@ -337,44 +376,6 @@ def load_raw_config(path: Path | None = None) -> dict[str, Any]:
         return tomllib.load(f)
 
 
-def _derive_legacy_subscriptions(raw: dict[str, Any]) -> tuple[Subscription, ...]:
-    """
-    Build subscriptions from legacy two-venue strategy keys.
-
-    Parameters
-    ----------
-    raw : dict[str, Any]
-        Raw strategy table.
-
-    Returns
-    -------
-    tuple[Subscription, ...]
-        One book subscription per distinct venue, in key order.
-
-    Raises
-    ------
-    ConfigError
-        If no symbol or no venue key is present.
-    """
-    symbol = raw.get("symbol")
-    if not isinstance(symbol, str):
-        raise ConfigError(
-            f"Strategy {raw.get('identifier')!r} has neither 'subscriptions' "
-            "nor a legacy 'symbol'"
-        )
-    venues: list[str] = []
-    for key in LEGACY_VENUE_KEYS:
-        venue = raw.get(key)
-        if isinstance(venue, str) and venue not in venues:
-            venues.append(venue)
-    if not venues:
-        raise ConfigError(
-            f"Strategy {raw.get('identifier')!r} has neither 'subscriptions' "
-            f"nor any of {LEGACY_VENUE_KEYS}"
-        )
-    return tuple(Subscription(venue=v, symbol=symbol) for v in venues)
-
-
 def _parse_strategy(raw: dict[str, Any]) -> StrategyConfig:
     """
     Convert a raw strategy table into a ``StrategyConfig``.
@@ -392,36 +393,33 @@ def _parse_strategy(raw: dict[str, Any]) -> StrategyConfig:
     Raises
     ------
     ConfigError
-        If required keys are missing or malformed.
+        If required keys are missing, unknown keys are present or values are
+        malformed. Strategy parameters must live under ``params``; a stray
+        top-level key is an error rather than a silently dropped parameter.
     """
-    for key in ("identifier", "type", "production"):
+    for key in ("identifier", "type", "production", "subscriptions"):
         if key not in raw:
-            raise ConfigError(f"Strategy {raw!r} is missing required key {key!r}")
-
-    legacy = "subscriptions" not in raw
-    if legacy:
-        subscriptions = _derive_legacy_subscriptions(raw)
-        logger.info(
-            "Strategy %s uses legacy venue keys, derived subscriptions %s",
-            raw["identifier"],
-            subscriptions,
-        )
-    else:
-        try:
-            subscriptions = msgspec.convert(
-                raw["subscriptions"], tuple[Subscription, ...]
-            )
-        except msgspec.ValidationError as e:
             raise ConfigError(
-                f"Strategy {raw['identifier']!r} has invalid subscriptions: {e}"
-            ) from e
+                f"Strategy {raw.get('identifier', raw)!r} is missing required "
+                f"key {key!r}"
+            )
+    unknown = set(raw) - STRATEGY_KEYS
+    if unknown:
+        raise ConfigError(
+            f"Strategy {raw['identifier']!r} has unknown keys {sorted(unknown)}; "
+            "strategy parameters belong under [strategies.params]"
+        )
 
-    # Explicit [strategies.params] table wins; otherwise every non-reserved
-    # key is a parameter, which is what legacy strategies rely on.
-    if "params" in raw and isinstance(raw["params"], dict):
-        params = dict(raw["params"])
-    else:
-        params = {k: v for k, v in raw.items() if k not in RESERVED_STRATEGY_KEYS}
+    try:
+        subscriptions = msgspec.convert(raw["subscriptions"], tuple[Subscription, ...])
+    except msgspec.ValidationError as e:
+        raise ConfigError(
+            f"Strategy {raw['identifier']!r} has invalid subscriptions: {e}"
+        ) from e
+
+    params = raw.get("params", {})
+    if not isinstance(params, dict):
+        raise ConfigError(f"Strategy {raw['identifier']!r} params must be a table")
 
     try:
         return StrategyConfig(
@@ -429,8 +427,7 @@ def _parse_strategy(raw: dict[str, Any]) -> StrategyConfig:
             type=str(raw["type"]),
             production=bool(raw["production"]),
             subscriptions=subscriptions,
-            params=params,
-            legacy=legacy,
+            params=dict(params),
         )
     except msgspec.ValidationError as e:
         raise ConfigError(f"Strategy {raw['identifier']!r} is invalid: {e}") from e
@@ -449,7 +446,7 @@ def _validate(config: AppConfig) -> None:
     ------
     ConfigError
         On duplicate identifiers within a production group, references to
-        undeclared venues, or legacy strategies without a refresh speed.
+        undeclared venues or unknown feed names.
     """
     venue_ids = config.venue_ids
     for production in (True, False):
@@ -469,9 +466,13 @@ def _validate(config: AppConfig) -> None:
                     f"Strategy {strategy.identifier!r} subscribes to undeclared "
                     f"venue {sub.venue!r}"
                 )
-
-    if config.refresh_speed is None and any(s.legacy for s in config.strategies):
-        raise ConfigError("refresh_speed is required while legacy strategies exist")
+            unknown = set(sub.feeds) - KNOWN_FEEDS
+            if unknown:
+                raise ConfigError(
+                    f"Strategy {strategy.identifier!r} subscribes to unknown "
+                    f"feeds {sorted(unknown)} on {sub.venue}:{sub.symbol}; "
+                    f"known feeds are {sorted(KNOWN_FEEDS)}"
+                )
 
 
 def parse_app_config(raw: dict[str, Any]) -> AppConfig:
@@ -496,9 +497,8 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
     try:
         redis = msgspec.convert(raw.get("redis", {}), RedisConfig)
         market_data = msgspec.convert(raw.get("market_data", {}), MarketDataConfig)
-        venues = msgspec.convert(
-            raw.get("venues", raw.get("exchanges", [])), tuple[VenueConfig, ...]
-        )
+        recorder = msgspec.convert(raw.get("recorder", {}), RecorderConfig)
+        venues = msgspec.convert(raw.get("venues", []), tuple[VenueConfig, ...])
     except msgspec.ValidationError as e:
         raise ConfigError(str(e)) from e
 
@@ -515,6 +515,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
         venues=venues,
         strategies=tuple(_parse_strategy(s) for s in raw_strategies),
         refresh_speed=refresh_speed,
+        recorder=recorder,
     )
     _validate(config)
     return config

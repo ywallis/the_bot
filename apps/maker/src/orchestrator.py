@@ -35,6 +35,7 @@ PROCESS_LIST = [
     ["uv", "run", "-m", "apps.maker.src.watcher"],
     ["uv", "run", "-m", "apps.maker.src.matcher"],
     ["uv", "run", "-m", "apps.maker.src.balance"],
+    ["uv", "run", "-m", "apps.maker.src.recorder"],
 ]
 
 
