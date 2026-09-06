@@ -230,3 +230,15 @@ def test_feed_pairs_filters_by_feed():
     config = parse_app_config({"venues": VENUES, "strategies": [new_strategy()]})
     assert config.feed_pairs("book") == {("gate", "BTC/USDT"), ("mexc", "SOL/USDT")}
     assert config.feed_pairs("trade") == {("gate", "BTC/USDT")}
+
+
+def test_venue_options_default_and_parsed():
+    """Per-venue CCXT options are optional and passed through untouched."""
+    venues = [
+        {"id": "gate", "name": "Gate.io"},
+        {"id": "mexc", "name": "Mexc", "options": {"watchOrderBook": {"checksum": False}}},
+    ]
+    config = parse_app_config({"venues": venues, "strategies": [new_strategy()]})
+    by_id = {v.id: v for v in config.venues}
+    assert by_id["gate"].options == {}
+    assert by_id["mexc"].options == {"watchOrderBook": {"checksum": False}}

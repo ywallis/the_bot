@@ -7,6 +7,7 @@ This module aggregates exceptions from `asyncio` and `ccxt` to provide a single 
 from asyncio.exceptions import CancelledError as CancelledError
 
 from ccxt.async_support import BadRequest as BadRequest
+from ccxt.async_support import ChecksumError as ChecksumError
 from ccxt.async_support import ExchangeClosedByUser as ExchangeClosedByUser
 from ccxt.async_support import ExchangeError as ExchangeError
 from ccxt.async_support import InvalidNonce as InvalidNonce
