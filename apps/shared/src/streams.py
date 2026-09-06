@@ -1,9 +1,13 @@
-"""Helpers for producing and enumerating Redis Streams.
+"""Helpers for producing, enumerating and locating Redis Streams.
 
 ``StreamPublisher`` is the one place that knows how an event becomes an
 ``XADD``: stream routing, optional namespace prefix, approximate trimming and
 per-stream sequence numbers. Feed handlers use it; consumers read with
 ``XREAD`` directly.
+
+The rest of the module owns the on-disk layout of recordings, including
+``sealed_files``, the invariant every tool that touches a recording
+directory depends on. See ``docs/design/event-driven-framework.md`` section 7.
 """
 
 from collections import defaultdict
@@ -23,6 +27,11 @@ from apps.shared.src.events import (
     to_stream_fields,
     trade_stream,
 )
+
+# On-disk recording names. Recordings are uncompressed while the recorder
+# may still append to them and compressed once sealed and shipped.
+FILE_SUFFIX = ".jsonl"
+COMPRESSED_SUFFIX = ".jsonl.zst"
 
 
 class StreamPublisher:
@@ -153,6 +162,81 @@ def configured_streams(config: AppConfig, production: bool | None) -> list[str]:
         streams.add(balance_stream(venue_config.id))
     streams.update({INTENTS_STREAM, ORDER_EVENTS_STREAM, LATENCY_STREAM})
     return sorted(streams)
+
+
+def bucket_of_file(path: Path) -> str | None:
+    """
+    Return the bucket a recording file holds, or None if it is not one.
+
+    Parameters
+    ----------
+    path : Path
+        Any path inside a stream directory.
+
+    Returns
+    -------
+    str | None
+        ``YYYY-MM-DDTHH``, or None for a file the recorder did not write.
+    """
+    for suffix in (COMPRESSED_SUFFIX, FILE_SUFFIX):
+        if path.name.endswith(suffix):
+            return path.name[: -len(suffix)]
+    return None
+
+
+def recording_files(directory: Path) -> list[Path]:
+    """
+    Return every recording in a stream directory, oldest bucket first.
+
+    Matches on the full name rather than ``Path.suffix``, which reports
+    ``.zst`` for a compressed recording and would silently skip it.
+
+    Parameters
+    ----------
+    directory : Path
+        Directory returned by ``stream_path``.
+
+    Returns
+    -------
+    list[Path]
+        Recording files, sorted by bucket then name. Anything else in the
+        directory is ignored.
+    """
+    if not directory.is_dir():
+        return []
+    found = [(bucket, p) for p in directory.iterdir() if (bucket := bucket_of_file(p))]
+    return [path for _, path in sorted(found, key=lambda item: (item[0], item[1].name))]
+
+
+def sealed_files(directory: Path) -> list[Path]:
+    """
+    Return the recordings the recorder is guaranteed to have closed.
+
+    The newest bucket is excluded because rotation is driven by entry
+    arrival: a quiet stream can hold its file open long after the bucket
+    elapsed, and only the existence of a later bucket proves the earlier one
+    was closed. Compaction, the shipper and any retention job must select
+    files through this function. Touching the live file would unlink the
+    recorder's open append fd, losing every subsequent write without an
+    error, and would leave ``last_recorded_id`` with no tail to resume from.
+
+    Parameters
+    ----------
+    directory : Path
+        Directory returned by ``stream_path``.
+
+    Returns
+    -------
+    list[Path]
+        Sealed recordings, oldest first. Both compressed and uncompressed
+        files of a sealed bucket are returned, which happens when a previous
+        compaction was interrupted between rename and unlink.
+    """
+    files = recording_files(directory)
+    if not files:
+        return []
+    live = bucket_of_file(files[-1])
+    return [path for path in files if bucket_of_file(path) != live]
 
 
 def stream_path(root: Path, stream: str) -> Path:

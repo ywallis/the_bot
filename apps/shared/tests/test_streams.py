@@ -8,7 +8,14 @@ from fakeredis import aioredis as fakeredis
 from apps.shared.src import events
 from apps.shared.src.config import parse_app_config
 from apps.shared.src.events import BookEvent, TradeEvent
-from apps.shared.src.streams import StreamPublisher, configured_streams, stream_path
+from apps.shared.src.streams import (
+    StreamPublisher,
+    bucket_of_file,
+    configured_streams,
+    recording_files,
+    sealed_files,
+    stream_path,
+)
 
 TS = 1_757_160_000_000_000_000
 VENUES = [{"id": "gate", "name": "Gate.io"}, {"id": "mexc", "name": "Mexc"}]
@@ -152,3 +159,54 @@ def test_trade_event_routes_to_trade_stream():
         amount=1.0,
     )
     assert events.stream_for(event) == "md:trade:mexc:SOL/USDT"
+
+
+def test_recording_files_matches_both_suffixes(tmp_path: Path):
+    """Compressed recordings are found despite Path.suffix reporting .zst."""
+    for name in ("2026-09-06T13.jsonl", "2026-09-06T12.jsonl.zst", "notes.txt"):
+        (tmp_path / name).write_bytes(b"")
+    (tmp_path / "subdir").mkdir()
+    assert [p.name for p in recording_files(tmp_path)] == [
+        "2026-09-06T12.jsonl.zst",
+        "2026-09-06T13.jsonl",
+    ]
+
+
+def test_recording_files_on_missing_directory(tmp_path: Path):
+    """A stream that has never been recorded has no files."""
+    assert recording_files(tmp_path / "absent") == []
+
+
+def test_sealed_files_excludes_the_live_bucket(tmp_path: Path):
+    """The newest bucket is never sealed: the recorder still holds it open."""
+    for name in ("2026-09-06T12.jsonl", "2026-09-06T13.jsonl", "2026-09-06T14.jsonl"):
+        (tmp_path / name).write_bytes(b"")
+    assert [p.name for p in sealed_files(tmp_path)] == [
+        "2026-09-06T12.jsonl",
+        "2026-09-06T13.jsonl",
+    ]
+
+
+def test_sealed_files_with_one_or_no_buckets(tmp_path: Path):
+    """A single bucket is the live one, so nothing is sealed."""
+    assert sealed_files(tmp_path) == []
+    (tmp_path / "2026-09-06T12.jsonl").write_bytes(b"")
+    assert sealed_files(tmp_path) == []
+
+
+def test_sealed_files_returns_both_halves_of_an_interrupted_compaction(tmp_path: Path):
+    """A bucket left with both encodings is sealed as a unit, not split."""
+    names = ("2026-09-06T12.jsonl", "2026-09-06T12.jsonl.zst", "2026-09-06T13.jsonl")
+    for name in names:
+        (tmp_path / name).write_bytes(b"")
+    assert [p.name for p in sealed_files(tmp_path)] == [
+        "2026-09-06T12.jsonl",
+        "2026-09-06T12.jsonl.zst",
+    ]
+
+
+def test_bucket_of_file(tmp_path: Path):
+    """The bucket is the name without either recording suffix."""
+    assert bucket_of_file(Path("2026-09-06T12.jsonl")) == "2026-09-06T12"
+    assert bucket_of_file(Path("2026-09-06T12.jsonl.zst")) == "2026-09-06T12"
+    assert bucket_of_file(Path("notes.txt")) is None

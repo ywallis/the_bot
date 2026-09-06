@@ -80,6 +80,10 @@ class RecorderConfig(msgspec.Struct, frozen=True):
         are resolved against the current working directory.
     flush_interval_s : float
         Seconds between forced flushes of open files.
+    seal_grace_s : float
+        How long past the end of an hour bucket the recorder keeps its file
+        open. Bounds how long a quiet stream's data waits on the trading
+        host before the shipper may take it.
     block_ms : int
         How long a blocking ``XREAD`` waits when no entry is available.
     batch : int
@@ -88,6 +92,7 @@ class RecorderConfig(msgspec.Struct, frozen=True):
 
     root: str = "data"
     flush_interval_s: float = 1.0
+    seal_grace_s: float = 300.0
     block_ms: int = 1000
     batch: int = 1000
 

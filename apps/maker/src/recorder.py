@@ -1,14 +1,19 @@
-"""Stream recorder: the durable copy of everything on the bus.
+"""Stream recorder: the hot tier of the recording.
 
 One process ``XREAD``s every configured stream and appends each entry to a
-JSON Lines file partitioned by stream and UTC day, for example
-``data/md/book/mexc/ALPH-USDT/2026-09-06.jsonl``. Entries are written
+JSON Lines file partitioned by stream and UTC hour, for example
+``data/md/book/mexc/ALPH-USDT/2026-09-06T14.jsonl``. Entries are written
 verbatim, without decoding the payload, so the recorder stays cheap and never
 rejects an event a newer producer emits.
 
 Each line is ``{"id": "<redis stream id>", "type": "<tag>", "data": <json>}``.
 On startup the recorder resumes each stream from the last id it recorded, so
 a restart neither duplicates nor drops entries that Redis still holds.
+
+This process only ever writes the newest file of each stream. Sealed files
+belong to the shipper and to compaction, which select them through
+``streams.sealed_files``. See ``docs/design/event-driven-framework.md``
+section 7.
 """
 
 import asyncio
@@ -16,6 +21,7 @@ import json
 import logging
 import os
 import signal
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
@@ -25,20 +31,31 @@ from redis.asyncio import ConnectionPool, Redis
 import apps.shared.src.logging_config as logging_config
 from apps.shared.src.config import AppConfig, RecorderConfig, load_app_config
 from apps.shared.src.events import DATA_FIELD, TYPE_FIELD
-from apps.shared.src.streams import configured_streams, stream_path
+from apps.shared.src.streams import (
+    COMPRESSED_SUFFIX,
+    FILE_SUFFIX,
+    configured_streams,
+    recording_files,
+    stream_path,
+)
 from apps.shared.src.utils import production
 
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
-FILE_SUFFIX = ".jsonl"
 # Start of a stream, for a stream that has never been recorded.
 STREAM_START = "0-0"
+# One file per UTC hour. Small enough that data does not sit long on the
+# trading host and that a backtest range is a filename filter, large enough
+# that compression is unaffected: the zstd ratio on book data is flat above
+# roughly 300 KB and an hour of any active feed is far past that.
+BUCKET_FORMAT = "%Y-%m-%dT%H"
+BUCKET_SECONDS = 3600
 
 
-def day_of_entry(entry_id: str) -> str:
+def bucket_of_entry(entry_id: str) -> str:
     """
-    Return the UTC day a stream entry was added on.
+    Return the UTC hour bucket a stream entry was added in.
 
     Parameters
     ----------
@@ -48,10 +65,28 @@ def day_of_entry(entry_id: str) -> str:
     Returns
     -------
     str
-        ``YYYY-MM-DD``.
+        ``YYYY-MM-DDTHH``.
     """
     ms = int(entry_id.split("-", 1)[0])
-    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime(BUCKET_FORMAT)
+
+
+def bucket_end(bucket: str) -> float:
+    """
+    Return the epoch second at which a bucket stops accepting entries.
+
+    Parameters
+    ----------
+    bucket : str
+        ``YYYY-MM-DDTHH``.
+
+    Returns
+    -------
+    float
+        Seconds since the epoch.
+    """
+    start = datetime.strptime(bucket, BUCKET_FORMAT).replace(tzinfo=timezone.utc)
+    return start.timestamp() + BUCKET_SECONDS
 
 
 def format_line(entry_id: str, event_type: str, data: bytes) -> bytes:
@@ -80,9 +115,14 @@ def last_recorded_id(directory: Path) -> str:
     """
     Find the id of the last entry recorded in a stream directory.
 
-    Reads the tail of the newest day file. A corrupt or empty tail is
+    Reads the tail of the newest recording. A corrupt or empty tail is
     treated as no recording, which at worst duplicates the entries Redis
     still holds.
+
+    Compressed recordings are included in the search. They are read whole,
+    but the newest recording is never compressed while the invariant in
+    ``sealed_files`` holds, so that path is only reached if something
+    outside the recorder compacted the live file.
 
     Parameters
     ----------
@@ -94,11 +134,17 @@ def last_recorded_id(directory: Path) -> str:
     str
         The last id, or ``STREAM_START`` if nothing was recorded.
     """
-    if not directory.is_dir():
-        return STREAM_START
-    files = sorted(p for p in directory.iterdir() if p.suffix == FILE_SUFFIX)
+    files = recording_files(directory)
+    if files and files[-1].name.endswith(COMPRESSED_SUFFIX):
+        logger.warning(
+            f"Newest recording {files[-1].name} is compressed; the live file of a "
+            "stream must stay uncompressed, see streams.sealed_files"
+        )
     for path in reversed(files):
-        tail = _last_line(path)
+        if path.name.endswith(COMPRESSED_SUFFIX):
+            tail = _last_compressed_line(path)
+        else:
+            tail = _last_line(path)
         if tail is None:
             continue
         try:
@@ -108,6 +154,43 @@ def last_recorded_id(directory: Path) -> str:
             return STREAM_START
         return str(entry_id)
     return STREAM_START
+
+
+def _last_compressed_line(path: Path) -> bytes | None:
+    """
+    Return the last non-empty line of a compressed recording.
+
+    Decompresses the whole file, since a zstd frame cannot be scanned
+    backwards. Only reached when the live file was compressed by something
+    other than the recorder.
+
+    Parameters
+    ----------
+    path : Path
+        File to read.
+
+    Returns
+    -------
+    bytes | None
+        The line without its newline, or None if the file has none or
+        cannot be decompressed.
+    """
+    try:
+        from compression import zstd
+    except ImportError:
+        logger.error(f"Cannot read {path}, this interpreter has no zstd support")
+        return None
+    last = None
+    try:
+        with zstd.open(path, "rb") as f:
+            for line in f:
+                stripped = line.rstrip(b"\n")
+                if stripped:
+                    last = stripped
+    except (OSError, ValueError) as error:
+        logger.error(f"Cannot read {path}: {error}")
+        return None
+    return last
 
 
 def _last_line(path: Path, chunk: int = 4096) -> bytes | None:
@@ -147,12 +230,12 @@ def _last_line(path: Path, chunk: int = 4096) -> bytes | None:
 
 class StreamWriter:
     """
-    Append-only writer for one stream, rotating files by UTC day.
+    Append-only writer for one stream, rotating files by UTC hour.
 
     Attributes
     ----------
     directory : Path
-        Directory the day files live in.
+        Directory the bucket files live in.
     """
 
     def __init__(self, directory: Path) -> None:
@@ -165,12 +248,18 @@ class StreamWriter:
             Directory returned by ``stream_path``. Created on first write.
         """
         self.directory = directory
-        self._day: str | None = None
+        self._bucket: str | None = None
+        self._bucket_end: float = 0.0
         self._file: Any = None
 
     def write(self, entry_id: str, event_type: str, data: bytes) -> None:
         """
-        Append one entry, opening a new day file when the day changes.
+        Append one entry, opening a new file when the bucket changes.
+
+        Files are opened for append, so an entry belonging to a bucket this
+        writer already sealed reopens it rather than truncating it. That
+        happens when the recorder is lagging far enough behind Redis to
+        cross a bucket boundary.
 
         Parameters
         ----------
@@ -181,13 +270,40 @@ class StreamWriter:
         data : bytes
             Raw JSON payload.
         """
-        day = day_of_entry(entry_id)
-        if day != self._day:
+        bucket = bucket_of_entry(entry_id)
+        if bucket != self._bucket:
             self.close()
             self.directory.mkdir(parents=True, exist_ok=True)
-            self._file = open(self.directory / f"{day}{FILE_SUFFIX}", "ab")
-            self._day = day
+            self._file = open(self.directory / f"{bucket}{FILE_SUFFIX}", "ab")
+            self._bucket = bucket
+            self._bucket_end = bucket_end(bucket)
         self._file.write(format_line(entry_id, event_type, data))
+
+    def seal_if_elapsed(self, now: float, grace_s: float) -> bool:
+        """
+        Close the open file if its bucket ended more than ``grace_s`` ago.
+
+        Rotation is otherwise driven by entry arrival, so a stream that goes
+        quiet would hold its file open indefinitely and pin the data on the
+        trading host. Sealing on a timer bounds that wait for every stream
+        regardless of how often it produces.
+
+        Parameters
+        ----------
+        now : float
+            Current epoch second.
+        grace_s : float
+            How long past the end of a bucket to keep accepting entries.
+
+        Returns
+        -------
+        bool
+            True if a file was sealed.
+        """
+        if self._file is None or now < self._bucket_end + grace_s:
+            return False
+        self.close()
+        return True
 
     def flush(self) -> None:
         """Flush buffered lines to the operating system."""
@@ -199,7 +315,8 @@ class StreamWriter:
         if self._file is not None:
             self._file.close()
             self._file = None
-            self._day = None
+            self._bucket = None
+            self._bucket_end = 0.0
 
 
 class Recorder:
@@ -289,6 +406,27 @@ class Recorder:
         for writer in self.writers.values():
             writer.flush()
 
+    def seal_elapsed(self, now: float) -> int:
+        """
+        Seal every open file whose bucket ended past the grace period.
+
+        Parameters
+        ----------
+        now : float
+            Current epoch second.
+
+        Returns
+        -------
+        int
+            Number of files sealed.
+        """
+        sealed = 0
+        for stream, writer in self.writers.items():
+            if writer.seal_if_elapsed(now, self.settings.seal_grace_s):
+                logger.debug(f"Sealed {stream}")
+                sealed += 1
+        return sealed
+
     def close(self) -> None:
         """Flush and close every open file."""
         for writer in self.writers.values():
@@ -303,7 +441,7 @@ class Recorder:
         redis : Redis
             A Redis client created with ``decode_responses=False``.
         """
-        flusher = asyncio.create_task(self._flush_periodically())
+        maintenance = asyncio.create_task(self._maintain_periodically())
         try:
             while True:
                 response = await redis.xread(
@@ -316,14 +454,15 @@ class Recorder:
                     # is RESP2 here so it is always the list form.
                     self.record_batch(cast(list[Any], response))
         finally:
-            flusher.cancel()
+            maintenance.cancel()
             self.close()
 
-    async def _flush_periodically(self) -> None:
-        """Flush open files on the configured interval."""
+    async def _maintain_periodically(self) -> None:
+        """Flush open files and seal elapsed buckets on the configured interval."""
         while True:
             await asyncio.sleep(self.settings.flush_interval_s)
             self.flush()
+            self.seal_elapsed(time.time())
 
 
 async def main(config: AppConfig) -> None:

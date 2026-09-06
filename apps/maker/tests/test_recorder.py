@@ -29,11 +29,26 @@ def book(seq: int) -> BookEvent:
     )
 
 
-def test_day_of_entry_uses_utc():
-    """The day partition comes from the id's millisecond prefix in UTC."""
-    assert rec.day_of_entry("1788652800000-0") == "2026-09-06"
-    assert rec.day_of_entry("1788739199999-3") == "2026-09-06"
-    assert rec.day_of_entry("1788739200000-0") == "2026-09-07"
+def test_bucket_of_entry_uses_utc_hours():
+    """The partition comes from the id's millisecond prefix in UTC."""
+    assert rec.bucket_of_entry("1788652800000-0") == "2026-09-06T00"
+    assert rec.bucket_of_entry("1788656399999-3") == "2026-09-06T00"
+    assert rec.bucket_of_entry("1788656400000-0") == "2026-09-06T01"
+    assert rec.bucket_of_entry("1788739200000-0") == "2026-09-07T00"
+
+
+def test_bucket_names_sort_chronologically():
+    """Lexical order over bucket names matches time order across days."""
+    ids = ["1788652800000-0", "1788735600000-0", "1788739200000-0"]
+    buckets = [rec.bucket_of_entry(i) for i in ids]
+    assert buckets == sorted(buckets)
+    assert buckets == ["2026-09-06T00", "2026-09-06T23", "2026-09-07T00"]
+
+
+def test_bucket_end_is_one_hour_after_start():
+    """A bucket stops accepting entries an hour after it starts."""
+    assert rec.bucket_end("2026-09-06T00") == 1788652800.0 + 3600
+    assert rec.bucket_end("2026-09-06T23") == 1788739200.0
 
 
 def test_format_line_embeds_raw_payload():
@@ -44,20 +59,42 @@ def test_format_line_embeds_raw_payload():
 
 
 def test_last_recorded_id(tmp_path: Path):
-    """The cursor resumes from the last line of the newest day file."""
+    """The cursor resumes from the last line of the newest bucket file."""
     directory = tmp_path / "s"
     assert rec.last_recorded_id(directory) == rec.STREAM_START
     directory.mkdir()
     assert rec.last_recorded_id(directory) == rec.STREAM_START
-    (directory / "2026-09-05.jsonl").write_bytes(
+    (directory / "2026-09-06T12.jsonl").write_bytes(
         rec.format_line("1-0", "book", b"{}") + rec.format_line("2-0", "book", b"{}")
     )
-    (directory / "2026-09-06.jsonl").write_bytes(rec.format_line("3-5", "book", b"{}"))
+    (directory / "2026-09-06T13.jsonl").write_bytes(
+        rec.format_line("3-5", "book", b"{}")
+    )
     (directory / "notes.txt").write_text("ignored")
     assert rec.last_recorded_id(directory) == "3-5"
     # An empty newest file falls back to the previous one.
-    (directory / "2026-09-07.jsonl").write_bytes(b"")
+    (directory / "2026-09-06T14.jsonl").write_bytes(b"")
     assert rec.last_recorded_id(directory) == "3-5"
+
+
+def test_last_recorded_id_reads_compressed_recordings(tmp_path: Path):
+    """A compacted directory resumes from its data, not from the stream start."""
+    from compression import zstd
+
+    directory = tmp_path / "s"
+    directory.mkdir()
+    lines = rec.format_line("1-0", "book", b"{}")
+    lines += rec.format_line("7-2", "book", b"{}")
+    (directory / "2026-09-06T12.jsonl.zst").write_bytes(zstd.compress(lines))
+    # Path.suffix reports ".zst" here, so a suffix match would miss the file
+    # entirely and re-record everything Redis still holds.
+    assert rec.last_recorded_id(directory) == "7-2"
+
+    # An uncompressed newer bucket still wins.
+    (directory / "2026-09-06T13.jsonl").write_bytes(
+        rec.format_line("9-0", "book", b"{}")
+    )
+    assert rec.last_recorded_id(directory) == "9-0"
 
 
 def test_last_line_scans_backwards_across_chunks(tmp_path: Path):
@@ -68,16 +105,50 @@ def test_last_line_scans_backwards_across_chunks(tmp_path: Path):
     assert rec._last_line(path, chunk=100) == long_line
 
 
-def test_stream_writer_rotates_by_day(tmp_path: Path):
-    """Entries on different UTC days go to different files."""
+def test_stream_writer_rotates_by_hour(tmp_path: Path):
+    """Entries in different UTC hours go to different files."""
     writer = rec.StreamWriter(tmp_path / "s")
     writer.write("1788652800000-0", "book", b"{}")
     writer.write("1788652800001-0", "book", b"{}")
-    writer.write("1788739200000-0", "book", b"{}")
+    writer.write("1788656400000-0", "book", b"{}")
     writer.close()
     files = sorted(p.name for p in (tmp_path / "s").iterdir())
-    assert files == ["2026-09-06.jsonl", "2026-09-07.jsonl"]
-    assert len((tmp_path / "s" / "2026-09-06.jsonl").read_bytes().splitlines()) == 2
+    assert files == ["2026-09-06T00.jsonl", "2026-09-06T01.jsonl"]
+    assert len((tmp_path / "s" / "2026-09-06T00.jsonl").read_bytes().splitlines()) == 2
+
+
+def test_seal_if_elapsed_respects_the_grace_period(tmp_path: Path):
+    """A file is sealed only once its bucket ended more than the grace ago."""
+    writer = rec.StreamWriter(tmp_path / "s")
+    writer.write("1788652800000-0", "book", b"{}")
+    end = rec.bucket_end("2026-09-06T00")
+    assert writer.seal_if_elapsed(end, grace_s=300.0) is False
+    assert writer.seal_if_elapsed(end + 299, grace_s=300.0) is False
+    assert writer.seal_if_elapsed(end + 301, grace_s=300.0) is True
+    # Idempotent: nothing is open to seal a second time.
+    assert writer.seal_if_elapsed(end + 999, grace_s=300.0) is False
+
+
+def test_write_after_seal_appends_rather_than_truncating(tmp_path: Path):
+    """A lagging recorder crossing a sealed bucket reopens it for append."""
+    directory = tmp_path / "s"
+    writer = rec.StreamWriter(directory)
+    writer.write("1788652800000-0", "book", b'{"n":1}')
+    assert writer.seal_if_elapsed(rec.bucket_end("2026-09-06T00") + 600, 300.0) is True
+    writer.write("1788652800001-0", "book", b'{"n":2}')
+    writer.close()
+    lines = (directory / "2026-09-06T00.jsonl").read_bytes().splitlines()
+    assert [json.loads(line)["data"]["n"] for line in lines] == [1, 2]
+
+
+def test_recorder_seals_every_elapsed_writer(tmp_path: Path):
+    """seal_elapsed reports how many streams it closed."""
+    settings = RecorderConfig(root=str(tmp_path), seal_grace_s=60.0)
+    recorder = rec.Recorder(tmp_path, [STREAM, "oms:events"], settings)
+    recorder.record(STREAM, "1788652800000-0", {b"type": b"book", b"data": b"{}"})
+    assert recorder.seal_elapsed(rec.bucket_end("2026-09-06T00") + 30) == 0
+    assert recorder.seal_elapsed(rec.bucket_end("2026-09-06T00") + 90) == 1
+    assert recorder.seal_elapsed(rec.bucket_end("2026-09-06T00") + 90) == 0
 
 
 @pytest.mark.asyncio
