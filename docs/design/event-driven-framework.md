@@ -282,6 +282,14 @@ host. A lagging recorder can still receive an entry belonging to a sealed
 bucket; it reopens the file in append mode, and the shipper detects the
 change by checksum rather than by existence.
 
+The predicate is deliberately conservative: it never reports a live file as
+sealed, but it does not report every sealed file. "Not the newest bucket" is
+a proxy for "the recorder has closed this", and the proxy has one blind spot
+— the newest file itself, even long after the recorder closed it. So the tail
+of the recording is never shippable while the system is stopped. That is
+correct but incomplete, and section 7.4 is what the shipper needs in order to
+close it.
+
 ### 7.3 Shipper
 
 Sealed files are compressed with zstd `-3` on the trading host and
@@ -304,6 +312,52 @@ it whole. Compression itself needs no dependency: the project pins Python
 3.14, whose standard library provides `compression.zstd`. Parquet can replace
 JSONL in the archive tier once the schemas are stable; compaction is the
 natural place to convert.
+
+### 7.4 What the shipper needs first
+
+Four changes, none of them urgent while nothing deletes anything, all of them
+prerequisites for a shipper that does.
+
+**1. Persist the cursor per stream, independent of the data files.** Resume
+currently tails the newest recording. That couples it to which files happen
+to be on local disk, which is precisely what a shipper changes. Left alone
+the sequence is: the recorder stops at 17:03, the shipper takes and deletes
+`T17`, the recorder restarts into an empty directory, resumes from `0-0` and
+re-records everything Redis still holds. Writing the cursor on flush, to a
+small per-stream file or a Redis hash the shipper never touches, removes the
+coupling. It also makes resume O(1) rather than a backward scan, and lets
+retention delete anything at all without consulting the recorder.
+`last_recorded_id` stays as the fallback when no cursor is present.
+
+**2. Make sealing final: the recorder never writes to a bucket it sealed.**
+A late entry goes to the current bucket instead, carrying its true id and
+`ts_recv` as always. Today's reopen is what makes "is this file closed?"
+unanswerable from outside the process — a recorder catching up after a stall
+receives entries whose ids belong to hours that ended long ago, and the file
+flaps between closed by the timer and reopened by the next old entry. Nothing
+can safely ship a file that might be reopened. The only thing given up is
+that a file's name stops being an exact statement about its contents' time
+range, and the name was never load-bearing: the replayer merges on `ts_recv`,
+so the bucket is a coarse index, not a guarantee.
+
+**3. Then `sealed_files` can widen** to "not the newest bucket, **or** the
+bucket elapsed more than the grace plus a margin ago". With reopen
+impossible, elapsed time is a sound proof of sealed in every case: the
+recorder is running and past the grace (its timer closed the file), or it is
+stopped (it is not writing at all), or it is lagging (it can no longer reach
+that bucket). The stranded tail is then released roughly an hour after the
+recorder stops rather than never.
+
+**4. The replayer reads one bucket either side of a requested range.** Needed
+once (2) lets an entry land in the following bucket, and worth doing anyway
+given the skew between `ts_recv` and the XADD time the bucket is derived
+from.
+
+Two alternatives were considered and rejected. An advisory `flock` on the
+open file is the race-free textbook answer, but it puts a lock acquisition in
+the recorder's write path, and a trading process must never be able to stall
+on the shipper. A `.sealed` sidecar marker per bucket does not eliminate the
+reopen race, only moves it, and doubles the inode count.
 
 ## 8. Strategy runtime
 
