@@ -298,10 +298,12 @@ it by checksum, so local retention is "transferred", not an age. Until the
 shipper exists there is no second copy, so nothing may be deleted and the
 trading host grows without bound: see the precondition in section 11.
 
-Uncompressed JSONL is the hot format because Python 3.12 has no stdlib zstd
-and tailing the last line must stay trivial. Parquet can replace JSONL in the
-archive tier once the schemas are stable; compaction is the natural place to
-convert.
+Uncompressed JSONL is the hot format because tailing the last line to resume
+must stay trivial, which a compressed frame cannot do without decompressing
+it whole. Compression itself needs no dependency: the project pins Python
+3.14, whose standard library provides `compression.zstd`. Parquet can replace
+JSONL in the archive tier once the schemas are stable; compaction is the
+natural place to convert.
 
 ## 8. Strategy runtime
 
