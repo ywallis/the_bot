@@ -19,6 +19,53 @@ from apps.maker.src.structs import (
 )
 
 
+class StopWatching(Exception):
+    """Raised by fake clients to break out of a watch loop."""
+
+
+class FakeClient:
+    """
+    A CCXT-like client that replays scripted results then stops.
+
+    Every ``watch_*`` method returns the next scripted result, raising it if
+    it is an exception and raising ``StopWatching`` once the script runs out.
+    A watch loop swallows the errors it knows how to recover from, so the
+    only reliable way to end one in a test is an error it does not know.
+    """
+
+    def __init__(self, venue: str, results: list):
+        """Store the scripted results, which may be dicts, lists or exceptions."""
+        self.id = venue
+        self.name = venue.title()
+        self._results = list(results)
+        self.closed = 0
+
+    async def _next(self):
+        if not self._results:
+            raise StopWatching()
+        result = self._results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    async def watch_order_book(self, symbol: str):
+        """Return the next scripted order book."""
+        return await self._next()
+
+    async def watch_trades(self, symbol: str):
+        """Return the next scripted trade batch."""
+        return await self._next()
+
+    async def watch_orders(self, symbol: str, since: int | None = None):
+        """Return the next scripted batch of order updates."""
+        self.since = since
+        return await self._next()
+
+    async def close(self):
+        """Count close calls."""
+        self.closed += 1
+
+
 @pytest.fixture
 def order_raw_item():
     """Return a raw dictionary representation of an order."""

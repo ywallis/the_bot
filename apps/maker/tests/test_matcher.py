@@ -1,421 +1,331 @@
-"""Tests for the matcher module."""
+"""Tests for the taker hedge."""
 
 import asyncio
-import json
 from decimal import Decimal
-from unittest.mock import AsyncMock
 
 import pytest
+from fakeredis import aioredis as fakeredis
 
-from apps.maker.src.constants import MESSAGE_PROCESSOR_CHANNEL
-from apps.maker.src.enums import MessageType, OrderSide, OrderType
-from apps.maker.src.matcher import watch_orders
-from apps.maker.src.structs import OrderMessage
-from apps.shared.src.structs import CustomExchange
+from apps.maker.src.matcher import (
+    HEDGE_MEMORY,
+    NATIVE_ASSET_FEE,
+    consume_order_events,
+    handle_order_event,
+    hedge_intent,
+    hedge_price,
+    hedge_quantity,
+    matching_venues,
+    should_hedge,
+)
+from apps.maker.src.order_watcher import STRATEGY_TAG
+from apps.maker.src.structs import LimitedSet
+from apps.shared.src.config import (
+    AppConfig,
+    MarketDataConfig,
+    RedisConfig,
+    StrategyConfig,
+    Subscription,
+)
+from apps.shared.src.events import (
+    INTENTS_STREAM,
+    Fill,
+    OrderEvent,
+    OrderIntent,
+    OrderKind,
+    OrderState,
+    Side,
+    from_stream_fields,
+    now_ns,
+)
+from apps.shared.src.streams import StreamPublisher
+
+SHOULD_MATCH = {"lmb": "bitget"}
 
 
-@pytest.mark.asyncio
-async def test_watch_buy_orders_various_order_states_native_fee():
-    """Test watching buy orders with various states and native fees."""
-    # AsyncMock for redis
-    redis = AsyncMock()
-
-    # Create a mock CustomExchange client
-    client = AsyncMock(spec=CustomExchange)
-    client.name = "gate.io"
-    client.id = "gate"
-
-    expected_matching_order = OrderMessage(
-        kind=MessageType.ORDER,
-        strategy="matching",
-        exchange="binance",
-        id="t-prefix_strategy123_suffix",
-        exchange_id="_",
-        pair="BTC/USDT",
-        side=OrderSide.SELL,
-        order_type=OrderType.MARKET,
-        price=Decimal(50000),
-        amount=Decimal("0.0100"),
+def fill_event(
+    intent_id: str = "t-250906120000_lmb_eb",
+    venue: str = "mexc",
+    state: OrderState = OrderState.FILLED,
+    side: Side = Side.SELL,
+    filled: Decimal = Decimal("40"),
+    avg_price: Decimal | None = Decimal("0.35"),
+    strategy_id: str = "lmb",
+    last_fill: Fill | None = None,
+) -> OrderEvent:
+    """Return an order event as the order watcher would publish it."""
+    return OrderEvent(
+        ts_recv=now_ns(),
+        intent_id=intent_id,
+        strategy=f"{strategy_id}_eb",
+        venue=venue,
+        symbol="ALPH/USDT",
+        state=state,
+        side=side,
+        venue_order_id=f"venue-{intent_id}",
+        filled=filled,
+        remaining=Decimal(0),
+        avg_price=avg_price,
+        last_fill=last_fill,
+        tags={STRATEGY_TAG: strategy_id, "order_id": "eb"},
     )
-    # Configure the mock's watch_orders method to return a mix of orders
-    client.watch_orders.side_effect = [
-        [
-            # ✅ Valid order
-            {
-                "id": "order-1",
-                "clientOrderId": "t-prefix_strategy123_suffix",
-                "symbol": "BTC/USDT",
-                "price": "50000",
-                "amount": "0.01",
-                "filled": "0.01",
-                "side": "buy",
-                "status": "closed",
-            },
-            #  Unfilled order
-            {
-                "id": "order-2",
-                "clientOrderId": "t-prefix_strategy123_suffix",
-                "symbol": "BTC/USDT",
-                "price": "50000",
-                "amount": "0.01",
-                "filled": "0.0",
-                "side": "buy",
-                "status": "closed",
-            },
-            #  Status is open
-            {
-                "id": "order-3",
-                "clientOrderId": "t-prefix_strategy123_suffix",
-                "symbol": "BTC/USDT",
-                "price": "50000",
-                "amount": "0.01",
-                "filled": "0.01",
-                "side": "buy",
-                "status": "open",
-            },
-            #  Unknown strategy
-            {
-                "id": "order-4",
-                "clientOrderId": "t-prefix_unknownStrategy_suffix",
-                "symbol": "BTC/USDT",
-                "price": "50000",
-                "amount": "0.01",
-                "filled": "0.01",
-                "side": "buy",
-                "status": "closed",
-            },
-            #  Duplicate valid order
-            {
-                "id": "order-1",
-                "clientOrderId": "t-prefix_strategy123_suffix",
-                "symbol": "BTC/USDT",
-                "price": "50000",
-                "amount": "0.01",
-                "filled": "0.01",
-                "side": "buy",
-                "status": "closed",
-            },
-        ],
-        asyncio.CancelledError("stop test loop"),  # force loop exit
-    ]
-
-    should_match = {"strategy123": "binance"}
-
-    # Launch the watcher
-    task = asyncio.create_task(watch_orders(redis, client, "BTC/USDT", should_match))
-
-    # Let the watcher run briefly
-    await asyncio.sleep(0.1)
-    task.cancel()
-
-    with pytest.raises(asyncio.CancelledError):
-        await task
-
-    # Check publish was only called for the valid, non-duplicate order
-    redis.publish.assert_called_once()
-    channel, message = redis.publish.call_args[0]
-    assert channel == MESSAGE_PROCESSOR_CHANNEL
-    assert '"exchange": "binance"' in message
-    assert message == json.dumps(dict(expected_matching_order), default=str)
 
 
-@pytest.mark.asyncio
-async def test_watch_buy_orders_various_order_states():
-    """Test watching buy orders with various states."""
-    # AsyncMock for redis
-    redis = AsyncMock()
+# Sizing --------------------------------------------------------------------
 
-    # Create a mock CustomExchange client
-    client = AsyncMock(spec=CustomExchange)
-    client.name = "binance"
-    client.id = "binance"
 
-    expected_matching_order = OrderMessage(
-        kind=MessageType.ORDER,
-        strategy="matching",
-        exchange="gate",
-        id="t-prefix_strategy123_suffix",
-        exchange_id="_",
-        pair="BTC/USDT",
-        side=OrderSide.SELL,
-        order_type=OrderType.MARKET,
-        price=Decimal(50000),
-        amount=Decimal("0.0100"),
+def test_a_sell_fill_is_hedged_one_for_one_on_a_quote_fee_venue():
+    """With no fee paid in the asset, the hedge is the size that filled."""
+    assert hedge_quantity("mexc", "kraken", Side.SELL, 40.0, 1.0) == 40.0
+
+
+def test_a_buy_on_a_native_fee_venue_leaves_less_to_hedge():
+    """A venue that takes its fee in the asset leaves us short of the fill."""
+    quantity = hedge_quantity("gate", "mexc", Side.BUY, 40.0, 1.0)
+    assert quantity == pytest.approx(40.0 * (1 - NATIVE_ASSET_FEE["gate"]))
+
+
+def test_a_sell_hedged_on_a_native_fee_venue_needs_more():
+    """Buying back on a venue that charges in the asset needs a bigger order."""
+    quantity = hedge_quantity("mexc", "bitget", Side.SELL, 40.0, 1.0)
+    assert quantity == pytest.approx(40.0 / (1 - NATIVE_ASSET_FEE["bitget"]))
+
+
+def test_a_dust_fill_is_rounded_up_to_a_tradeable_size():
+    """A fill under the minimum notional is hedged at a size a venue accepts."""
+    quantity = hedge_quantity("mexc", "kraken", Side.SELL, 1.0, 1.0)
+    assert quantity == pytest.approx(3.1)
+
+
+def test_hedge_price_prefers_the_average():
+    """The average fill price is what the hedge is sized and priced against."""
+    assert hedge_price(fill_event(avg_price=Decimal("0.36"))) == 0.36
+
+
+def test_hedge_price_falls_back_to_the_last_fill():
+    """Without an average, the price of the fill that closed the order is used."""
+    event = fill_event(
+        avg_price=None, last_fill=Fill(price=Decimal("0.37"), amount=Decimal("40"))
     )
-    # Configure the mock's watch_orders method to return a mix of orders
-    client.watch_orders.side_effect = [
-        [
-            # ✅ Valid order
-            {
-                "id": "order-1",
-                "clientOrderId": "t-prefix_strategy123_suffix",
-                "symbol": "BTC/USDT",
-                "price": "50000",
-                "amount": "0.01",
-                "filled": "0.01",
-                "side": "buy",
-                "status": "closed",
-            },
-            #  Unfilled order
-            {
-                "id": "order-2",
-                "clientOrderId": "t-prefix_strategy123_suffix",
-                "symbol": "BTC/USDT",
-                "price": "50000",
-                "amount": "0.01",
-                "filled": "0.0",
-                "side": "buy",
-                "status": "closed",
-            },
-            #  Status is open
-            {
-                "id": "order-3",
-                "clientOrderId": "t-prefix_strategy123_suffix",
-                "symbol": "BTC/USDT",
-                "price": "50000",
-                "amount": "0.01",
-                "filled": "0.01",
-                "side": "buy",
-                "status": "open",
-            },
-            #  Unknown strategy
-            {
-                "id": "order-4",
-                "clientOrderId": "t-prefix_unknownStrategy_suffix",
-                "symbol": "BTC/USDT",
-                "price": "50000",
-                "amount": "0.01",
-                "filled": "0.01",
-                "side": "buy",
-                "status": "closed",
-            },
-            #  Duplicate valid order
-            {
-                "id": "order-1",
-                "clientOrderId": "t-prefix_strategy123_suffix",
-                "symbol": "BTC/USDT",
-                "price": "50000",
-                "amount": "0.01",
-                "filled": "0.01",
-                "side": "buy",
-                "status": "closed",
-            },
-        ],
-        asyncio.CancelledError("stop test loop"),  # force loop exit
-    ]
-
-    should_match = {"strategy123": "gate"}
-
-    # Launch the watcher
-    task = asyncio.create_task(watch_orders(redis, client, "BTC/USDT", should_match))
-
-    # Let the watcher run briefly
-    await asyncio.sleep(0.1)
-    task.cancel()
-
-    with pytest.raises(asyncio.CancelledError):
-        await task
-
-    # Check publish was only called for the valid, non-duplicate order
-    redis.publish.assert_called_once()
-    channel, message = redis.publish.call_args[0]
-    assert channel == MESSAGE_PROCESSOR_CHANNEL
-    assert '"exchange": "gate"' in message
-    assert message == json.dumps(dict(expected_matching_order), default=str)
+    assert hedge_price(event) == 0.37
 
 
-@pytest.mark.asyncio
-async def test_watch_sell_orders_various_order_states():
-    """Test watching sell orders with various states."""
-    # AsyncMock for redis
-    redis = AsyncMock()
+def test_hedge_price_is_none_when_the_venue_reported_none():
+    """An event with no price at all cannot size a hedge."""
+    assert hedge_price(fill_event(avg_price=None)) is None
 
-    # Create a mock CustomExchange client
-    client = AsyncMock(spec=CustomExchange)
-    client.name = "binance"
-    client.id = "binance"
 
-    expected_matching_order = OrderMessage(
-        kind=MessageType.ORDER,
-        strategy="matching",
-        exchange="gate",
-        id="t-prefix_strategy123_suffix",
-        exchange_id="_",
-        pair="BTC/USDT",
-        side=OrderSide.BUY,
-        order_type=OrderType.MARKET,
-        price=Decimal(50000),
-        # amount=Decimal("0.01"),
-        amount=Decimal("2.0020"),
+def test_hedge_intent_is_an_opposing_market_order():
+    """The hedge trades the other way, at market, on the other venue."""
+    intent = hedge_intent(fill_event(), "bitget", 40.0, 0.35)
+    assert intent.side is Side.BUY
+    assert intent.venue == "bitget"
+    assert intent.order_type is OrderKind.MARKET
+    assert intent.symbol == "ALPH/USDT"
+    assert intent.intent_id == "t-250906120000_lmb_eb"
+    assert intent.tags["hedge_of"] == "t-250906120000_lmb_eb"
+    assert intent.tags["origin_venue"] == "mexc"
+
+
+def test_hedge_intent_of_a_buy_sells():
+    """A filled buy is flattened by selling."""
+    assert hedge_intent(fill_event(side=Side.BUY), "bitget", 1.0, 1.0).side is Side.SELL
+
+
+# Selection -----------------------------------------------------------------
+
+
+def test_an_open_order_is_not_hedged():
+    """Only an order that can no longer fill further is hedged."""
+    event = fill_event(state=OrderState.OPEN)
+    assert should_hedge(event, SHOULD_MATCH, LimitedSet(10)) is None
+
+
+def test_a_partially_filled_order_waits():
+    """A partial fill is not hedged: the order can still fill further."""
+    event = fill_event(state=OrderState.PARTIALLY_FILLED)
+    assert should_hedge(event, SHOULD_MATCH, LimitedSet(10)) is None
+
+
+def test_a_cancelled_order_that_filled_is_still_hedged():
+    """A cancellation after a partial fill still leaves a position to close."""
+    event = fill_event(state=OrderState.CANCELLED, filled=Decimal("10"))
+    assert should_hedge(event, SHOULD_MATCH, LimitedSet(10)) == "bitget"
+
+
+def test_an_unfilled_order_is_not_hedged():
+    """Nothing filled, nothing to hedge."""
+    event = fill_event(state=OrderState.CANCELLED, filled=Decimal(0))
+    assert should_hedge(event, SHOULD_MATCH, LimitedSet(10)) is None
+
+
+def test_an_order_of_another_strategy_is_not_hedged():
+    """Only strategies that asked to be matched are matched."""
+    event = fill_event(strategy_id="other")
+    assert should_hedge(event, SHOULD_MATCH, LimitedSet(10)) is None
+
+
+def test_an_unattributed_order_is_not_hedged():
+    """An order placed outside this system belongs to no strategy."""
+    event = fill_event()
+    event.tags = {}
+    assert should_hedge(event, SHOULD_MATCH, LimitedSet(10)) is None
+
+
+def test_a_fill_on_the_taker_venue_is_not_hedged():
+    """The hedge venue cannot hedge against itself."""
+    event = fill_event(venue="bitget")
+    assert should_hedge(event, SHOULD_MATCH, LimitedSet(10)) is None
+
+
+def test_an_order_without_a_side_is_not_hedged():
+    """A hedge needs a direction, and guessing one would double a position."""
+    event = fill_event()
+    event.side = None
+    assert should_hedge(event, SHOULD_MATCH, LimitedSet(10)) is None
+
+
+def test_the_same_order_is_only_hedged_once():
+    """A replayed terminal event must not open a second position."""
+    hedged = LimitedSet(HEDGE_MEMORY)
+    event = fill_event()
+    assert should_hedge(event, SHOULD_MATCH, hedged) == "bitget"
+    assert should_hedge(fill_event(), SHOULD_MATCH, hedged) is None
+
+
+def test_the_same_order_id_on_two_venues_is_hedged_separately():
+    """Order ids are unique per venue, so the dedupe key carries the venue."""
+    hedged = LimitedSet(HEDGE_MEMORY)
+    assert should_hedge(fill_event(venue="mexc"), SHOULD_MATCH, hedged) == "bitget"
+    assert (
+        should_hedge(
+            fill_event(venue="gate"), {"lmb": "bitget"}, hedged
+        )
+        == "bitget"
     )
-    # Configure the mock's watch_orders method to return a mix of orders
-    client.watch_orders.side_effect = [
-        [
-            # ✅ Valid order
-            {
-                "id": "order-1",
-                "clientOrderId": "t-prefix_strategy123_suffix",
-                "symbol": "BTC/USDT",
-                "price": "50000",
-                "amount": "2.00",
-                "filled": "2.00",
-                "side": "sell",
-                "status": "closed",
-            },
-            #  Unfilled order
-            {
-                "id": "order-2",
-                "clientOrderId": "t-prefix_strategy123_suffix",
-                "symbol": "BTC/USDT",
-                "price": "50000",
-                "amount": "0.01",
-                "filled": "0.0",
-                "side": "sell",
-                "status": "closed",
-            },
-            #  Status is open
-            {
-                "id": "order-3",
-                "clientOrderId": "t-prefix_strategy123_suffix",
-                "symbol": "BTC/USDT",
-                "price": "50000",
-                "amount": "0.01",
-                "filled": "0.01",
-                "side": "sell",
-                "status": "open",
-            },
-            #  Unknown strategy
-            {
-                "id": "order-4",
-                "clientOrderId": "t-prefix_unknownStrategy_suffix",
-                "symbol": "BTC/USDT",
-                "price": "50000",
-                "amount": "0.01",
-                "filled": "0.01",
-                "side": "sell",
-                "status": "closed",
-            },
-            #  Duplicate valid order
-            {
-                "id": "order-1",
-                "clientOrderId": "t-prefix_strategy123_suffix",
-                "symbol": "BTC/USDT",
-                "price": "50000",
-                "amount": "0.01",
-                "filled": "0.01",
-                "side": "sell",
-                "status": "closed",
-            },
-        ],
-        asyncio.CancelledError("stop test loop"),  # force loop exit
-    ]
 
-    should_match = {"strategy123": "gate"}
 
-    # Launch the watcher
-    task = asyncio.create_task(watch_orders(redis, client, "BTC/USDT", should_match))
-
-    # Let the watcher run briefly
-    await asyncio.sleep(0.1)
-    task.cancel()
-
-    with pytest.raises(asyncio.CancelledError):
-        await task
-
-    # Check publish was only called for the valid, non-duplicate order
-    redis.publish.assert_called_once()
-    channel, message = redis.publish.call_args[0]
-    assert channel == MESSAGE_PROCESSOR_CHANNEL
-    assert '"exchange": "gate"' in message
-    assert message == json.dumps(dict(expected_matching_order), default=str)
+# Publication ---------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_watch_sell_orders_match_self():
-    """Test watching orders where the target exchange is the same as the source."""
-    # AsyncMock for redis
-    redis = AsyncMock()
-    publish = AsyncMock()
-    redis.publish = publish
+async def test_a_fill_publishes_a_hedge_intent():
+    """The hedge reaches the order manager as an intent."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
 
-    # Create a mock CustomExchange client
-    client = AsyncMock(spec=CustomExchange)
-    client.name = "gate"
-    client.id = "gate"
+    intent = await handle_order_event(
+        redis, publisher, fill_event(), SHOULD_MATCH, LimitedSet(10)
+    )
 
-    # Configure the mock's watch_orders method to return a mix of orders
-    client.watch_orders.side_effect = [
-        [
-            # ✅ Valid order
-            {
-                "id": "order-1",
-                "clientOrderId": "t-prefix_strategy123_suffix",
-                "symbol": "BTC/USDT",
-                "price": "50000",
-                "amount": "2.00",
-                "filled": "2.00",
-                "side": "sell",
-                "status": "closed",
-            },
-            #  Unfilled order
-            {
-                "id": "order-2",
-                "clientOrderId": "t-prefix_strategy123_suffix",
-                "symbol": "BTC/USDT",
-                "price": "50000",
-                "amount": "0.01",
-                "filled": "0.0",
-                "side": "sell",
-                "status": "closed",
-            },
-            #  Status is open
-            {
-                "id": "order-3",
-                "clientOrderId": "t-prefix_strategy123_suffix",
-                "symbol": "BTC/USDT",
-                "price": "50000",
-                "amount": "0.01",
-                "filled": "0.01",
-                "side": "sell",
-                "status": "open",
-            },
-            #  Unknown strategy
-            {
-                "id": "order-4",
-                "clientOrderId": "t-prefix_unknownStrategy_suffix",
-                "symbol": "BTC/USDT",
-                "price": "50000",
-                "amount": "0.01",
-                "filled": "0.01",
-                "side": "sell",
-                "status": "closed",
-            },
-            #  Duplicate valid order
-            {
-                "id": "order-1",
-                "clientOrderId": "t-prefix_strategy123_suffix",
-                "symbol": "BTC/USDT",
-                "price": "50000",
-                "amount": "0.01",
-                "filled": "0.01",
-                "side": "sell",
-                "status": "closed",
-            },
-        ],
-        asyncio.CancelledError("stop test loop"),  # force loop exit
+    assert intent is not None
+    entries = await redis.xrange(INTENTS_STREAM)
+    published = from_stream_fields(entries[0][1])
+    assert isinstance(published, OrderIntent)
+    assert published.venue == "bitget"
+    assert published.side is Side.BUY
+    assert published.order_type is OrderKind.MARKET
+    assert published.strategy == "matching"
+
+
+@pytest.mark.asyncio
+async def test_an_event_that_needs_no_hedge_publishes_nothing():
+    """Events the matcher does not act on leave the intents stream empty."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+
+    intent = await handle_order_event(
+        redis, publisher, fill_event(state=OrderState.OPEN), SHOULD_MATCH, LimitedSet(10)
+    )
+
+    assert intent is None
+    assert await redis.xlen(INTENTS_STREAM) == 0
+
+
+@pytest.mark.asyncio
+async def test_an_unpriceable_fill_is_skipped():
+    """A fill the venue gave no price for cannot be hedged."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+
+    intent = await handle_order_event(
+        redis, publisher, fill_event(avg_price=None), SHOULD_MATCH, LimitedSet(10)
+    )
+
+    assert intent is None
+    assert await redis.xlen(INTENTS_STREAM) == 0
+
+
+@pytest.mark.asyncio
+async def test_consume_order_events_hedges_what_it_reads():
+    """The consumer loop turns fills on the bus into hedges."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+    # A fill from before the matcher started must not be hedged.
+    await publisher.publish(redis, fill_event(intent_id="old"))
+
+    consumer = asyncio.create_task(
+        consume_order_events(redis, publisher, SHOULD_MATCH, 10, 10)
+    )
+    await asyncio.sleep(0.05)
+    await publisher.publish(redis, fill_event(intent_id="new"))
+    await asyncio.sleep(0.15)
+    consumer.cancel()
+
+    intents = [
+        from_stream_fields(fields) for _id, fields in await redis.xrange(INTENTS_STREAM)
     ]
+    assert [i.intent_id for i in intents] == ["new"]
 
-    should_match = {"strategy123": "gate"}
 
-    # Launch the watcher
-    task = asyncio.create_task(watch_orders(redis, client, "BTC/USDT", should_match))
+@pytest.mark.asyncio
+async def test_consume_order_events_survives_an_undecodable_entry():
+    """One bad entry does not stop the matcher from hedging the next fill."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
 
-    # Let the watcher run briefly
-    await asyncio.sleep(0.1)
-    task.cancel()
+    consumer = asyncio.create_task(
+        consume_order_events(redis, publisher, SHOULD_MATCH, 10, 10)
+    )
+    await asyncio.sleep(0.05)
+    from apps.shared.src.events import ORDER_EVENTS_STREAM
 
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    await redis.xadd(ORDER_EVENTS_STREAM, {"type": "order_event", "data": "{"})
+    await publisher.publish(redis, fill_event(intent_id="after"))
+    await asyncio.sleep(0.15)
+    consumer.cancel()
 
-    # Check publish was only called for the valid, non-duplicate order
-    redis.publish.assert_not_called()
+    intents = [
+        from_stream_fields(fields) for _id, fields in await redis.xrange(INTENTS_STREAM)
+    ]
+    assert [i.intent_id for i in intents] == ["after"]
+
+
+# Configuration -------------------------------------------------------------
+
+
+def test_matching_venues_reads_every_strategy_that_hedges():
+    """Matching applies regardless of the production flag."""
+    subscription = Subscription(venue="mexc", symbol="ALPH/USDT")
+    config = AppConfig(
+        redis=RedisConfig(),
+        market_data=MarketDataConfig(),
+        venues=(),
+        strategies=(
+            StrategyConfig(
+                identifier="lmb",
+                type="single_edge_liquidity",
+                production=False,
+                subscriptions=(subscription,),
+                params={"should_match": True, "taker_exchange": "bitget"},
+            ),
+            StrategyConfig(
+                identifier="plain",
+                type="take_take",
+                production=True,
+                subscriptions=(subscription,),
+                params={},
+            ),
+        ),
+    )
+
+    assert matching_venues(config) == {"lmb": "bitget"}

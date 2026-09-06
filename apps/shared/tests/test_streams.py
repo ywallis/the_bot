@@ -15,6 +15,7 @@ from apps.shared.src.streams import (
     recording_files,
     sealed_files,
     stream_path,
+    stream_tail,
 )
 
 TS = 1_757_160_000_000_000_000
@@ -210,3 +211,24 @@ def test_bucket_of_file(tmp_path: Path):
     assert bucket_of_file(Path("2026-09-06T12.jsonl")) == "2026-09-06T12"
     assert bucket_of_file(Path("2026-09-06T12.jsonl.zst")) == "2026-09-06T12"
     assert bucket_of_file(Path("notes.txt")) is None
+
+
+@pytest.mark.asyncio
+async def test_stream_tail_is_the_last_id():
+    """Resuming from the tail delivers everything published after it."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=10)
+    await publisher.publish(redis, book(1))
+    tail = await stream_tail(redis, "md:book:gate:BTC/USDT")
+    await publisher.publish(redis, book(2))
+
+    response = await redis.xread({"md:book:gate:BTC/USDT": tail})
+    delivered = [events.from_stream_fields(f) for _id, f in response[0][1]]
+    assert [e.seq for e in delivered] == [2]
+
+
+@pytest.mark.asyncio
+async def test_stream_tail_of_an_empty_stream_is_the_start():
+    """A stream with no entries yet has nothing to skip."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    assert await stream_tail(redis, "md:book:gate:BTC/USDT") == "0-0"

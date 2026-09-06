@@ -427,6 +427,10 @@ class OrderEvent(Event, tag=EventType.ORDER_EVENT.value):
         CCXT symbol.
     state : OrderState
         New state.
+    side : Side | None
+        Buy or sell. Every producer sets it; the type stays optional so a
+        decode of an event from a producer that predates the field still
+        succeeds rather than failing the whole read.
     ts_exch : int | None
         Exchange timestamp in milliseconds, if provided.
     venue_order_id : str | None
@@ -450,6 +454,7 @@ class OrderEvent(Event, tag=EventType.ORDER_EVENT.value):
     venue: str
     symbol: str
     state: OrderState
+    side: Side | None = None
     ts_exch: int | None = None
     venue_order_id: str | None = None
     filled: Decimal = Decimal(0)

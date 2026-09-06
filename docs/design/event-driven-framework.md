@@ -160,16 +160,30 @@ Order management
   ts_created.
 - `OrderEvent`: intent_id, strategy, venue, symbol, state (`accepted`,
   `rejected`, `open`, `partially_filled`, `filled`, `cancelled`, `expired`),
-  venue_order_id, filled, remaining, avg_price, last_fill (optional
-  `Fill`), reason, ts_recv, ts_exch.
+  side, venue_order_id, filled, remaining, avg_price, last_fill (optional
+  `Fill`), reason, tags, ts_recv, ts_exch. `side` was added in phase 3:
+  anything reacting to a fill needs its direction, and the matcher would
+  otherwise have to look the order up to hedge it the right way round.
+  `filled` is cumulative and `last_fill` is the difference from the previous
+  update of that order, which is the only way to recover a fill size from
+  CCXT's order updates.
 - `Fill`: price, amount, fee, fee_currency, liquidity (`maker`, `taker`),
   venue_trade_id.
 - `LatencyRecord`: intent_id, venue, ts_created, ts_oms_recv, ts_broker_send,
-  ts_venue_ack.
+  ts_broker_ack, ts_venue_ack. `ts_created` is the intent's own `ts_recv`.
+  `ts_broker_send` is measured when the request leaves the order manager
+  rather than when the broker reaches the venue: the broker's protocol
+  carries no timing back, so its internal queueing shows up inside
+  `ts_broker_ack` instead. An intent that arrives through the legacy bridge
+  is stamped when the bridge receives it, so its `ts_created` excludes the
+  pubsub hop the bridge adds.
 
-The current `OrderMessage`, `CancellationMessage` and `OrderBatchMessage`
-TypedDicts stay until phase 3, when the message processor moves to the new
-intents.
+The `OrderMessage`, `CancellationMessage` and `OrderBatchMessage`
+TypedDicts survive phase 3 in two places, both of them adapters rather than
+contracts: `legacy_bridge.py` translates them into intents on the way in, and
+the order manager builds them again to speak to the broker, which still uses
+the request-response pubsub protocol. They leave when the strategies emit
+intents (phase 4) and when the broker moves to the bus.
 
 ## 5. Configuration
 
@@ -183,6 +197,13 @@ port = 6379
 [market_data]
 book_depth = 20
 stream_maxlen = 10000
+
+[oms]
+# Consumer name inside the `oms` group. Stable across restarts on purpose,
+# so a restarted order manager reclaims its own unacknowledged intents.
+consumer = "oms"
+# Intents older than this are rejected rather than sent to a venue.
+max_intent_age_s = 5.0
 
 [[venues]]
 id = "gate"
@@ -218,21 +239,55 @@ Rules
 
 ## 6. Order management
 
-The message processor becomes an order manager. It
+The message processor is an order manager. It
 
 - consumes `oms:intents` through a consumer group and acknowledges after the
   broker has replied, so a crash mid-flight replays the intent;
 - keeps an order state machine per intent rather than one open order per
   strategy;
 - publishes every state transition to `oms:events`;
-- keeps the current per-strategy lock and latest-wins coalescing as an
-  opt-in behaviour, selected through `replace_of` on the intent, because it
-  is exactly what quote-replacement strategies want and harmful for others;
+- keeps the per-strategy lock and latest-wins coalescing as an opt-in
+  behaviour, selected through `replace_of` on the intent, because it is
+  exactly what quote-replacement strategies want and harmful for others;
 - writes `LatencyRecord`s.
 
-The order watcher (today inside `matcher.py`) becomes a feed handler that
-turns CCXT `watch_orders` updates into `OrderEvent`s. The matching logic
-consumes `oms:events` like any strategy and moves to the strategies repo.
+Orders are keyed by venue **and** intent id, not by intent id alone: the
+matcher hedges a fill by placing an order that reuses the filled order's
+client id on the other venue, so an intent id is only unique per venue.
+
+The book is fed from both directions. A placement enters it when the broker
+confirms, and it leaves when the order watcher reports a terminal state on
+`oms:events`. Without the second half, a filled order would sit in the book
+until shutdown tried to cancel it. Reading a stream the same process writes
+is harmless here because applying a state to the order it already describes
+is idempotent.
+
+Two guards bound what a replay can do. Acknowledging late means an intent can
+be delivered twice, so an intent older than `oms.max_intent_age_s` is
+rejected rather than sent to a venue: a stale quote is worse than a missing
+one. And the consumer name is stable across restarts, so a restarted order
+manager reclaims its own pending list instead of stranding it under a name
+nothing will ever use again.
+
+The order watcher is a feed handler (`order_watcher.py`) that turns CCXT
+`watch_orders` updates into `OrderEvent`s. The matching logic consumes
+`oms:events` like any strategy; it no longer holds an exchange connection at
+all, which is what makes it movable to the strategies repo.
+
+### 6.1 The legacy bridge
+
+Strategies still publish dicts on the `messageprocessor` pubsub channel.
+`legacy_bridge.py` runs inside the order manager, subscribes to that channel
+and republishes each message to `oms:intents`, so the order manager has
+exactly one input path and every order is recorded as an intent whatever
+produced it. The shim is deleted in phase 4.
+
+Two pieces of legacy vocabulary have no field on `OrderIntent` and travel as
+tags. `replace` versus `unique` versus `market` becomes `legacy_order_type`,
+because a legacy sender does not know the intent id it supersedes and so
+cannot fill `replace_of`. And a cancellation with an empty id, which means
+"cancel whatever I have resting", becomes a `CancelIntent` with an empty
+`target_intent_id` that the order manager resolves against its own book.
 
 ## 7. Recording tier
 
@@ -418,9 +473,19 @@ version, and `XADD` intents. No shared code is required. The Python
    `BalanceEvent`s, feed handlers are driven by declared `subscriptions`
    (a `trade` feed starts a `watch_trades` loop), and unknown feed names
    are a config error.
-3. Message processor and broker move to `oms:intents` and `oms:events`.
-   Order watcher publishes `OrderEvent`s. Matcher consumes them. Latency
-   records start flowing.
+3. Message processor moves to `oms:intents` and `oms:events`. Order watcher
+   publishes `OrderEvent`s. Matcher consumes them. Latency records start
+   flowing. Done 2026-09-06: the order manager consumes intents through the
+   `oms` consumer group, keeps a per-intent state machine keyed by venue and
+   intent id, publishes every transition and a `LatencyRecord` per placement,
+   and rejects intents older than `oms.max_intent_age_s`. The order watcher
+   moved out of `matcher.py` into its own feed handler, leaving the matcher
+   as a consumer of `oms:events` that emits hedges as intents. Legacy
+   strategies reach the order manager through `legacy_bridge.py` (section
+   6.1) rather than through a second code path inside it. The broker still
+   speaks its request-response pubsub protocol; moving it onto the bus is
+   deferred, since it is one hop behind the order manager and changing it
+   buys nothing until the strategies move.
 4. Strategy runtime and clock. Port one existing strategy as validation.
 5. Replayer and simulated broker.
 
@@ -458,6 +523,11 @@ it is roughly 15 GB/day and about a week.
 - JSON Lines with the payload spliced in verbatim: the recorder never decodes
   an event, so a producer can add a field without the recording tier knowing
   about it, and a replay is byte-identical to what was on the bus.
+- Consumers resolve the tail of a stream once and then advance through
+  concrete entry ids, rather than passing `$` on every `XREAD`. `$` is
+  re-resolved per call, so an entry published while a consumer sits between
+  two reads is skipped with nothing to show for it. On `oms:events` that is
+  a fill nobody hedges.
 
 ## 13. Open questions
 

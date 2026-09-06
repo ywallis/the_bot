@@ -135,6 +135,35 @@ class StreamPublisher:
         return stream
 
 
+async def stream_tail(redis: Any, stream: str) -> str:
+    """
+    Return the id to start from to receive only entries added after now.
+
+    ``XREAD`` accepts ``$`` for this, but ``$`` is resolved afresh on every
+    call, so an entry published while a consumer sits between two reads is
+    skipped without a trace. Resolving the tail once and then advancing
+    through concrete ids closes that window: anything added after this call
+    carries a higher id and is delivered.
+
+    Parameters
+    ----------
+    redis : Any
+        A ``redis.asyncio.Redis`` client.
+    stream : str
+        Stream name, already prefixed if the caller uses a prefix.
+
+    Returns
+    -------
+    str
+        The last entry id, or ``0-0`` for a stream that has none.
+    """
+    entries = await redis.xrevrange(stream, count=1)
+    if not entries:
+        return "0-0"
+    entry_id = entries[0][0]
+    return entry_id.decode() if isinstance(entry_id, bytes) else str(entry_id)
+
+
 def configured_streams(config: AppConfig, production: bool | None) -> list[str]:
     """
     Enumerate every stream the running system can produce.

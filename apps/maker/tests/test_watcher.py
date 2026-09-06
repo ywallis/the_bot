@@ -6,6 +6,7 @@ import pytest
 from fakeredis import aioredis as fakeredis
 
 from apps.maker.src import watcher
+from apps.maker.tests.conftest import FakeClient, StopWatching
 from apps.shared.src import events
 from apps.shared.src.config import parse_app_config
 from apps.shared.src.errors import ChecksumError, NetworkError, UnsubscribeError
@@ -13,41 +14,6 @@ from apps.shared.src.events import BookEvent, TradeEvent
 from apps.shared.src.streams import StreamPublisher
 
 VENUES = [{"id": "gate", "name": "Gate.io"}, {"id": "mexc", "name": "Mexc"}]
-
-
-class StopWatching(Exception):
-    """Raised by fake clients to break out of a watch loop."""
-
-
-class FakeClient:
-    """A CCXT-like client that replays scripted results then stops."""
-
-    def __init__(self, venue: str, results: list):
-        """Store the scripted results, which may be dicts, lists or exceptions."""
-        self.id = venue
-        self.name = venue.title()
-        self._results = list(results)
-        self.closed = 0
-
-    async def _next(self):
-        if not self._results:
-            raise StopWatching()
-        result = self._results.pop(0)
-        if isinstance(result, Exception):
-            raise result
-        return result
-
-    async def watch_order_book(self, symbol: str):
-        """Return the next scripted order book."""
-        return await self._next()
-
-    async def watch_trades(self, symbol: str):
-        """Return the next scripted trade batch."""
-        return await self._next()
-
-    async def close(self):
-        """Count close calls."""
-        self.closed += 1
 
 
 def order_book(best_bid: float) -> dict:

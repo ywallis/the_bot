@@ -218,8 +218,8 @@ apps/
 │   ├── src/           # Shared utilities
 │   │   ├── config.py       # Typed config loader (msgspec). Single source of truth for config.toml
 │   │   ├── events.py       # Event schemas, JSON codec and Redis Stream names (cross-language contract)
-│   │   ├── ccxt_events.py  # Converters from CCXT structures to BookEvent/TradeEvent/BalanceEvent
-│   │   ├── streams.py      # StreamPublisher (XADD with seq and trimming), stream enumeration and paths
+│   │   ├── ccxt_events.py  # Converters from CCXT structures to Book/Trade/Balance/OrderEvent
+│   │   ├── streams.py      # StreamPublisher (XADD with seq and trimming), stream_tail, enumeration, paths
 │   │   └── utils.py        # Backwards-compatible module globals derived from config.py
 │   └── tests/
 └── accountant/
@@ -234,6 +234,10 @@ apps/
 - New inter-process messages are `msgspec.Struct` events in `apps.shared.src.events` and travel on Redis Streams.
 - Feed handlers (`apps/maker/src/watcher.py`, `balance.py`) publish through `StreamPublisher` and keep writing the legacy snapshot keys.
 - `apps/maker/src/recorder.py` tails every configured stream into `data/<stream path>/<UTC hour>.jsonl`; it is the hot tier of the recording, shipped to the archive host once sealed. Never touch the newest file in a stream directory: the recorder still holds it open.
+- Orders travel as events: strategies publish `OrderIntent`/`CancelIntent` to `oms:intents`, the order manager (`apps/maker/src/message_processor.py`) is the single consumer of that stream through the `oms` consumer group, and it publishes `OrderEvent`s to `oms:events` and `LatencyRecord`s to `oms:latency`.
+- `apps/maker/src/order_watcher.py` turns CCXT `watch_orders` updates into `OrderEvent`s; `apps/maker/src/matcher.py` is an ordinary consumer of `oms:events` and holds no exchange connection.
+- Legacy strategies still publish dicts on the `messageprocessor` pubsub channel. `apps/maker/src/legacy_bridge.py` translates them into intents and is the only place that knows the legacy wire format; delete it in phase 4 rather than adding a second path through the order manager.
+- Consumers of a stream resolve its tail with `streams.stream_tail` and then advance through concrete entry ids. Do not pass `$` to a repeated `XREAD`: it re-resolves per call and silently drops anything published between two reads.
 - Before adding a venue, after a CCXT upgrade, or when a feed misbehaves: run `uv run -m apps.maker.src.tools.venue_conformance <venue> <SYMBOL>` and follow `docs/runbooks/new-venue.md`. Venue websocket behaviour (checksums, trade ids, cache replay, error types) is not covered by unit tests.
 - Design and migration plan: `docs/design/event-driven-framework.md`.
 

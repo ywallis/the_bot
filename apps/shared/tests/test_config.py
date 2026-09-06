@@ -242,3 +242,26 @@ def test_venue_options_default_and_parsed():
     by_id = {v.id: v for v in config.venues}
     assert by_id["gate"].options == {}
     assert by_id["mexc"].options == {"watchOrderBook": {"checksum": False}}
+
+
+def test_oms_settings_default():
+    """The order manager runs on defaults unless the config says otherwise."""
+    config = parse_app_config({"venues": VENUES, "strategies": [new_strategy()]})
+    assert config.oms.consumer == "oms"
+    assert config.oms.max_intent_age_s == 5.0
+    assert config.oms.stream_maxlen == 10_000
+
+
+def test_oms_settings_are_overridable():
+    """Each order manager setting can be tuned from the config file."""
+    config = parse_app_config(
+        {
+            "venues": VENUES,
+            "strategies": [new_strategy()],
+            "oms": {"consumer": "oms-b", "max_intent_age_s": 0.5, "batch": 5},
+        }
+    )
+    assert config.oms.consumer == "oms-b"
+    assert config.oms.max_intent_age_s == 0.5
+    assert config.oms.batch == 5
+    assert config.oms.block_ms == 1000
