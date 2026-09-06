@@ -135,6 +135,32 @@ class StreamPublisher:
         return stream
 
 
+def entry_id_str(entry_id: Any) -> str:
+    """
+    Return a Redis stream entry id as the string a command will accept.
+
+    Whether ids arrive as ``bytes`` or ``str`` is decided by the connection
+    pool, not by the client: ``decode_responses`` passed to ``Redis`` is
+    ignored when an existing ``ConnectionPool`` is handed in, and the pools
+    in this app are built without it. So an id read from a stream is bytes
+    in production and ``str`` in a test that builds a client directly, and
+    ``str(b"1-0")`` is ``"b'1-0'"``, which Redis rejects as an invalid
+    stream id. Every id that crosses from a reply back into a command goes
+    through here.
+
+    Parameters
+    ----------
+    entry_id : Any
+        Entry id from an ``XREAD``, ``XREADGROUP`` or range reply.
+
+    Returns
+    -------
+    str
+        The id.
+    """
+    return entry_id.decode() if isinstance(entry_id, bytes) else str(entry_id)
+
+
 async def stream_tail(redis: Any, stream: str) -> str:
     """
     Return the id to start from to receive only entries added after now.
@@ -160,8 +186,7 @@ async def stream_tail(redis: Any, stream: str) -> str:
     entries = await redis.xrevrange(stream, count=1)
     if not entries:
         return "0-0"
-    entry_id = entries[0][0]
-    return entry_id.decode() if isinstance(entry_id, bytes) else str(entry_id)
+    return entry_id_str(entries[0][0])
 
 
 def configured_streams(config: AppConfig, production: bool | None) -> list[str]:

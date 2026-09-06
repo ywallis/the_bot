@@ -2,6 +2,7 @@
 
 import asyncio
 from decimal import Decimal
+from typing import Any, cast
 
 import pytest
 from fakeredis import aioredis as fakeredis
@@ -68,6 +69,13 @@ def fill_event(
         last_fill=last_fill,
         tags={STRATEGY_TAG: strategy_id, "order_id": "eb"},
     )
+
+
+async def intents_on(redis: Any) -> list[OrderIntent]:
+    """Return every order intent published to the intents stream."""
+    entries = cast(list[Any], await redis.xrange(INTENTS_STREAM))
+    decoded = (from_stream_fields(fields) for _id, fields in entries)
+    return [event for event in decoded if isinstance(event, OrderIntent)]
 
 
 # Sizing --------------------------------------------------------------------
@@ -218,9 +226,7 @@ async def test_a_fill_publishes_a_hedge_intent():
     )
 
     assert intent is not None
-    entries = await redis.xrange(INTENTS_STREAM)
-    published = from_stream_fields(entries[0][1])
-    assert isinstance(published, OrderIntent)
+    published = (await intents_on(redis))[0]
     assert published.venue == "bitget"
     assert published.side is Side.BUY
     assert published.order_type is OrderKind.MARKET
@@ -256,9 +262,17 @@ async def test_an_unpriceable_fill_is_skipped():
 
 
 @pytest.mark.asyncio
-async def test_consume_order_events_hedges_what_it_reads():
-    """The consumer loop turns fills on the bus into hedges."""
-    redis = fakeredis.FakeRedis(decode_responses=True)
+@pytest.mark.parametrize("decode", [True, False], ids=["decoded", "bytes"])
+async def test_consume_order_events_hedges_what_it_reads(decode: bool):
+    """
+    The consumer loop turns fills on the bus into hedges.
+
+    Run against both a decoding and a non-decoding client: the connection
+    pool decides which one production gets, and a cursor built with
+    ``str()`` from a bytes id is rejected on the next read. That killed this
+    loop one event before the first live fill, which then went unhedged.
+    """
+    redis = fakeredis.FakeRedis(decode_responses=decode)
     publisher = StreamPublisher(maxlen=100)
     # A fill from before the matcher started must not be hedged.
     await publisher.publish(redis, fill_event(intent_id="old"))
@@ -267,14 +281,17 @@ async def test_consume_order_events_hedges_what_it_reads():
         consume_order_events(redis, publisher, SHOULD_MATCH, 10, 10)
     )
     await asyncio.sleep(0.05)
-    await publisher.publish(redis, fill_event(intent_id="new"))
+    # Two fills, read separately, so the cursor built from the first read has
+    # to survive as the argument of the second.
+    await publisher.publish(redis, fill_event(intent_id="first"))
     await asyncio.sleep(0.15)
+    await publisher.publish(redis, fill_event(intent_id="second"))
+    await asyncio.sleep(0.15)
+
+    assert not consumer.done(), "the consumer died between the two fills"
     consumer.cancel()
 
-    intents = [
-        from_stream_fields(fields) for _id, fields in await redis.xrange(INTENTS_STREAM)
-    ]
-    assert [i.intent_id for i in intents] == ["new"]
+    assert [i.intent_id for i in await intents_on(redis)] == ["first", "second"]
 
 
 @pytest.mark.asyncio
@@ -294,10 +311,7 @@ async def test_consume_order_events_survives_an_undecodable_entry():
     await asyncio.sleep(0.15)
     consumer.cancel()
 
-    intents = [
-        from_stream_fields(fields) for _id, fields in await redis.xrange(INTENTS_STREAM)
-    ]
-    assert [i.intent_id for i in intents] == ["after"]
+    assert [i.intent_id for i in await intents_on(redis)] == ["after"]
 
 
 # Configuration -------------------------------------------------------------

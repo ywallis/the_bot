@@ -238,6 +238,7 @@ apps/
 - `apps/maker/src/order_watcher.py` turns CCXT `watch_orders` updates into `OrderEvent`s; `apps/maker/src/matcher.py` is an ordinary consumer of `oms:events` and holds no exchange connection.
 - Legacy strategies still publish dicts on the `messageprocessor` pubsub channel. `apps/maker/src/legacy_bridge.py` translates them into intents and is the only place that knows the legacy wire format; delete it in phase 4 rather than adding a second path through the order manager.
 - Consumers of a stream resolve its tail with `streams.stream_tail` and then advance through concrete entry ids. Do not pass `$` to a repeated `XREAD`: it re-resolves per call and silently drops anything published between two reads.
+- Redis replies are **bytes** in every live process: `decode_responses` passed to `Redis(...)` is ignored when an existing `ConnectionPool` is handed in, and the pools here are built without it. Pass any stream entry id back through `streams.entry_id_str` before using it as a command argument — `str(b"1-0")` is `"b'1-0'"`, which Redis rejects. Tests that build a client directly get `str` instead, so cover both (see the parametrised fixtures in `test_message_processor.py`).
 - Before adding a venue, after a CCXT upgrade, or when a feed misbehaves: run `uv run -m apps.maker.src.tools.venue_conformance <venue> <SYMBOL>` and follow `docs/runbooks/new-venue.md`. Venue websocket behaviour (checksums, trade ids, cache replay, error types) is not covered by unit tests.
 - Design and migration plan: `docs/design/event-driven-framework.md`.
 
