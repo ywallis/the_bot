@@ -21,7 +21,7 @@ from apps.maker.src.utils import info_from_oid
 from apps.shared.src.errors import NetworkError
 from apps.shared.src.exchange_clients import authenticated_clients
 from apps.shared.src.structs import CustomExchange
-from apps.shared.src.utils import load_config
+from apps.shared.src.config import load_app_config
 
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
@@ -189,19 +189,17 @@ async def main(clients: dict[str, CustomExchange]):
     clients : dict[str, CustomExchange]
         Dictionary of authenticated exchange clients.
     """
-    config = load_config()
+    config = load_app_config()
     exchange_and_pair: set[tuple[str, str]] = set()
 
-    should_match = {}
+    should_match: dict[str, str] = {}
 
-    strategies = config.get("strategies")
-    if strategies is None:
-        raise Exception("No strategy found")
-    for strategy in strategies:
-        # pairs.add(strategy["symbol"])
-        if strategy.get("should_match"):
-            should_match[strategy["identifier"]] = strategy["taker_exchange"]
-            exchange_and_pair.add((strategy["maker_exchange"], strategy["symbol"]))
+    # Matching applies to every strategy regardless of production flag.
+    for strategy in config.strategies:
+        params = strategy.params
+        if params.get("should_match"):
+            should_match[strategy.identifier] = params["taker_exchange"]
+            exchange_and_pair.add((params["maker_exchange"], params["symbol"]))
     # Init Redis
     pool = ConnectionPool(
         host=REDIS_HOSTNAME, port=REDIS_PORT, db=0, max_connections=20
