@@ -22,6 +22,7 @@ import logging
 import os
 import signal
 import time
+from compression import zstd
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
@@ -175,11 +176,6 @@ def _last_compressed_line(path: Path) -> bytes | None:
         The line without its newline, or None if the file has none or
         cannot be decompressed.
     """
-    try:
-        from compression import zstd
-    except ImportError:
-        logger.error(f"Cannot read {path}, this interpreter has no zstd support")
-        return None
     last = None
     try:
         with zstd.open(path, "rb") as f:

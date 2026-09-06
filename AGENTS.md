@@ -5,7 +5,7 @@ This document provides guidelines for AI agents working in this repository.
 ## Project Overview
 
 This is a Python-based event-driven liquidity arbitrage framework. The project uses:
-- Python 3.12+
+- Python 3.14+
 - pytest with pytest-asyncio for testing
 - ruff for linting (docstrings only)
 - mypy for type checking
@@ -129,7 +129,7 @@ def function_name(param1: str, param2: int) -> bool:
 
 ### Type Annotations
 
-- Use Python 3.12+ union syntax (`str | None` instead of `Optional[str]`)
+- Use Python 3.10+ union syntax (`str | None` instead of `Optional[str]`)
 - Use `TypeGuard` for type narrowing functions
 - Use `TypedDict` for dictionary-based data structures
 - Use `Decimal` for financial quantities (not float)
