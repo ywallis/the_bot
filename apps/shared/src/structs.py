@@ -1,6 +1,6 @@
 """Data structures and types used across the application."""
 
-from typing import Literal, NotRequired, Protocol, TypedDict
+from typing import Any, Literal, NotRequired, Protocol, TypedDict
 
 
 class ccxtFee(TypedDict):
@@ -173,6 +173,25 @@ class CustomExchange(Protocol):
         -------
         dict[str, str]
             The order book data.
+        """
+        ...
+
+    async def watch_trades(self, symbol: str) -> list[dict[str, Any]]:
+        """
+        Watch public trades for a symbol.
+
+        With CCXT's default ``newUpdates`` option each call resolves with
+        only the trades received since the previous call.
+
+        Parameters
+        ----------
+        symbol : str
+            The trading pair symbol.
+
+        Returns
+        -------
+        list[dict[str, Any]]
+            New trades, oldest first.
         """
         ...
 

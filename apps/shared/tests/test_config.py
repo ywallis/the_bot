@@ -12,25 +12,6 @@ from apps.shared.src.config import (
 VENUES = [{"id": "gate", "name": "Gate.io"}, {"id": "mexc", "name": "Mexc"}]
 
 
-def legacy_strategy(**overrides):
-    """Return a raw legacy-shaped strategy table."""
-    raw = {
-        "symbol": "ALPH/USDT",
-        "type": "single_edge_liquidity",
-        "identifier": "lam",
-        "exchange_1": "gate",
-        "exchange_2": "mexc",
-        "taker_exchange": "gate",
-        "maker_exchange": "mexc",
-        "should_match": True,
-        "spread": 1.0025,
-        "min_size_usdt": 11,
-        "production": True,
-    }
-    raw.update(overrides)
-    return raw
-
-
 def new_strategy(**overrides):
     """Return a raw strategy table in the target shape."""
     raw = {
@@ -47,47 +28,32 @@ def new_strategy(**overrides):
     return raw
 
 
-def test_legacy_strategy_derives_subscriptions():
-    """Legacy venue keys yield one book subscription per distinct venue."""
-    config = parse_app_config(
-        {"refresh_speed": 0.01, "exchanges": VENUES, "strategies": [legacy_strategy()]}
-    )
-    strategy = config.strategies[0]
-    assert strategy.legacy is True
-    assert strategy.subscriptions == (
-        Subscription(venue="gate", symbol="ALPH/USDT"),
-        Subscription(venue="mexc", symbol="ALPH/USDT"),
-    )
-    assert config.venue_symbol_pairs() == {("gate", "ALPH/USDT"), ("mexc", "ALPH/USDT")}
-    assert config.symbols() == {"ALPH/USDT"}
-
-
-def test_legacy_dict_roundtrip_preserves_raw_keys():
-    """The flat dict handed to legacy strategies matches the original table."""
-    raw = legacy_strategy()
-    config = parse_app_config(
-        {"refresh_speed": 0.01, "exchanges": VENUES, "strategies": [raw]}
-    )
-    flat = config.strategies[0].to_legacy_dict(config.refresh_speed)
-    expected = dict(raw, refresh_speed=0.01)
-    assert flat == expected
-
-
 def test_new_strategy_shape():
     """Explicit subscriptions and params are parsed and exposed."""
     config = parse_app_config(
         {"venues": VENUES, "strategies": [new_strategy()]}
     )
     strategy = config.strategies[0]
-    assert strategy.legacy is False
     assert strategy.params == {"lag_ms": 400, "threshold": 0.002}
     assert strategy.subscriptions[0].feeds == ("book", "trade")
     assert strategy.subscriptions[1].feeds == ("book",)
     assert config.symbols() == {"BTC/USDT", "SOL/USDT"}
-    flat = strategy.to_legacy_dict(None)
+    flat = strategy.to_strategy_dict(None)
     assert flat["lag_ms"] == 400
     assert flat["subscriptions"][0]["venue"] == "gate"
     assert "refresh_speed" not in flat
+    assert strategy.to_strategy_dict(0.01)["refresh_speed"] == 0.01
+
+
+def test_strategy_dict_matches_what_strategies_read():
+    """Params are flattened to the top level, as strategies index them."""
+    raw = new_strategy(params={"maker_exchange": "mexc", "spread": 1.0025})
+    config = parse_app_config({"venues": VENUES, "strategies": [raw]})
+    flat = config.strategies[0].to_strategy_dict(0.01)
+    assert flat["maker_exchange"] == "mexc"
+    assert flat["spread"] == 1.0025
+    assert flat["identifier"] == "lat"
+    assert "params" not in flat
 
 
 def test_defaults_for_redis_and_market_data():
@@ -162,10 +128,19 @@ def test_undeclared_venue_rejected():
         )
 
 
-def test_legacy_requires_refresh_speed():
-    """Legacy strategies need a polling interval."""
-    with pytest.raises(ConfigError, match="refresh_speed"):
-        parse_app_config({"exchanges": VENUES, "strategies": [legacy_strategy()]})
+def test_missing_subscriptions_rejected():
+    """Subscriptions are mandatory; nothing is inferred from parameters."""
+    raw = new_strategy()
+    del raw["subscriptions"]
+    with pytest.raises(ConfigError, match="subscriptions"):
+        parse_app_config({"venues": VENUES, "strategies": [raw]})
+
+
+def test_stray_top_level_key_rejected():
+    """A parameter outside [strategies.params] is an error, not dropped."""
+    raw = new_strategy(spread=1.0025)
+    with pytest.raises(ConfigError, match="unknown keys.*spread"):
+        parse_app_config({"venues": VENUES, "strategies": [raw]})
 
 
 def test_missing_required_key_rejected():
@@ -221,4 +196,37 @@ def test_real_config_loads():
     config = load_app_config()
     assert config.venue_ids >= {"mexc", "bitget"}
     assert config.strategies
-    assert not any(s.legacy for s in config.strategies)
+    assert all(s.subscriptions for s in config.strategies)
+
+
+def test_recorder_config_defaults_and_override():
+    """The recorder section is optional and fully defaulted."""
+    config = parse_app_config({"venues": VENUES, "strategies": [new_strategy()]})
+    assert config.recorder.root == "data"
+    assert config.recorder.block_ms == 1000
+    config = parse_app_config(
+        {
+            "venues": VENUES,
+            "recorder": {"root": "/var/bot/data", "batch": 50},
+            "strategies": [new_strategy()],
+        }
+    )
+    assert config.recorder.root == "/var/bot/data"
+    assert config.recorder.batch == 50
+    assert config.recorder.flush_interval_s == 1.0
+
+
+def test_unknown_feed_is_rejected():
+    """A typo in a feed name fails loudly instead of silently disabling it."""
+    bad = new_strategy(
+        subscriptions=[{"venue": "gate", "symbol": "BTC/USDT", "feeds": ["books"]}]
+    )
+    with pytest.raises(ConfigError, match="unknown feeds"):
+        parse_app_config({"venues": VENUES, "strategies": [bad]})
+
+
+def test_feed_pairs_filters_by_feed():
+    """feed_pairs returns only the venue/symbol tuples subscribed to a feed."""
+    config = parse_app_config({"venues": VENUES, "strategies": [new_strategy()]})
+    assert config.feed_pairs("book") == {("gate", "BTC/USDT"), ("mexc", "SOL/USDT")}
+    assert config.feed_pairs("trade") == {("gate", "BTC/USDT")}

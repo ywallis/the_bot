@@ -45,7 +45,7 @@ app_config: AppConfig = load_app_config()
 refresh_speed: float | None = app_config.refresh_speed
 
 strategies: list[dict[str, Any]] = [
-    s.to_legacy_dict(refresh_speed) for s in app_config.active_strategies(production)
+    s.to_strategy_dict(refresh_speed) for s in app_config.active_strategies(production)
 ]
 exchange_and_pair: set[tuple[str, str]] = app_config.venue_symbol_pairs(production)
 pairs: set[str] = app_config.symbols(production)

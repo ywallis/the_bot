@@ -15,10 +15,17 @@ This is a Python-based event-driven liquidity arbitrage framework. The project u
 
 ### Running Tests
 
+The strategies submodule holds `config.toml`, which most modules load at
+import time. In a fresh clone or worktree run `git submodule update --init`
+first or the maker tests fail at collection.
+
 Run all tests:
 ```bash
 pytest
 ```
+
+Stream and Redis behaviour is tested against `fakeredis` (a dev dependency),
+so no Redis server is needed.
 
 Run a single test file:
 ```bash
@@ -47,9 +54,9 @@ pytest --cov=apps/maker/src --cov=apps/shared/src
 
 ### Linting
 
-Run ruff linter:
+Run ruff linter (installed as a dev dependency):
 ```bash
-ruff check apps/
+uv run ruff check apps/
 ```
 
 The project only lints docstrings (D rules), ignoring D100 (missing module docstring):
@@ -209,9 +216,11 @@ apps/
 │   └── tests/         # Test files
 ├── shared/
 │   ├── src/           # Shared utilities
-│   │   ├── config.py  # Typed config loader (msgspec). Single source of truth for config.toml
-│   │   ├── events.py  # Event schemas, JSON codec and Redis Stream names (cross-language contract)
-│   │   └── utils.py   # Backwards-compatible module globals derived from config.py
+│   │   ├── config.py       # Typed config loader (msgspec). Single source of truth for config.toml
+│   │   ├── events.py       # Event schemas, JSON codec and Redis Stream names (cross-language contract)
+│   │   ├── ccxt_events.py  # Converters from CCXT structures to BookEvent/TradeEvent/BalanceEvent
+│   │   ├── streams.py      # StreamPublisher (XADD with seq and trimming), stream enumeration and paths
+│   │   └── utils.py        # Backwards-compatible module globals derived from config.py
 │   └── tests/
 └── accountant/
     ├── src/
@@ -221,8 +230,10 @@ apps/
 ### Configuration and events
 
 - Read config through `apps.shared.src.config.load_app_config()`; do not parse `config.toml` elsewhere.
-- Strategies may declare `subscriptions` explicitly; legacy `exchange_1`/`exchange_2`/`symbol` keys are still derived.
+- Every strategy declares `subscriptions`; parameters live under `[strategies.params]`. Stray top-level keys are a config error.
 - New inter-process messages are `msgspec.Struct` events in `apps.shared.src.events` and travel on Redis Streams.
+- Feed handlers (`apps/maker/src/watcher.py`, `balance.py`) publish through `StreamPublisher` and keep writing the legacy snapshot keys.
+- `apps/maker/src/recorder.py` tails every configured stream into `data/<stream path>/<UTC day>.jsonl`; it is the durable copy of market data.
 - Design and migration plan: `docs/design/event-driven-framework.md`.
 
 ### Misc

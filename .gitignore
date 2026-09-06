@@ -5,3 +5,6 @@ app.log
 **/*.pyc
 test.py
 Session.vim
+
+# Recorder output
+/data/
