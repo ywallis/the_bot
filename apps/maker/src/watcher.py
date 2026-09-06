@@ -8,6 +8,7 @@ from datetime import datetime
 from redis.asyncio import ConnectionPool, Redis
 
 import apps.shared.src.logging_config as logging_config
+from apps.maker.src.constants import REDIS_HOSTNAME, REDIS_PORT
 from apps.shared.src.errors import (
     CancelledError,
     ExchangeClosedByUser,
@@ -84,7 +85,9 @@ async def main(config_tuples: set[tuple[str, str]], clients: dict[str, CustomExc
     clients : dict[str, CustomExchange]
         Dictionary of exchange clients.
     """
-    pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=20)
+    pool = ConnectionPool(
+        host=REDIS_HOSTNAME, port=REDIS_PORT, db=0, max_connections=20
+    )
     redis = Redis(decode_responses=True, connection_pool=pool)
 
     try:

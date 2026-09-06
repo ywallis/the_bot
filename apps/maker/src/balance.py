@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from redis.asyncio import ConnectionPool, Redis
 
 import apps.shared.src.logging_config as logging_config
+from apps.maker.src.constants import REDIS_HOSTNAME, REDIS_PORT
 from apps.shared.src.errors import NetworkError
 from apps.shared.src.exchange_clients import authenticated_clients
 from apps.shared.src.structs import CustomExchange
@@ -81,7 +82,9 @@ async def main(clients: dict[str, CustomExchange]):
         A dict mapping CCXT short id to a CCXT exchange client
 
     """
-    pool = ConnectionPool(host="localhost", port=6379, db=0, max_connections=20)
+    pool = ConnectionPool(
+        host=REDIS_HOSTNAME, port=REDIS_PORT, db=0, max_connections=20
+    )
     redis = Redis(decode_responses=True, connection_pool=pool)
 
     # Since watch only shows updates, I first pull data with fetch

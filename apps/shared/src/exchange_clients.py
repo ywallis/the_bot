@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 import apps.shared.src.logging_config as logging_config
 from apps.shared.src.errors import RequestTimeout
 from apps.shared.src.structs import CustomExchange
-from apps.shared.src.utils import load_config
+from apps.shared.src.config import load_app_config
 
 # Initializing centralized logging
 logging_config.setup_logging()
@@ -38,18 +38,16 @@ async def load_clients():
 
 
 load_dotenv()
-# Load TOML file
+# Load typed config. Symbols cover every strategy, production or not, so the
+# broker can recollect open orders regardless of the mode it runs in.
 
-config = load_config()
-# Extract exchange items
-exchanges = config.get("exchanges", [])
-strategies = config.get("strategies", [])
-symbols = set([strategy["symbol"] for strategy in strategies])
+config = load_app_config()
+symbols: set[str] = config.symbols()
 
 authenticated_clients: dict[str, CustomExchange] = {}
 
-for exchange in exchanges:
-    id = exchange["id"]
+for venue in config.venues:
+    id = venue.id
     exchange_key = os.getenv(f"{id.upper()}_KEY")
     exchange_secret = os.getenv(f"{id.upper()}_SECRET")
     exchange_password = os.getenv(f"{id.upper()}_PASSWORD")
