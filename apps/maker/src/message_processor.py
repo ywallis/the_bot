@@ -65,7 +65,7 @@ from apps.shared.src.events import (
     from_stream_fields,
     now_ns,
 )
-from apps.shared.src.streams import StreamPublisher, stream_tail
+from apps.shared.src.streams import StreamPublisher, entry_id_str, stream_tail
 
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
@@ -410,6 +410,15 @@ class OrderManager:
         acknowledged. Once that is empty the cursor moves to new entries and
         stays there.
 
+        While draining the pending list the cursor advances past each entry
+        as it is read. Processing is asynchronous, so an entry is still
+        pending when the next read goes out, and a cursor that stayed at the
+        start of the list would hand the same entries back and act on them
+        again on every pass. The pending list itself remains the record of
+        what is unfinished, so advancing here loses nothing: a crash
+        mid-drain leaves the entries in it and the next process starts over
+        from the beginning.
+
         Returns
         -------
         int
@@ -433,7 +442,10 @@ class OrderManager:
                 continue
             for entry_id, fields in entries:
                 read += 1
-                self.start(str(entry_id), fields)
+                entry = entry_id_str(entry_id)
+                if self.cursor != NEW:
+                    self.cursor = entry
+                self.start(entry, fields)
         return read
 
     def start(self, entry_id: str, fields: dict[Any, Any]) -> None:
@@ -908,7 +920,7 @@ class OrderManager:
             )
             for _stream, entries in cast(list[Any], response or []):
                 for entry_id, fields in entries:
-                    cursor = str(entry_id)
+                    cursor = entry_id_str(entry_id)
                     try:
                         event = from_stream_fields(fields)
                     except Exception as error:  # noqa: BLE001, keep following
@@ -1059,7 +1071,8 @@ class OrderManager:
                 await pubsub.subscribe("INIT")
                 async for message in pubsub.listen():
                     if message["type"] == "message":
-                        response = message["data"].decode()
+                        data = message["data"]
+                        response = data.decode() if isinstance(data, bytes) else data
                         logger.debug(f"Received init reply from broker: {response}")
                         order_batch = cast(OrderBatchMessage, parse_message(response))
                         for order in order_batch["orders"]:

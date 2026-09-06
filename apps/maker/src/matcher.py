@@ -34,7 +34,7 @@ from apps.shared.src.events import (
     from_stream_fields,
     now_ns,
 )
-from apps.shared.src.streams import StreamPublisher, stream_tail
+from apps.shared.src.streams import StreamPublisher, entry_id_str, stream_tail
 from apps.shared.src.utils import production
 
 logging_config.setup_logging()
@@ -293,7 +293,7 @@ async def consume_order_events(
         # RESP2 here so it is always the list form.
         for _stream, entries in cast(list[Any], response or []):
             for entry_id, fields in entries:
-                cursor = str(entry_id)
+                cursor = entry_id_str(entry_id)
                 try:
                     event = from_stream_fields(fields)
                 except Exception as error:  # noqa: BLE001, keep consuming

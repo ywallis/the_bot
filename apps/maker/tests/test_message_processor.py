@@ -115,16 +115,22 @@ class FakeBroker:
         return [m for m in self.sent if m["kind"] == MessageType.CANCELLATION]
 
 
-@pytest_asyncio.fixture
-async def manager():
+@pytest_asyncio.fixture(params=[True, False], ids=["decoded", "bytes"])
+async def manager(request: pytest.FixtureRequest):
     """
     Return an order manager on a fake Redis, ready to read new intents.
 
     The first read of a real manager drains its own pending list, so one
     read is spent here to move the cursor onto new entries. The transition
     itself is tested separately.
+
+    Every test runs against both a decoding and a non-decoding client.
+    Which one production gets is decided by the connection pool rather than
+    by the ``Redis`` constructor, and the pools in this app do not decode,
+    so a manager that only works against decoded replies works in every
+    test and in none of the live processes.
     """
-    redis = fakeredis.FakeRedis(decode_responses=True)
+    redis = fakeredis.FakeRedis(decode_responses=request.param)
     order_manager = OrderManager(config(), redis)
     await order_manager.ensure_group()
     await order_manager.consume_once()
@@ -168,6 +174,34 @@ async def pending_count(manager: OrderManager) -> int:
     """Return how many intents the consumer group has read but not acked."""
     summary = await manager.redis.xpending(INTENTS_STREAM, OMS_CONSUMER_GROUP)
     return int(summary["pending"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decode", [True, False], ids=["decoded", "bytes"])
+async def test_the_cursor_survives_a_non_decoding_client(decode: bool):
+    """
+    An entry id read back must be usable as a command argument again.
+
+    The connection pool decides whether ids come back as bytes, and
+    ``str(b"1-0")`` is a string Redis rejects. This is what left every
+    intent unacknowledged and killed the matcher on its second read the
+    first time the phase ran against a live Redis.
+    """
+    redis = fakeredis.FakeRedis(decode_responses=decode)
+    order_manager = OrderManager(config(), redis)
+    await order_manager.ensure_group()
+    await order_manager.consume_once()
+
+    publisher = StreamPublisher(maxlen=1000)
+    await publisher.publish(redis, order_intent(intent_id="one"))
+    fake = FakeBroker()
+    order_manager.send_to_broker = fake  # type: ignore[assignment]
+    await order_manager.consume_once()
+    await settle(order_manager)
+
+    assert [m["id"] for m in fake.orders] == ["one"]
+    summary = await redis.xpending(INTENTS_STREAM, OMS_CONSUMER_GROUP)
+    assert int(summary["pending"]) == 0
 
 
 # Pure helpers --------------------------------------------------------------
@@ -802,3 +836,50 @@ async def test_a_quote_queued_behind_a_cancellation_still_runs(
     assert manager.resting["lmb_eb"] == ("mexc", "next quote")
     assert manager.queued == {}
     assert await pending_count(manager) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_pending_entry_is_acted_on_once_while_draining(
+    manager: OrderManager, broker: FakeBroker
+):
+    """
+    Draining the pending list must not act on the same entry repeatedly.
+
+    An entry stays pending until its task acknowledges it, so a drain that
+    kept reading from the start of the list handed the same intents back on
+    every pass and placed the order again each time. Live, that looped until
+    the connection pool was exhausted.
+
+    The intent here is a unique one on purpose. A superseding intent would
+    queue behind its strategy's lock and hide the duplicate; a unique one
+    has nothing serialising it, so a re-read reaches the venue twice, which
+    is the case that costs money.
+    """
+    broker.gate = asyncio.Event()
+    publisher = StreamPublisher(maxlen=1000)
+    await publisher.publish(
+        manager.redis, order_intent(intent_id="in flight", legacy=OrderType.UNIQUE)
+    )
+    await manager.consume_once()
+    await asyncio.sleep(0)
+    for task in manager.tasks:
+        task.cancel()
+    manager.tasks = []
+    assert await pending_count(manager) == 1
+
+    restarted = OrderManager(config(), manager.redis)
+    await restarted.ensure_group()
+    replayed = FakeBroker()
+    replayed.gate = asyncio.Event()
+    restarted.send_to_broker = replayed  # type: ignore[assignment]
+
+    # Several passes while the entry is still unacknowledged, as `run` does.
+    for _ in range(5):
+        await restarted.consume_once()
+        await asyncio.sleep(0)
+
+    assert [m["id"] for m in replayed.orders] == ["in flight"]
+
+    replayed.gate.set()
+    await settle(restarted)
+    assert await pending_count(restarted) == 0
