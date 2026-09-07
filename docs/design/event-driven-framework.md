@@ -155,7 +155,12 @@ Order management
 
 - `OrderIntent`: intent_id, strategy, venue, symbol, side, order_type
   (`limit`, `market`), time_in_force, price, amount, ts_created,
-  replace_of (optional intent_id this intent supersedes), tags.
+  replace_of, tags. `replace_of` has three values: `null` is an independent
+  order, placed as is and left alone at shutdown; an intent id names the
+  quote this one supersedes; and the empty string (`REPLACE_RESTING` in
+  `events.py`) is a quote with nothing to name yet, which still rests under
+  its strategy key so that the next quote supersedes it and shutdown cancels
+  it. It mirrors the empty `target_intent_id` of a `CancelIntent`.
 - `CancelIntent`: intent_id, strategy, venue, symbol, target_intent_id,
   ts_created.
 - `OrderEvent`: intent_id, strategy, venue, symbol, state (`accepted`,
@@ -255,6 +260,13 @@ Orders are keyed by venue **and** intent id, not by intent id alone: the
 matcher hedges a fill by placing an order that reuses the filled order's
 client id on the other venue, so an intent id is only unique per venue.
 
+A superseding intent cancels whatever rests under its strategy key, whether
+or not `replace_of` names it. A strategy's view of what rests can lag the
+order manager: when two quotes queue behind a busy slot the older is
+rejected unplaced, and the newer names it while the venue still holds the
+quote before both. Only the resting slot knows that order, and a slot never
+holds more than one, so the slot is what gets cleared.
+
 The book is fed from both directions. A placement enters it when the broker
 confirms, and it leaves when the order watcher reports a terminal state on
 `oms:events`. Without the second half, a filled order would sit in the book
@@ -276,11 +288,14 @@ all, which is what makes it movable to the strategies repo.
 
 ### 6.1 The legacy bridge
 
-Strategies still publish dicts on the `messageprocessor` pubsub channel.
+Legacy strategies publish dicts on the `messageprocessor` pubsub channel.
 `legacy_bridge.py` runs inside the order manager, subscribes to that channel
 and republishes each message to `oms:intents`, so the order manager has
 exactly one input path and every order is recorded as an intent whatever
-produced it. The shim is deleted in phase 4.
+produced it. Since phase 4 the only legacy strategy is `take_take`, which is
+not in the current config, so the bridge carries nothing in a normal run.
+It is deleted when `take_take` is ported or retired, not before: deleting it
+first would leave a strategy in the repo that cannot run.
 
 Two pieces of legacy vocabulary have no field on `OrderIntent` and travel as
 tags. `replace` versus `unique` versus `market` becomes `legacy_order_type`,
@@ -416,20 +431,62 @@ reopen race, only moves it, and doubles the inode count.
 
 ## 8. Strategy runtime
 
-A small Python SDK (`apps/shared/src/runtime.py`, later) that
+`apps/shared/src/runtime.py` is a small SDK for writing a strategy against
+the streams. A strategy subclasses `Strategy`, overrides the hooks it needs
+(`on_start`, `on_book`, `on_trade`, `on_balance`, `on_order_event`,
+`on_timer`) and never touches Redis. The `Runtime`
 
-- reads the strategy's declared subscriptions from config,
-- runs one `XREAD` loop over all subscribed streams plus `oms:events`
-  filtered to the strategy id,
-- dispatches to `on_book`, `on_trade`, `on_balance`, `on_order_event` and
-  `on_timer`,
-- exposes `submit(intent)` and `cancel(intent_id)` which `XADD` to
-  `oms:intents`,
-- owns the `Clock`.
+- derives the streams to read from the strategy's declared `subscriptions`:
+  one book or trade stream per subscribed feed, the balance stream of every
+  subscribed venue, and `oms:events` filtered to the strategy's own orders
+  (those whose strategy key starts with its identifier);
+- runs one `XREAD` over all of them, resolving each tail once and then
+  advancing through concrete entry ids (section 12);
+- owns the `Clock` and advances it with the `ts_recv` of every delivered
+  event before dispatching;
+- builds intents through `order_intent`, which stamps them with the clock,
+  names the strategy key `<identifier>_<slot>` and generates the client
+  order id `t-<stamp>_<identifier>_<slot>` that the order watcher parses.
+  The stamp is clock time to the microsecond, bumped as needed so two ids
+  from one runtime never collide even when the clock has not moved, which
+  under replay it may not have. Identifiers containing `_` or `-` are
+  refused at construction because the id format splits on them;
+- exposes `submit(intent)`, `cancel(intent_id)`, which rebuilds venue and
+  symbol from the runtime's own record of what it submitted, and
+  `cancel_resting(venue, symbol, slot)`, the empty-target cancel a strategy
+  sends at start to clear what an earlier run left behind;
+- reads and writes every stream under an optional key prefix, so a backtest
+  is a prefix and a replay clock away.
 
-The existing `async def strategy(redis, config)` entry point stays valid;
-the runtime is an additional way to write a strategy, not a replacement.
-Non-Python strategies implement the stream contract directly.
+The clock has two modes. Live, `now()` is the wall clock, which is what the
+order manager's staleness guard and the latency records expect. Under replay
+it is the `ts_recv` of the last delivered event and reads 0 before the
+first. `advance` never moves time backwards: streams are merged by entry id,
+which carries publish jitter, so an event can arrive after one it was
+received before. Timers are clock time too: `on_timer` fires when
+`timer_interval_s` has elapsed on the runtime's clock, so under replay a
+timer fires by recorded time, and an idle replay fires none.
+
+Strategy modules export a `STRATEGY` class; the launcher constructs it with
+the strategy's `StrategyConfig` and runs it. A module without `STRATEGY` is
+run the old way, `async def <type>(redis, strategy_dict)`, so both shapes
+stay valid and the runtime is an additional way to write a strategy, not a
+replacement. Non-Python strategies implement the stream contract directly.
+
+The two maker strategies were ported in phase 4 and share a skeleton,
+`MakerQuoter` in the strategies repo: latest book per venue, latest balance
+per venue, at most one resting order per side, requote on every maker or
+taker book update, and a per-strategy `quotes` and `action` that supply the
+pricing and the keep, replace or cancel rule. The port changed one thing
+about how they behave. The legacy loop polled both books in one tick and
+saw a move on two venues as one replace; event by event the two updates
+arrive separately, and against a half-updated pair of books the strategy
+may cancel a side it will requote a moment later. That is the strategy
+seeing the market as it is rather than an artefact: the venues do move at
+different times, and the coalescing in the order manager absorbs the
+churn. The strategies also learned to free a slot on a terminal order
+event, which the polling versions never did, so a filled quote is not
+"replaced" by naming an order that is gone.
 
 ## 9. Backtesting
 
@@ -504,6 +561,24 @@ version, and `XADD` intents. No shared code is required. The Python
    motivation in section 1 assumes, so the round trip is worth measuring per
    venue before committing to any cross-venue lag under half a second.
 4. Strategy runtime and clock. Port one existing strategy as validation.
+   Done 2026-09-07: `runtime.py` with `Clock`, `Strategy` and `Runtime`
+   (section 8), the launcher running either shape of strategy module, and
+   both configured maker strategies, `fake_maker` and
+   `single_edge_liquidity`, ported onto a shared `MakerQuoter` skeleton in
+   the strategies repo. Two contract changes fell out of the port: the
+   `REPLACE_RESTING` value of `replace_of` (section 4), and the order
+   manager clearing the resting slot on any superseding intent rather than
+   only the order it names (section 6). `take_take` stays legacy, so the
+   bridge stays (section 6.1). The strategy tests now drive the real
+   runtime on `fakeredis` and assert on the intents stream; the legacy
+   cases were translated one for one and produce the same orders.
+
+   Not yet live-tested. The phase 3 live run exercised every downstream
+   component with the same intents the runtime now produces, but the
+   runtime itself has only run against `fakeredis`. The first live run
+   should check the same invariants as phase 3 (one resting order per
+   slot, nothing resting after shutdown) and additionally that the
+   strategies' `resting` view agrees with the order manager's after a fill.
 5. Replayer and simulated broker.
 
 Each phase leaves the system runnable with the current strategies.
@@ -540,6 +615,16 @@ it is roughly 15 GB/day and about a week.
 - JSON Lines with the payload spliced in verbatim: the recorder never decodes
   an event, so a producer can add a field without the recording tier knowing
   about it, and a replay is byte-identical to what was on the bus.
+- The clock is the wall clock live and event time under replay, rather
+  than event time in both modes. Stamping a live intent with the last
+  book's `ts_recv` would put the strategy's own reaction time onto the
+  strategy-to-OMS leg of every latency record, and would let an idle
+  strategy's intents age into the staleness guard.
+- `replace_of` distinguishes "independent order" (`null`) from "quote with
+  nothing to name yet" (empty string) instead of adding a boolean field:
+  the order manager already reads an empty `target_intent_id` as "whatever
+  rests", so the vocabulary exists, and a field that is only meaningful
+  when another is null is a worse contract than a sentinel.
 - Consumers resolve the tail of a stream once and then advance through
   concrete entry ids, rather than passing `$` on every `XREAD`. `$` is
   re-resolved per call, so an entry published while a consumer sits between

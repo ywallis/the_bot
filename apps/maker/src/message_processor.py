@@ -18,10 +18,12 @@ by what the broker confirms and by what the order watcher reports on
 ``oms:events``, so an order that fills or is cancelled at the venue leaves
 this process's book without anyone asking.
 
-Legacy strategies still publish dicts on a pubsub channel. ``legacy_bridge``
-runs inside this process, translates them into intents and publishes them to
-``oms:intents`` like any other producer, so there is exactly one input path
-here. See ``docs/design/event-driven-framework.md`` section 6.
+Strategies on the runtime publish intents themselves. The one legacy
+strategy left, ``take_take``, still publishes dicts on a pubsub channel;
+``legacy_bridge`` runs inside this process, translates them into intents and
+publishes them to ``oms:intents`` like any other producer, so there is
+exactly one input path here. See ``docs/design/event-driven-framework.md``
+section 6.
 """
 
 import ast
@@ -681,19 +683,31 @@ class OrderManager:
         """
         Cancel the order a superseding intent replaces, if it is still open.
 
+        Whatever rests under the intent's strategy key is cancelled whether
+        or not the intent names it. A strategy's idea of what rests can lag
+        this process: when two quotes queue behind a busy strategy the older
+        one is rejected unplaced, and the newer one names it as the order it
+        replaces while the venue still holds the quote before both. Only the
+        resting slot knows that order, and a strategy key never holds more
+        than one.
+
         Parameters
         ----------
         intent : OrderIntent
             The superseding intent.
         """
-        if intent.replace_of is not None:
-            key: OrderKey | None = (intent.venue, intent.replace_of)
-        else:
-            key = self.resting.get(intent.strategy)
-        if key is None or key not in self.orders:
+        keys: list[OrderKey] = []
+        if intent.replace_of:
+            keys.append((intent.venue, intent.replace_of))
+        resting = self.resting.get(intent.strategy)
+        if resting is not None and resting not in keys:
+            keys.append(resting)
+        open_keys = [key for key in keys if key in self.orders]
+        if not open_keys:
             logger.debug(f"Nothing to supersede for {intent.strategy}")
             return
-        await self.cancel_order(key, f"replaced by {intent.intent_id}")
+        for key in open_keys:
+            await self.cancel_order(key, f"replaced by {intent.intent_id}")
 
     async def cancel_order(self, key: OrderKey, reason: str) -> bool:
         """

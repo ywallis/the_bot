@@ -220,6 +220,7 @@ apps/
 │   │   ├── events.py       # Event schemas, JSON codec and Redis Stream names (cross-language contract)
 │   │   ├── ccxt_events.py  # Converters from CCXT structures to Book/Trade/Balance/OrderEvent
 │   │   ├── streams.py      # StreamPublisher (XADD with seq and trimming), stream_tail, enumeration, paths
+│   │   ├── runtime.py      # Strategy runtime: Clock, Strategy base class, Runtime (XREAD loop, submit/cancel)
 │   │   └── utils.py        # Backwards-compatible module globals derived from config.py
 │   └── tests/
 └── accountant/
@@ -236,7 +237,10 @@ apps/
 - `apps/maker/src/recorder.py` tails every configured stream into `data/<stream path>/<UTC hour>.jsonl`; it is the hot tier of the recording, shipped to the archive host once sealed. Never touch the newest file in a stream directory: the recorder still holds it open.
 - Orders travel as events: strategies publish `OrderIntent`/`CancelIntent` to `oms:intents`, the order manager (`apps/maker/src/message_processor.py`) is the single consumer of that stream through the `oms` consumer group, and it publishes `OrderEvent`s to `oms:events` and `LatencyRecord`s to `oms:latency`.
 - `apps/maker/src/order_watcher.py` turns CCXT `watch_orders` updates into `OrderEvent`s; `apps/maker/src/matcher.py` is an ordinary consumer of `oms:events` and holds no exchange connection.
-- Legacy strategies still publish dicts on the `messageprocessor` pubsub channel. `apps/maker/src/legacy_bridge.py` translates them into intents and is the only place that knows the legacy wire format; delete it in phase 4 rather than adding a second path through the order manager.
+- Strategies are written against `apps/shared/src/runtime.py`: subclass `Strategy`, override the `on_*` hooks, build intents with `runtime.order_intent(...)` and `submit` them. A strategy module exports a `STRATEGY` class; the launcher constructs it with its `StrategyConfig`. Strategy and slot identifiers must not contain `_` or `-`, which the client order id format splits on.
+- A quote's `replace_of` is the intent it supersedes, or `REPLACE_RESTING` (empty string) for the first quote of a slot; `None` means an independent order that shutdown leaves alone. The order manager clears whatever rests under the strategy key on any superseding intent, not only the order named.
+- Only `take_take` still publishes legacy dicts on the `messageprocessor` pubsub channel. `apps/maker/src/legacy_bridge.py` translates them into intents and is the only place that knows the legacy wire format; delete it when `take_take` is ported rather than adding a second path through the order manager.
+- Strategy tests drive the real `Runtime` on `fakeredis` through the `Harness` in `apps/strategies/tests/conftest.py` and assert on `oms:intents`; do not mock Redis calls inside a strategy.
 - Consumers of a stream resolve its tail with `streams.stream_tail` and then advance through concrete entry ids. Do not pass `$` to a repeated `XREAD`: it re-resolves per call and silently drops anything published between two reads.
 - Redis replies are **bytes** in every live process: `decode_responses` passed to `Redis(...)` is ignored when an existing `ConnectionPool` is handed in, and the pools here are built without it. Pass any stream entry id back through `streams.entry_id_str` before using it as a command argument — `str(b"1-0")` is `"b'1-0'"`, which Redis rejects. Tests that build a client directly get `str` instead, so cover both (see the parametrised fixtures in `test_message_processor.py`).
 - Before adding a venue, after a CCXT upgrade, or when a feed misbehaves: run `uv run -m apps.maker.src.tools.venue_conformance <venue> <SYMBOL>` and follow `docs/runbooks/new-venue.md`. Venue websocket behaviour (checksums, trade ids, cache replay, error types) is not covered by unit tests.
