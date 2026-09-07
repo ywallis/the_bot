@@ -605,11 +605,33 @@ version, and `XADD` intents. No shared code is required. The Python
    resting order per slot throughout, nothing resting at shutdown, no
    errors, balances unchanged. Still no fill.
 
-   Latency over the five native placements, no bridge hop: strategy to
-   order manager 0.5 to 0.8 ms; inside the order manager 0.3 ms for a fresh
-   quote and about 300 ms for a replace, which is the cancel round trip the
-   replace has to wait for; broker round trip 314 to 441 ms, inside the
-   range phase 3 measured.
+   A fourth run of 91 minutes (16:09 to 17:40) held every invariant at
+   volume: 191 order intents from both strategies, 181 placements each
+   confirmed by the order watcher, 181 cancellations confirmed both ways,
+   10 superseded in the queue, no duplicate placements, nothing in limbo,
+   one resting order per slot throughout, venue snapshots at three
+   checkpoints matching the order manager's book exactly, nothing open at
+   shutdown, no errors, balances unchanged. Still no fill: ALPH fell from
+   0.0510 to 0.0493 through the afternoon and a sell quote 0.5% above the
+   Bitget ask sat 0.66% above MEXC's own ask. On the basis of that run's
+   books the `fmb` spread was lowered to 1.003 with `min_spread` 1.002: the
+   hedge costs 0.10% Bitget taker fee plus up to 0.02% slippage, and the
+   Bitget ask moved less than 0.3% over the one second hedge latency in
+   97% of moments, 95th percentile 0.28% even after a MEXC ask jump.
+
+   The run also quantified the event-by-event churn described in section
+   8: 136 cancels on request against 45 replacements, so three quotes in
+   four were cancelled and requoted into an empty slot rather than
+   replaced, because one venue's book update briefly failed the quote
+   condition before the other's restored it. Correct, but each such pair
+   costs the same two round trips as a replace and leaves the slot empty
+   in between. A grace period before cancelling on a vanished condition is
+   the obvious mitigation and is not yet built.
+
+   Latency over 181 native placements, no bridge hop: strategy to order
+   manager 0.3 to 2.2 ms, median 0.6; inside the order manager median 0.6
+   ms, up to 961 ms for a replace waiting on its cancel round trip; broker
+   round trip median 313 ms, range 290 to 813 ms.
 5. Replayer and simulated broker.
 
 Each phase leaves the system runnable with the current strategies.
