@@ -572,6 +572,8 @@ class Runtime:
         -------
         OrderIntent
             The same intent, for callers that keep it as their resting order.
+            Intents are remembered by id, so two legs that share an id across
+            venues leave only the last one reachable through ``cancel``.
         """
         await self.publisher.publish(self.redis, intent)
         self.submitted[intent.intent_id] = intent

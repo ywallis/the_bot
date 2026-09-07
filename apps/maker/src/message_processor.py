@@ -18,12 +18,8 @@ by what the broker confirms and by what the order watcher reports on
 ``oms:events``, so an order that fills or is cancelled at the venue leaves
 this process's book without anyone asking.
 
-Strategies on the runtime publish intents themselves. The one legacy
-strategy left, ``take_take``, still publishes dicts on a pubsub channel;
-``legacy_bridge`` runs inside this process, translates them into intents and
-publishes them to ``oms:intents`` like any other producer, so there is
-exactly one input path here. See ``docs/design/event-driven-framework.md``
-section 6.
+Every strategy publishes intents itself, so ``oms:intents`` is the only
+input path here. See ``docs/design/event-driven-framework.md`` section 6.
 """
 
 import ast
@@ -39,11 +35,9 @@ from redis.asyncio import ConnectionPool, Redis
 from redis.exceptions import ResponseError
 
 import apps.shared.src.logging_config as logging_config
-from apps.maker.src import legacy_bridge
 from apps.maker.src.constants import BROKER_CHANNEL
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
 from apps.maker.src.errors import BrokerError
-from apps.maker.src.legacy_bridge import LEGACY_ORDER_TYPE_TAG
 from apps.maker.src.structs import (
     CancellationMessage,
     OrderBatchMessage,
@@ -92,6 +86,11 @@ TERMINAL_STATES: frozenset[OrderState] = frozenset(
 PENDING = "0"
 # Start position for entries no consumer in the group has read yet.
 NEW = ">"
+
+# Tag carrying the broker-protocol order type of an order recollected from a
+# venue at startup, so it is classified the same way it was when placed. New
+# intents never carry it: ``replace_of`` says what they are.
+LEGACY_ORDER_TYPE_TAG = "legacy_order_type"
 
 
 @dataclass
@@ -1196,7 +1195,7 @@ class OrderManager:
 
 async def main(config: AppConfig) -> None:
     """
-    Run the order manager, its legacy bridge and its event follower.
+    Run the order manager and its event follower.
 
     Parameters
     ----------
@@ -1220,11 +1219,9 @@ async def main(config: AppConfig) -> None:
         logger.info(f"Pre-existing open order were found: {open_orders}")
         manager.adopt(open_orders)
 
-    bridge_publisher = StreamPublisher(maxlen=config.oms.stream_maxlen)
     long_running = [
         asyncio.create_task(manager.run()),
         asyncio.create_task(manager.follow_order_events()),
-        asyncio.create_task(legacy_bridge.run(redis, bridge_publisher)),
         asyncio.create_task(manager.collect_results_periodically()),
     ]
 

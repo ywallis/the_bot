@@ -13,8 +13,8 @@ from pytest_mock import MockerFixture
 
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
 from apps.maker.src.errors import BrokerError
-from apps.maker.src.legacy_bridge import LEGACY_ORDER_TYPE_TAG
 from apps.maker.src.message_processor import (
+    LEGACY_ORDER_TYPE_TAG,
     OrderManager,
     broker_order_from_intent,
     legacy_order_type,

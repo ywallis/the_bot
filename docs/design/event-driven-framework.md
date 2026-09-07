@@ -184,11 +184,12 @@ Order management
   pubsub hop the bridge adds.
 
 The `OrderMessage`, `CancellationMessage` and `OrderBatchMessage`
-TypedDicts survive phase 3 in two places, both of them adapters rather than
-contracts: `legacy_bridge.py` translates them into intents on the way in, and
-the order manager builds them again to speak to the broker, which still uses
-the request-response pubsub protocol. They leave when the strategies emit
-intents (phase 4) and when the broker moves to the bus.
+TypedDicts survive in one place, as an adapter rather than a contract: the
+order manager builds them to speak to the broker, which still uses the
+request-response pubsub protocol. They leave when the broker moves to the
+bus. The `legacy_order_type` tag survives on orders recollected from a venue
+at startup, so an adopted order is classified the way it was placed; new
+intents never carry it.
 
 ## 5. Configuration
 
@@ -288,21 +289,12 @@ all, which is what makes it movable to the strategies repo.
 
 ### 6.1 The legacy bridge
 
-Legacy strategies publish dicts on the `messageprocessor` pubsub channel.
-`legacy_bridge.py` runs inside the order manager, subscribes to that channel
-and republishes each message to `oms:intents`, so the order manager has
-exactly one input path and every order is recorded as an intent whatever
-produced it. Since phase 4 the only legacy strategy is `take_take`, which is
-not in the current config, so the bridge carries nothing in a normal run.
-It is deleted when `take_take` is ported or retired, not before: deleting it
-first would leave a strategy in the repo that cannot run.
-
-Two pieces of legacy vocabulary have no field on `OrderIntent` and travel as
-tags. `replace` versus `unique` versus `market` becomes `legacy_order_type`,
-because a legacy sender does not know the intent id it supersedes and so
-cannot fill `replace_of`. And a cancellation with an empty id, which means
-"cancel whatever I have resting", becomes a `CancelIntent` with an empty
-`target_intent_id` that the order manager resolves against its own book.
+Until phase 4, strategies published dicts on the `messageprocessor` pubsub
+channel and `legacy_bridge.py`, running inside the order manager, republished
+each as an intent so that the order manager had one input path. With every
+strategy on the runtime the bridge was deleted along with the channel and
+the manual simulators that drove it. Anything that wants an order placed
+publishes an intent.
 
 ## 7. Recording tier
 
@@ -565,13 +557,17 @@ version, and `XADD` intents. No shared code is required. The Python
    (section 8), the launcher running either shape of strategy module, and
    both configured maker strategies, `fake_maker` and
    `single_edge_liquidity`, ported onto a shared `MakerQuoter` skeleton in
-   the strategies repo. Two contract changes fell out of the port: the
-   `REPLACE_RESTING` value of `replace_of` (section 4), and the order
-   manager clearing the resting slot on any superseding intent rather than
-   only the order it names (section 6). `take_take` stays legacy, so the
-   bridge stays (section 6.1). The strategy tests now drive the real
-   runtime on `fakeredis` and assert on the intents stream; the legacy
-   cases were translated one for one and produce the same orders.
+   the strategies repo, then `take_take` as well, and the legacy bridge
+   deleted with the pubsub channel it served (section 6.1). Two contract
+   changes fell out of the port: the `REPLACE_RESTING` value of
+   `replace_of` (section 4), and the order manager clearing the resting
+   slot on any superseding intent rather than only the order it names
+   (section 6). `take_take` places its two legs as independent intents
+   sharing one id, one per venue, and keeps its throttles as clock-time
+   rules: both books and both balances must postdate the last pair. The
+   strategy tests now drive the real runtime on `fakeredis` and assert on
+   the intents stream; the legacy cases were translated one for one and
+   produce the same orders.
 
    Not yet live-tested. The phase 3 live run exercised every downstream
    component with the same intents the runtime now produces, but the
