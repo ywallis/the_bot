@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
+import msgspec
 import pytest
 import pytest_asyncio
 from fakeredis import aioredis as fakeredis
@@ -883,3 +884,92 @@ async def test_a_pending_entry_is_acted_on_once_while_draining(
     replayed.gate.set()
     await settle(restarted)
     assert await pending_count(restarted) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_queued_intent_keeps_its_read_time(
+    manager: OrderManager, broker: FakeBroker
+):
+    """
+    Time spent in the coalescing queue belongs to the order manager.
+
+    ``ts_oms_recv`` means "read from the stream", so a queue wait has to
+    appear between it and ``ts_broker_send``. Stamping it afresh on drain
+    moved that wait onto the leg from the strategy, where anything building
+    section 9's latency model out of ``oms:latency`` would read it as
+    transport. A live run put up to a second of internal queueing there.
+    """
+    broker.gate = asyncio.Event()
+    publisher = StreamPublisher(maxlen=1000)
+    first = order_intent(intent_id="first")
+    second = order_intent(intent_id="second")
+    await publisher.publish(manager.redis, first)
+    await publisher.publish(manager.redis, second)
+    await manager.consume_once()
+    await asyncio.sleep(0)
+    read_at = manager.queued["lmb_eb"].ts_oms_recv
+    assert read_at > 0
+
+    broker.gate.set()
+    await settle(manager)
+
+    records = [
+        r for r in await events_on(manager, LATENCY_STREAM) if r.intent_id == "second"
+    ]
+    assert len(records) == 1
+    record = records[0]
+    assert record.ts_oms_recv == read_at
+    # The wait shows up inside the order manager, not on the way to it.
+    assert record.ts_oms_recv - record.ts_created < 1_000_000_000
+    assert record.ts_broker_send >= record.ts_oms_recv
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decode", [True, False], ids=["decoded", "bytes"])
+async def test_an_intent_that_goes_stale_while_queued_is_rejected(decode: bool):
+    """
+    Staleness is judged against the clock now, not the moment of reading.
+
+    A quote can be fresh when it is read and far too old by the time its
+    strategy's lock frees up. Judging it on its read time would send it, and
+    the read time has to be preserved for the latency record, so the two
+    cannot share a timestamp.
+    """
+    redis = fakeredis.FakeRedis(decode_responses=decode)
+    settings = OmsConfig(block_ms=10, batch=10, max_intent_age_s=0.05)
+    order_manager = OrderManager(
+        msgspec.structs.replace(config(), oms=settings), redis
+    )
+    await order_manager.ensure_group()
+    await order_manager.consume_once()
+
+    broker = FakeBroker()
+    broker.gate = asyncio.Event()
+    order_manager.send_to_broker = broker  # type: ignore[assignment]
+
+    publisher = StreamPublisher(maxlen=1000)
+    await publisher.publish(redis, order_intent(intent_id="first"))
+    await publisher.publish(redis, order_intent(intent_id="queued"))
+    await order_manager.consume_once()
+    await asyncio.sleep(0)
+    assert order_manager.queued["lmb_eb"].intent.intent_id == "queued"
+
+    # Both were fresh when read; "queued" ages past the limit while waiting.
+    await asyncio.sleep(0.2)
+    broker.gate.set()
+    await settle(order_manager)
+
+    assert [m["id"] for m in broker.orders] == ["first"]
+    events = [
+        e
+        for e in cast(list[Any], await redis.xrange(ORDER_EVENTS_STREAM))
+    ]
+    rejected = [
+        e
+        for e in (from_stream_fields(f) for _id, f in events)
+        if isinstance(e, OrderEvent)
+        and e.state is OrderState.REJECTED
+        and e.intent_id == "queued"
+    ]
+    assert len(rejected) == 1
+    assert "max_intent_age_s" in (rejected[0].reason or "")
