@@ -23,6 +23,12 @@ ORDER_EVENTS_STREAM = "oms:events"
 LATENCY_STREAM = "oms:latency"
 OMS_CONSUMER_GROUP = "oms"
 
+# ``replace_of`` value meaning "whatever this strategy key has resting". A
+# quote's first intent has no predecessor to name but must still rest under
+# its strategy key, so that a later quote supersedes it and shutdown cancels
+# it. Mirrors the empty ``target_intent_id`` of a ``CancelIntent``.
+REPLACE_RESTING = ""
+
 
 def book_stream(venue: str, symbol: str) -> str:
     """
@@ -340,7 +346,11 @@ class OrderIntent(Event, tag=EventType.ORDER_INTENT.value):
         Time in force, defaults to good till cancelled.
     replace_of : str | None
         Intent id this intent supersedes. The order manager cancels that
-        order first and coalesces pending replacements per strategy.
+        order first and coalesces pending replacements per strategy. None
+        marks an independent order that is placed as is and left alone at
+        shutdown. ``REPLACE_RESTING`` (the empty string) marks a quote with
+        nothing to name yet: it rests under its strategy key like any other
+        replacement and supersedes whatever that key holds.
     tags : dict[str, str]
         Free-form labels carried through to order events.
     """

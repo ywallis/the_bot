@@ -33,6 +33,7 @@ from apps.shared.src.events import (
     LATENCY_STREAM,
     OMS_CONSUMER_GROUP,
     ORDER_EVENTS_STREAM,
+    REPLACE_RESTING,
     CancelIntent,
     LatencyRecord,
     OrderEvent,
@@ -348,6 +349,42 @@ async def test_replace_of_names_the_order_it_supersedes(
 
     assert [m["id"] for m in broker.cancellations] == ["venue-first"]
     assert ("mexc", "first") not in manager.orders
+
+
+@pytest.mark.asyncio
+async def test_a_first_quote_rests_under_its_slot(
+    manager: OrderManager, broker: FakeBroker
+):
+    """``REPLACE_RESTING`` makes a quote rest even though it names no order."""
+    first = order_intent(intent_id="first", legacy=None, replace_of=REPLACE_RESTING)
+    await submit(manager, first)
+    assert broker.cancellations == []
+    assert manager.resting["lmb_eb"] == ("mexc", "first")
+
+    second = order_intent(intent_id="second", legacy=None, replace_of=REPLACE_RESTING)
+    await submit(manager, second)
+    assert [m["id"] for m in broker.cancellations] == ["venue-first"]
+    assert manager.resting["lmb_eb"] == ("mexc", "second")
+
+
+@pytest.mark.asyncio
+async def test_superseding_clears_the_slot_even_when_naming_a_gone_order(
+    manager: OrderManager, broker: FakeBroker
+):
+    """A quote that names a rejected predecessor still cancels what rests.
+
+    The strategy's view lags: it names the intent it last submitted, which
+    was rejected unplaced in the queue, while the venue still holds the
+    quote before it.
+    """
+    first = order_intent(intent_id="first", legacy=None, replace_of=REPLACE_RESTING)
+    await submit(manager, first)
+    third = order_intent(intent_id="third", legacy=None, replace_of="second")
+    await submit(manager, third)
+
+    assert [m["id"] for m in broker.cancellations] == ["venue-first"]
+    assert ("mexc", "first") not in manager.orders
+    assert manager.resting["lmb_eb"] == ("mexc", "third")
 
 
 @pytest.mark.asyncio

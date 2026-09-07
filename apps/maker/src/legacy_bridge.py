@@ -1,15 +1,15 @@
 """Compatibility shim: legacy pubsub messages become order intents.
 
-Strategies in the strategies repo still publish ``OrderMessage``,
-``OrderBatchMessage`` and ``CancellationMessage`` dicts on the
-``messageprocessor`` pubsub channel. Phase 3 moves the order manager to a
-consumer group on ``oms:intents``, so this module subscribes to that channel
-and re-publishes each message as a typed intent.
+Legacy strategies publish ``OrderMessage``, ``OrderBatchMessage`` and
+``CancellationMessage`` dicts on the ``messageprocessor`` pubsub channel.
+Phase 3 moved the order manager to a consumer group on ``oms:intents``, so
+this module subscribes to that channel and re-publishes each message as a
+typed intent.
 
 The order manager therefore has exactly one input path. Everything about the
-legacy wire format is confined here, and the whole module is deleted in phase
-4 once strategies submit intents themselves. See
-``docs/design/event-driven-framework.md`` sections 6 and 11.
+legacy wire format is confined here. Since phase 4 the only legacy strategy
+is ``take_take``; the whole module is deleted once it is ported or retired.
+See ``docs/design/event-driven-framework.md`` sections 6.1 and 11.
 
 Two pieces of legacy vocabulary have no field on ``OrderIntent`` and are
 carried as tags instead:
