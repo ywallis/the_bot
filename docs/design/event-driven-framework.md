@@ -447,6 +447,14 @@ the streams. A strategy subclasses `Strategy`, overrides the hooks it needs
   symbol from the runtime's own record of what it submitted, and
   `cancel_resting(venue, symbol, slot)`, the empty-target cancel a strategy
   sends at start to clear what an earlier run left behind;
+- primes the strategy at start with the latest entry of every snapshot
+  stream, the subscribed balances first and then the books, before reading
+  new entries. A balance or a book entry supersedes every earlier one, so
+  the last one is complete state; a trade or an order event is not and is
+  never primed. Without priming, a strategy that starts after the feed
+  handlers, which the orchestrator guarantees, would not see a balance
+  until one changed, and a balance changes when an order fills, which no
+  quote is sent without a balance to fund it;
 - reads and writes every stream under an optional key prefix, so a backtest
   is a prefix and a replay clock away.
 
@@ -569,12 +577,27 @@ version, and `XADD` intents. No shared code is required. The Python
    the intents stream; the legacy cases were translated one for one and
    produce the same orders.
 
-   Not yet live-tested. The phase 3 live run exercised every downstream
-   component with the same intents the runtime now produces, but the
-   runtime itself has only run against `fakeredis`. The first live run
-   should check the same invariants as phase 3 (one resting order per
-   slot, nothing resting after shutdown) and additionally that the
-   strategies' `resting` view agrees with the order manager's after a fill.
+   Live-tested on 2026-09-07 through the orchestrator against MEXC and
+   Bitget, in two runs. The first stood still for eight minutes: the
+   balance watcher publishes one snapshot at its own start and then only on
+   change, the strategies start sixty seconds later at the stream tail, and
+   a strategy with no balance judges every quote insolvent. Nothing in the
+   unit suite could see this, because every test funded the strategy after
+   it started. The runtime now primes snapshot streams at start (section
+   8). The second run went end to end: both strategies primed with four
+   snapshots, `fake_maker` quoted a 273 ALPH sell on MEXC, the order
+   manager placed it, the order watcher confirmed it independently, and
+   shutdown cancelled it. No tracebacks, balances unchanged, nothing left
+   open at either venue, and every phase 3 invariant held (one placement,
+   one latency record, nothing in limbo, one resting order per slot,
+   nothing resting after shutdown). The quote rested unchanged for four
+   minutes because the Bitget ask it was priced from did not move. Nothing
+   filled, so the strategies' slot-freeing on a fill and the matcher's hedge
+   remain tested only against `fakeredis`.
+
+   Latency of that one placement, all native path with no bridge hop:
+   strategy to order manager 0.6 ms, inside the order manager 0.4 ms,
+   broker round trip 441 ms, inside the range phase 3 measured.
 5. Replayer and simulated broker.
 
 Each phase leaves the system runnable with the current strategies.

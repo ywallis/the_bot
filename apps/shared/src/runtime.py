@@ -231,6 +231,39 @@ def owner_of(event: OrderEvent) -> str:
     return event.strategy.partition("_")[0]
 
 
+def snapshot_streams(strategy: StrategyConfig, prefix: str = "") -> list[str]:
+    """
+    Enumerate the streams whose latest entry is a complete piece of state.
+
+    A balance or book entry supersedes every earlier one, so the last entry
+    on the stream is worth delivering to a strategy that starts late. A
+    trade or an order event is a fact about a moment and is not.
+
+    Parameters
+    ----------
+    strategy : StrategyConfig
+        The strategy.
+    prefix : str
+        Key prefix, empty in live trading.
+
+    Returns
+    -------
+    list[str]
+        The balance stream of every subscribed venue, then one book stream
+        per subscription listing the book feed. Balances come first so that
+        a strategy primed with a book already knows what it can fund.
+    """
+    venues: list[str] = []
+    books: list[str] = []
+    for subscription in strategy.subscriptions:
+        if subscription.venue not in venues:
+            venues.append(subscription.venue)
+        if BOOK_FEED in subscription.feeds:
+            books.append(book_stream(subscription.venue, subscription.symbol))
+    streams = [balance_stream(venue) for venue in venues] + books
+    return list(dict.fromkeys(prefixed(prefix, stream) for stream in streams))
+
+
 def subscribed_streams(strategy: StrategyConfig, prefix: str = "") -> list[str]:
     """
     Enumerate the streams a strategy's runtime reads.
@@ -671,10 +704,16 @@ class Runtime:
 
     async def start(self) -> None:
         """
-        Resolve stream tails, arm the timer and run the handler's ``on_start``.
+        Resolve stream tails, run ``on_start``, then prime the strategy's state.
 
         Tails are resolved before ``on_start`` so that an event published in
-        reaction to something the strategy does at start is not missed.
+        reaction to something the strategy does at start is not missed. The
+        latest entry of every snapshot stream (``snapshot_streams``) is then
+        delivered as if it had just arrived. Without that a strategy starting
+        after the feed handlers, which the orchestrator guarantees, would not
+        see a balance until one changed, and a balance changes when an order
+        fills, which no quote is sent without a balance to fund it. The first
+        live run of the runtime stood still for eight minutes on exactly that.
         """
         self.cursors = {
             stream: await stream_tail(self.redis, stream) for stream in self.streams
@@ -682,6 +721,35 @@ class Runtime:
         logger.info(f"{self.identifier} reading {self.streams}")
         self._arm_timer()
         await self.handler.on_start(self)
+        await self.prime()
+
+    async def prime(self) -> int:
+        """
+        Deliver the latest entry of every snapshot stream.
+
+        The cursors already sit at those entries, so nothing is delivered
+        twice.
+
+        Returns
+        -------
+        int
+            Number of entries delivered.
+        """
+        delivered = 0
+        for stream in snapshot_streams(self.strategy, self.prefix):
+            entries = await self.redis.xrevrange(stream, count=1)
+            if not entries:
+                continue
+            entry_id, fields = entries[0]
+            try:
+                event = from_stream_fields(fields)
+            except Exception as error:  # noqa: BLE001, keep priming
+                logger.error(f"Undecodable entry {entry_id!r} on {stream}: {error}")
+                continue
+            await self.dispatch(event)
+            delivered += 1
+        logger.info(f"{self.identifier} primed with {delivered} snapshots")
+        return delivered
 
     async def step(self) -> int:
         """
