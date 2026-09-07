@@ -42,6 +42,7 @@ from apps.shared.src.runtime import (
     Runtime,
     Strategy,
     owner_of,
+    snapshot_streams,
     strategy_key,
     subscribed_streams,
     time_stamp,
@@ -396,16 +397,66 @@ async def test_events_are_dispatched_by_type_and_ownership(redis: Any):
     assert handler.events[-1].strategy == "fmb_es"  # type: ignore[union-attr]
 
 
+def test_snapshot_streams_are_balances_then_books():
+    """Balances first, so a primed book already knows what it can fund."""
+    assert snapshot_streams(strategy_config(), prefix="bt:1") == [
+        "bt:1:acct:balance:mexc",
+        "bt:1:acct:balance:bitget",
+        "bt:1:md:book:mexc:ALPH/USDT",
+        "bt:1:md:book:bitget:ALPH/USDT",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_start_primes_the_latest_snapshots_only(redis: Any):
+    """The last balance and book are delivered at start; trades and order events are not."""
+    await publish(
+        redis,
+        book(seq=1),
+        book(seq=2),
+        balance(),
+        trade(),
+        order_event("fmb_es"),
+    )
+    handler = Recorder()
+    runtime = Runtime(redis, config(), strategy_config(), handler)
+    await runtime.start()
+
+    assert [type(e).__name__ for e in handler.events] == ["BalanceEvent", "BookEvent"]
+    assert handler.events[1].seq == 2  # type: ignore[union-attr]
+    # The primed entries are not delivered a second time by the first read.
+    await publish(redis, book(seq=3))
+    await runtime.step()
+    assert [e.seq for e in handler.events if isinstance(e, BookEvent)] == [2, 3]
+
+
+@pytest.mark.asyncio
+async def test_start_primes_after_on_start(redis: Any):
+    """The strategy holds the runtime before the first primed event arrives."""
+
+    class Needy(Recorder):
+        async def on_balance(self, event: BalanceEvent) -> None:
+            assert self.started is not None
+            self.events.append(event)
+
+    await publish(redis, balance())
+    handler = Needy()
+    runtime = Runtime(redis, config(), strategy_config(), handler)
+    await runtime.start()
+    assert len(handler.events) == 1
+
+
 @pytest.mark.asyncio
 async def test_reading_starts_at_the_tail(redis: Any):
-    """Events published before the runtime started are not replayed to it."""
-    await publish(redis, book(seq=1))
+    """Events published before the runtime started are not replayed, beyond the snapshot."""
+    await publish(redis, trade(), book(seq=1))
     handler = Recorder()
     runtime = Runtime(redis, config(), strategy_config(), handler)
     await runtime.start()
     await publish(redis, book(seq=2))
     await runtime.step()
-    assert [event.seq for event in handler.events] == [2]  # type: ignore[union-attr]
+    assert [type(e).__name__ for e in handler.events] == ["BookEvent", "BookEvent"]
+    assert [event.seq for event in handler.events] == [1, 2]  # type: ignore[union-attr]
 
 
 @pytest.mark.asyncio
