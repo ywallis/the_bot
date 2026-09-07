@@ -486,6 +486,23 @@ version, and `XADD` intents. No shared code is required. The Python
    speaks its request-response pubsub protocol; moving it onto the bus is
    deferred, since it is one hop behind the order manager and changing it
    buys nothing until the strategies move.
+
+   Live-tested against MEXC and Bitget on 2026-09-06 and 07: intents, the
+   bridge, placement, supersede, cancel-by-strategy, the order watcher, a
+   forced fill hedged by the matcher, book pruning on fill, the staleness
+   guard rejecting replayed intents, shutdown cancelling resting orders, and
+   `fake_maker` quoting unchanged through the bridge. The run found two bugs
+   no unit test could see, both since fixed and covered: entry ids arrive as
+   bytes because `decode_responses` is ignored when a `ConnectionPool` is
+   passed, and the pending-list drain re-read entries that were still
+   unacknowledged.
+
+   First measured order round trip, which section 9's latency model needs:
+   **MEXC limit order, 326 to 492 ms** from the order manager publishing to
+   the broker until the broker's reply, over four samples. That is the whole
+   REST leg plus one local pubsub hop. It sits at the top of the range the
+   motivation in section 1 assumes, so the round trip is worth measuring per
+   venue before committing to any cross-venue lag under half a second.
 4. Strategy runtime and clock. Port one existing strategy as validation.
 5. Replayer and simulated broker.
 
