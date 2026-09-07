@@ -595,9 +595,21 @@ version, and `XADD` intents. No shared code is required. The Python
    filled, so the strategies' slot-freeing on a fill and the matcher's hedge
    remain tested only against `fakeredis`.
 
-   Latency of that one placement, all native path with no bridge hop:
-   strategy to order manager 0.6 ms, inside the order manager 0.4 ms,
-   broker round trip 441 ms, inside the range phase 3 measured.
+   A third, fifteen minute run the same afternoon exercised the paths the
+   second had not: `fake_maker` quoted the instant it was primed, replaced
+   its quote twice on size changes (each `replace_of` naming the order it
+   superseded, and the order manager cancelling that order before placing),
+   cancelled it twice when the quote condition went away, and requoted from
+   an empty slot with `REPLACE_RESTING`. Four placements, four order
+   watcher confirmations, four cancellations confirmed both ways, one
+   resting order per slot throughout, nothing resting at shutdown, no
+   errors, balances unchanged. Still no fill.
+
+   Latency over the five native placements, no bridge hop: strategy to
+   order manager 0.5 to 0.8 ms; inside the order manager 0.3 ms for a fresh
+   quote and about 300 ms for a replace, which is the cancel round trip the
+   replace has to wait for; broker round trip 314 to 441 ms, inside the
+   range phase 3 measured.
 5. Replayer and simulated broker.
 
 Each phase leaves the system runnable with the current strategies.
