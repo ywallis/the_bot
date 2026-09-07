@@ -145,10 +145,15 @@ class QueuedIntent:
         Redis entry id, still unacknowledged so a crash replays the intent.
     intent : OrderIntent
         The intent.
+    ts_oms_recv : int
+        When this process read the intent from the stream. Carried through
+        the queue so the latency record keeps meaning what it says: the
+        wait here belongs to the order manager, not to the wire.
     """
 
     entry_id: str
     intent: OrderIntent
+    ts_oms_recv: int
 
 
 def legacy_order_type(intent: OrderIntent) -> OrderType:
@@ -539,9 +544,12 @@ class OrderManager:
         intent : OrderIntent
             The intent.
         ts_oms_recv : int
-            When this process read the intent, nanoseconds.
+            When this process read the intent, nanoseconds. Used for the
+            latency record only; staleness is judged against the clock now,
+            because an intent drained from the queue carries its original
+            read time and may have aged a great deal since.
         """
-        if self.is_stale(intent, ts_oms_recv):
+        if self.is_stale(intent, now_ns()):
             await self.reject(intent, "intent is older than max_intent_age_s")
             await self.ack(entry_id)
             return
@@ -555,7 +563,7 @@ class OrderManager:
         lock = self.get_lock(strategy)
         if lock.locked():
             superseded = self.queued.get(strategy)
-            self.queued[strategy] = QueuedIntent(entry_id, intent)
+            self.queued[strategy] = QueuedIntent(entry_id, intent, ts_oms_recv)
             if superseded is not None:
                 logger.debug(
                     f"{intent.intent_id} replaced {superseded.intent.intent_id} "
@@ -577,6 +585,15 @@ class OrderManager:
         """
         Start processing the intent a strategy had queued, if any.
 
+        The intent keeps the receive time it was read with rather than being
+        stamped afresh. ``ts_oms_recv`` means "read from the stream", so the
+        time an intent spent waiting for its strategy's lock has to show up
+        between ``ts_oms_recv`` and ``ts_broker_send``, which is the pair
+        that measures time inside this process. Re-stamping moved that wait
+        onto the leg from the strategy instead, where a latency model built
+        from ``oms:latency`` would read it as transport it cannot avoid. A
+        13 minute live run put up to a second of it there.
+
         Parameters
         ----------
         strategy : str
@@ -588,7 +605,9 @@ class OrderManager:
         logger.debug(f"Processing queued intent {queued.intent.intent_id}")
         self.tasks.append(
             asyncio.create_task(
-                self.process_order_intent(queued.entry_id, queued.intent, now_ns())
+                self.process_order_intent(
+                    queued.entry_id, queued.intent, queued.ts_oms_recv
+                )
             )
         )
 
