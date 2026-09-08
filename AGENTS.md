@@ -11,6 +11,17 @@ This is a Python-based event-driven liquidity arbitrage framework. The project u
 - mypy for type checking
 - CCXT for cryptocurrency exchange integrations
 
+## Confidentiality
+
+This repository is public. Never name the venues traded on or the assets
+traded, in code, tests, fixtures, documentation, commit messages or pull
+request descriptions. That information can be used against the operator.
+Refer to venues and symbols generically (`venue_a`, `BASE/QUOTE`, "the maker
+venue") and read the real ones from `config.toml` at runtime; venue-specific
+behaviour belongs behind a config option or the CCXT `has` map, never a
+hardcoded venue id. The strategies repository (`apps/strategies`) is private
+and is where venue and asset names live.
+
 ## Build, Lint, and Test Commands
 
 ### Running Tests
