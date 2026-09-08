@@ -63,6 +63,12 @@ pythonpath = ["."]
 testpaths = ["apps/maker/tests", "apps/shared/tests", "apps/strategies/tests"]
 asyncio_default_fixture_loop_scope = "function"
 
+# setup-uv reads this and installs the matching uv, so CI and a local run use
+# the same resolver. Without it setup-uv falls back to "latest" and silently
+# drifts ahead of whatever is on the developer machine.
+[tool.uv]
+required-version = ">=0.12.10"
+
 [tool.ruff]
 # apps/strategies is a separate private repository with its own lifecycle.
 # Style there is its own business, and excluding it here means `ruff format`
