@@ -58,6 +58,18 @@ Run tests with verbose output:
 pytest -v
 ```
 
+Coverage is not on by default, so a plain `pytest` run stays fast and a
+filtered run (`pytest -k ...`) does not trip the floor. CI runs:
+```bash
+uv run pytest -q --cov --cov-report=term
+```
+
+`[tool.coverage.run]` measures the four `src` trees with branch coverage;
+`fail_under` in `[tool.coverage.report]` is a ratchet set to what the suite
+reaches today, not a target. `apps/accountant/src` has no tests at all and is
+what holds the number down; the other three trees sit around 79%. Raise the
+floor as coverage improves, and do not lower it to make a red build green.
+
 ### Linting
 
 Run ruff linter (installed as a dev dependency):

@@ -8,3 +8,6 @@ Session.vim
 
 # Recorder output
 /data/
+
+# Coverage
+.coverage
