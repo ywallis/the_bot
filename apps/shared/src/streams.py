@@ -202,6 +202,8 @@ async def stream_tail(redis: Any, stream: str) -> str:
 REPLAY_PROGRESS_KEY = "replay:progress"
 REPLAY_DONE_KEY = "replay:done"
 REPLAY_CLOSED_KEY = "replay:closed"
+REPLAY_BROKER_KEY = "replay:broker"
+REPLAY_FRONTIER_KEY = "replay:frontier"
 
 
 def replay_progress_key(prefix: str, name: str) -> str:
@@ -261,6 +263,72 @@ def replay_closed_key(prefix: str) -> str:
         ``<prefix>:replay:closed``; its value is the broker's final clock.
     """
     return prefixed(prefix, REPLAY_CLOSED_KEY)
+
+
+def replay_broker_key(prefix: str) -> str:
+    """
+    Return the key a simulated broker sets when it joins a run.
+
+    A replayed runtime that finds it waits for the closed key rather than
+    stopping on the done key: the broker's last fills and cancellations
+    arrive after the market data ends, and a strategy that has left by then
+    never reacts to them. Without a broker there is nothing to wait for.
+
+    Parameters
+    ----------
+    prefix : str
+        Backtest prefix.
+
+    Returns
+    -------
+    str
+        ``<prefix>:replay:broker``; its value is the broker's name.
+    """
+    return prefixed(prefix, REPLAY_BROKER_KEY)
+
+
+def replay_frontier_key(prefix: str) -> str:
+    """
+    Return the key the replayer keeps the last published ``ts_recv`` in.
+
+    A consumer that has read its streams to their tails has processed
+    everything up to this time, whatever its own clock says: its streams may
+    be quiet while others move, or the recording may have a gap. Reporting
+    the frontier as progress in that case is what lets the replayer and the
+    simulated broker follow a consumer without ever waiting on a clock that
+    has nothing left to advance it.
+
+    Parameters
+    ----------
+    prefix : str
+        Backtest prefix.
+
+    Returns
+    -------
+    str
+        ``<prefix>:replay:frontier``.
+    """
+    return prefixed(prefix, REPLAY_FRONTIER_KEY)
+
+
+async def read_frontier(redis: Any, prefix: str) -> int:
+    """
+    Read the replay frontier.
+
+    Parameters
+    ----------
+    redis : Any
+        A ``redis.asyncio.Redis`` client.
+    prefix : str
+        Backtest prefix.
+
+    Returns
+    -------
+    int
+        The last published ``ts_recv``, 0 before anything was published.
+    """
+    value = await redis.get(replay_frontier_key(prefix))
+    return 0 if value is None else int(value)
 
 
 async def read_progress(

@@ -31,6 +31,7 @@ from apps.shared.src.events import (
 )
 from apps.shared.src.runtime import Clock, Runtime, Strategy
 from apps.shared.src.streams import (
+    read_frontier,
     replay_done_key,
     replay_progress_key,
     stream_path,
@@ -701,8 +702,35 @@ async def test_a_following_replay_waits_for_its_consumers_and_keeps_within_the_l
         c.cancel()
     assert report.published == {BOOK_A: 4}
     assert len(seen) == 4
-    # Every batch after the first went out only once the slowest consumer was
-    # within one lookahead of everything published before it.
-    for published, slowest in seen[1:]:
+    # Every batch after the first went out only once the slowest consumer had
+    # caught up with what was published, or the batch ended within one
+    # lookahead of it.
+    for (published, slowest), batch_end in zip(
+        seen[1:], [r.ts_recv for r in list(replayer.records())[1:]], strict=False
+    ):
         assert published is not None and slowest is not None
-        assert published - slowest <= lookahead_s * rp.NS_PER_S
+        assert slowest >= published or batch_end - slowest <= lookahead_s * rp.NS_PER_S
+    assert await read_frontier(redis, "bt:r1") == report.last_ts_recv
+
+
+@pytest.mark.asyncio
+async def test_a_following_replay_splits_batches_by_recorded_time(tmp_path: Path):
+    """Following, a batch spans at most half the lookahead, so the throttle can act."""
+    recording(tmp_path)
+    free = rp.Replayer(tmp_path, [BOOK_A], "bt:r1", start_ns=T14, end_ns=T14 + HOUR)
+    assert [len(b) async for b in free.batches()] == [4]
+    following = rp.Replayer(
+        tmp_path,
+        [BOOK_A],
+        "bt:r1",
+        start_ns=T14,
+        end_ns=T14 + HOUR,
+        follow=["s"],
+        lookahead_s=20 * 60,  # ten minutes per batch; records are 5 to 20 apart
+    )
+    assert [[r.ts_recv for r in b] async for b in following.batches()] == [
+        [T14 - 30 * MINUTE],
+        [T14 + 5 * MINUTE],
+        [T14 + 20 * MINUTE],
+        [T14 + 40 * MINUTE],
+    ]

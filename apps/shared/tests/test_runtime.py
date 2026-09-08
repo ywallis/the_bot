@@ -51,11 +51,15 @@ from apps.shared.src.runtime import (
 )
 from apps.shared.src.streams import (
     StreamPublisher,
+    replay_frontier_key,
+    replay_broker_key,
+    replay_closed_key,
     replay_done_key,
     replay_progress_key,
 )
 
-T0 = 1_757_200_000_000_000_000  # 2025-09-06T23:06:40Z
+T0 = 1_757_200_000_000_000_000
+NS = 1_000_000_000  # 2025-09-06T23:06:40Z
 
 
 def config() -> AppConfig:
@@ -744,3 +748,51 @@ async def test_a_replayed_runtime_stops_once_the_replay_is_done_and_read(redis: 
     assert not await Runtime(
         redis, config(), strategy_config(), Recorder()
     ).replay_finished()
+
+
+@pytest.mark.asyncio
+async def test_a_replayed_runtime_waits_for_the_broker_to_close_the_run(redis: Any):
+    """With a simulated broker present the done key is not enough; the closed key is."""
+    handler = Recorder()
+    runtime = Runtime(
+        redis,
+        config(),
+        strategy_config(),
+        handler,
+        clock=Clock.replay(),
+        prefix="bt:1",
+        block_ms=10,
+    )
+    await redis.set(replay_broker_key("bt:1"), "sim")
+    await redis.set(replay_done_key("bt:1"), T0)
+    task = asyncio.create_task(runtime.run())
+    await asyncio.sleep(0.05)
+    assert not task.done()
+    await publish(redis, order_event("fmb_es", ts_recv=T0 + 1), prefix="bt:1")
+    await redis.set(replay_closed_key("bt:1"), T0 + 1)
+    await asyncio.wait_for(task, timeout=1)
+    assert [type(e).__name__ for e in handler.events] == ["OrderEvent"]
+
+
+@pytest.mark.asyncio
+async def test_an_idle_replayed_runtime_reports_the_frontier(redis: Any):
+    """At the tail of quiet streams, progress is what the replayer has published."""
+    handler = Recorder()
+    runtime = Runtime(
+        redis,
+        config(),
+        strategy_config(),
+        handler,
+        clock=Clock.replay(),
+        prefix="bt:1",
+        block_ms=10,
+    )
+    await runtime.start()
+    await publish(redis, book(ts_recv=T0), prefix="bt:1")
+    await runtime.step()
+    assert int(await redis.get(replay_progress_key("bt:1", "fmb"))) == T0
+    # Other streams moved on to T0 + 60s while this strategy's went quiet.
+    await redis.set(replay_frontier_key("bt:1"), T0 + 60 * NS)
+    await runtime.step()
+    assert int(await redis.get(replay_progress_key("bt:1", "fmb"))) == T0 + 60 * NS
+    assert runtime.clock.now() == T0  # the clock itself did not move

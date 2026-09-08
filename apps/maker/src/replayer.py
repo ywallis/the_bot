@@ -64,6 +64,7 @@ from apps.shared.src.streams import (
     read_progress,
     recording_files,
     replay_done_key,
+    replay_frontier_key,
     stream_path,
 )
 from apps.shared.src.utils import production
@@ -900,10 +901,10 @@ class Replayer:
         pending: list[Record] = []
         for record in self.records():
             delay = self.pacer.delay(record.ts_recv)
+            if pending and (delay > 0 or self.spans_too_much(pending, record)):
+                yield pending
+                pending = []
             if delay > 0:
-                if pending:
-                    yield pending
-                    pending = []
                 await self.sleep(delay)
             pending.append(record)
             if len(pending) >= self.batch:
@@ -911,6 +912,30 @@ class Replayer:
                 pending = []
         if pending:
             yield pending
+
+    def spans_too_much(self, pending: list[Record], record: Record) -> bool:
+        """
+        Return whether adding a record would make a batch too long in time.
+
+        Only when following: the throttle admits a batch whose end is within
+        the lookahead of the slowest consumer, so a batch spanning more than
+        half of it could never be admitted in the steady state.
+
+        Parameters
+        ----------
+        pending : list[Record]
+            The batch so far, non-empty.
+        record : Record
+            The record to add.
+
+        Returns
+        -------
+        bool
+            True if the record should start a new batch.
+        """
+        if not self.follow:
+            return False
+        return record.ts_recv - pending[0].ts_recv > self.lookahead_ns // 2
 
     async def sleep(self, seconds: float) -> None:
         """
@@ -988,8 +1013,11 @@ class Replayer:
                         f"{gap.previous} -> {gap.current}"
                     )
                     self.report.gaps.append(gap)
-            await self.throttle(redis)
+            await self.throttle(redis, batch[-1].ts_recv)
             await self.publish(redis, batch)
+            await redis.set(
+                replay_frontier_key(self.prefix), self.report.last_ts_recv or 0
+            )
         await redis.set(replay_done_key(self.prefix), self.report.last_ts_recv or 0)
         return self.report
 
@@ -1037,22 +1065,30 @@ class Replayer:
             await self.sleep(FOLLOW_POLL_S)
             waited += FOLLOW_POLL_S
 
-    async def throttle(self, redis: Any) -> None:
+    async def throttle(self, redis: Any, batch_end: int) -> None:
         """
-        Wait until the slowest followed consumer is within the lookahead.
+        Wait until a batch may be published without outrunning the consumers.
+
+        A batch goes out when nothing has been published yet, when every
+        followed consumer has processed everything published so far (so a
+        gap in the recording, or the jump from a primed snapshot to the
+        range, never stalls the replay), or when the batch's last time is
+        within the lookahead of the slowest consumer.
 
         Parameters
         ----------
         redis : Any
             A ``redis.asyncio.Redis`` client.
+        batch_end : int
+            ``ts_recv`` of the batch's last record.
         """
         if not self.follow or self.report.last_ts_recv is None:
             return
         while True:
             slowest = await self.slowest_consumer(redis)
-            if (
-                slowest is not None
-                and self.report.last_ts_recv - slowest <= self.lookahead_ns
+            if slowest is not None and (
+                slowest >= self.report.last_ts_recv
+                or batch_end - slowest <= self.lookahead_ns
             ):
                 return
             await self.sleep(FOLLOW_POLL_S)

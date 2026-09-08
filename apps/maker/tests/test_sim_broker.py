@@ -46,6 +46,7 @@ from apps.shared.src.events import (
 )
 from apps.shared.src.streams import (
     StreamPublisher,
+    replay_frontier_key,
     replay_closed_key,
     replay_done_key,
     replay_progress_key,
@@ -759,3 +760,22 @@ def test_build_latency_requires_a_model_for_every_declared_venue(tmp_path: Path)
         sb.build_latency(config(), tmp_path, [], seed=0)
     model = sb.build_latency(config(), tmp_path, [(A, 300), (B, 400)], seed=0)
     assert model.summary()[A]["source"] == "assumed"
+
+
+@pytest.mark.asyncio
+async def test_an_idle_broker_reports_the_frontier_as_its_progress():
+    """With nothing buffered and nothing read, the broker is as far as the replay."""
+    h = Harness()
+    await h.start()
+    await h.publish(book(A, T0, [[0.34, 100]], [[0.35, 50]]))
+    assert int(await h.redis.get(replay_progress_key(PREFIX, "sim"))) == T0
+    await h.redis.set(replay_frontier_key(PREFIX), T0 + 30 * S)
+    await h.broker.step()
+    assert int(await h.redis.get(replay_progress_key(PREFIX, "sim"))) == T0 + 30 * S
+    # Held back by the gate, it reports where it actually is.
+    gated = Harness(follow=["s"])
+    await gated.start()
+    await gated.redis.set(replay_frontier_key(PREFIX), T0 + 30 * S)
+    await gated.broker.step()
+    assert gated.broker.buffer
+    assert int(await gated.redis.get(replay_progress_key(PREFIX, "sim"))) == 0

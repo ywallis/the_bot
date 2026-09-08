@@ -100,7 +100,9 @@ from apps.shared.src.events import (
 from apps.shared.src.runtime import StreamReader
 from apps.shared.src.streams import (
     StreamPublisher,
+    read_frontier,
     read_progress,
+    replay_broker_key,
     replay_closed_key,
     replay_done_key,
     replay_progress_key,
@@ -1615,7 +1617,9 @@ class SimulatedBroker:
         int
             Events processed.
         """
-        for stream, entries in await self.reader.read(self.block_ms):
+        frontier = await read_frontier(self.redis, self.prefix)
+        blocks = await self.reader.read(self.block_ms)
+        for stream, entries in blocks:
             for entry_id, event in entries:
                 self.reader.advance(stream, entry_id)
                 if event is None:
@@ -1634,7 +1638,11 @@ class SimulatedBroker:
         while self.buffer and self.buffer[0].ts <= gate:
             await self.handle(heapq.heappop(self.buffer).event)
             processed += 1
-        await self.redis.set(replay_progress_key(self.prefix, self.name), self.clock)
+        # Caught up with nothing pending: the frontier is as far as anyone
+        # has got, and it is this process's progress too.
+        idle = not blocks and not self.buffer
+        progress = max(self.clock, frontier) if idle else self.clock
+        await self.redis.set(replay_progress_key(self.prefix, self.name), progress)
         return processed
 
     async def finished(self) -> bool:
@@ -1669,6 +1677,7 @@ class SimulatedBroker:
             The report.
         """
         await self.reader.start()
+        await self.redis.set(replay_broker_key(self.prefix), self.name)
         logger.info(f"Simulating {sorted(self.latency.venues)} under {self.prefix}")
         for venue in self.config.venues:
             fees = self.fees(venue.id)

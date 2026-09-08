@@ -55,6 +55,9 @@ from apps.shared.src.streams import (
     STREAM_START,
     StreamPublisher,
     entry_id_str,
+    replay_broker_key,
+    replay_closed_key,
+    read_frontier,
     replay_done_key,
     replay_progress_key,
     stream_tail,
@@ -933,15 +936,22 @@ class Runtime:
         unread. Held-back entries are simply re-read: the cursor of their
         stream stays where delivery stopped.
 
-        Under replay the runtime's progress, the clock after the step, is
-        written to ``replay_progress_key`` so the replayer and the simulated
-        broker can follow it.
+        Under replay the runtime's progress is written to
+        ``replay_progress_key`` so the replayer and the simulated broker can
+        follow it: the clock after the step, or the replay frontier when the
+        read found nothing, since a runtime at the tail of its streams has
+        processed everything published even if its own streams are quiet.
 
         Returns
         -------
         int
             Number of entries delivered.
         """
+        # Read the frontier before the streams: if the read then finds
+        # nothing, everything published up to that frontier was processed.
+        frontier = (
+            0 if self.clock.live else await read_frontier(self.redis, self.prefix)
+        )
         blocks = await self.reader.read(self._block_ms())
         watermark = min(
             (
@@ -971,8 +981,9 @@ class Runtime:
             delivered += 1
         await self._fire_timer_if_due()
         if not self.clock.live:
+            progress = self.clock.now() if blocks else max(self.clock.now(), frontier)
             await self.redis.set(
-                replay_progress_key(self.prefix, self.identifier), self.clock.now()
+                replay_progress_key(self.prefix, self.identifier), progress
             )
         return delivered
 
@@ -997,13 +1008,18 @@ class Runtime:
         Returns
         -------
         bool
-            True once ``replay_done_key`` is set and every cursor is at its
-            tail. Always False live, where there is no end.
+            True once ``replay_done_key`` is set, every cursor is at its tail
+            and, if a simulated broker joined the run, it has set
+            ``replay_closed_key``: its last fills and cancellations come after
+            the market data ends. Always False live, where there is no end.
         """
         if self.clock.live:
             return False
         if await self.redis.get(replay_done_key(self.prefix)) is None:
             return False
+        if await self.redis.get(replay_broker_key(self.prefix)) is not None:
+            if await self.redis.get(replay_closed_key(self.prefix)) is None:
+                return False
         return await self.reader.at_tail()
 
     def stop(self) -> None:
