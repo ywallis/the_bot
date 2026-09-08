@@ -28,7 +28,10 @@ jobs:
       - uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
-          python-version: "3.14"
+          # No python-version input on purpose: it would override
+          # .python-version and let CI float to a different patch than the
+          # one developers run. The committed .python-version drives both,
+          # and [tool.uv] required-version pins the uv that reads it.
 
       # --locked fails if uv.lock is stale against pyproject.toml, so it doubles
       # as the lockfile check.

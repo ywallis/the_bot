@@ -5,7 +5,7 @@ This document provides guidelines for AI agents working in this repository.
 ## Project Overview
 
 This is a Python-based event-driven liquidity arbitrage framework. The project uses:
-- Python 3.14+
+- Python 3.14, pinned to an exact patch in `.python-version`
 - pytest with pytest-asyncio for testing
 - ruff for linting (docstrings only)
 - ty for type checking
@@ -29,6 +29,16 @@ and is where venue and asset names live.
 The strategies submodule holds `config.toml`, which most modules load at
 import time. In a fresh clone or worktree run `git submodule update --init`
 first or the maker tests fail at collection.
+
+`.python-version` names an exact patch, and CI uses that same file rather
+than a version of its own, so a green build says something about the
+interpreter you run locally. `uv` installs it for you; the distro package is
+not used. Bumping Python means editing that file deliberately:
+```bash
+uv python install <version> && uv python pin <version>
+rm -rf .venv && uv sync --locked --all-groups
+```
+`[tool.uv] required-version` pins uv itself for the same reason.
 
 Run all tests:
 ```bash
