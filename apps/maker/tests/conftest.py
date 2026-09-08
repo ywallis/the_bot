@@ -5,7 +5,7 @@ import json
 from collections.abc import Awaitable
 from copy import deepcopy
 from decimal import Decimal
-from typing import Callable
+from typing import Any, Callable
 
 import pytest
 import pytest_asyncio
@@ -33,11 +33,26 @@ class FakeClient:
     only reliable way to end one in a test is an error it does not know.
     """
 
-    def __init__(self, venue: str, results: list):
-        """Store the scripted results, which may be dicts, lists or exceptions."""
+    def __init__(
+        self,
+        venue: str,
+        results: list,
+        rest_results: list | None = None,
+        has: dict[str, bool] | None = None,
+    ):
+        """
+        Store the scripted results, which may be dicts, lists or exceptions.
+
+        ``rest_results`` scripts the ``fetch_*`` order endpoints the same way,
+        shared across them in call order, and ``has`` is the CCXT capability
+        map the order watcher consults to pick among them.
+        """
         self.id = venue
         self.name = venue.title()
         self._results = list(results)
+        self._rest_results = list(rest_results or [])
+        self.has = {"fetchOrders": True} if has is None else has
+        self.rest_calls: list[tuple[str, Any]] = []
         self.closed = 0
 
     async def _next(self):
@@ -60,6 +75,37 @@ class FakeClient:
         """Return the next scripted batch of order updates."""
         self.since = since
         return await self._next()
+
+    async def _rest(self, name: str, since: Any):
+        self.rest_calls.append((name, since))
+        if not self._rest_results:
+            return []
+        result = self._rest_results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    async def fetch_orders(self, symbol: str, since=None, limit=None, params=None):
+        """Return the next scripted REST result."""
+        return await self._rest("fetch_orders", since)
+
+    async def fetch_open_orders(self, symbol: str, since=None, limit=None, params=None):
+        """Return the next scripted REST result."""
+        return await self._rest("fetch_open_orders", since)
+
+    async def fetch_closed_orders(self, symbol: str, since=None, limit=None, params=None):
+        """Return the next scripted REST result."""
+        return await self._rest("fetch_closed_orders", since)
+
+    async def fetch_canceled_orders(self, symbol: str, since=None, limit=None, params=None):
+        """Return the next scripted REST result."""
+        return await self._rest("fetch_canceled_orders", since)
+
+    async def fetch_canceled_and_closed_orders(
+        self, symbol: str, since=None, limit=None, params=None
+    ):
+        """Return the next scripted REST result."""
+        return await self._rest("fetch_canceled_and_closed_orders", since)
 
     async def close(self):
         """Count close calls."""
