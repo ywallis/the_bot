@@ -157,3 +157,38 @@ async def test_redis_subscriber_valid_message(order_1, order_raw_string):
     # Verify that subscribe and unsubscribe were called with the correct channel.
     pubsub.subscribe.assert_awaited_once_with("broker")
     pubsub.unsubscribe.assert_awaited_once_with("broker")
+
+
+@pytest.mark.asyncio
+async def test_wind_down_stops_every_task():
+    """The subscriber is cancelled, the workers and results worker drain and exit."""
+    from apps.maker.src.broker import results_worker, wind_down, worker
+
+    class Never:
+        async def close(self):
+            pass
+
+    async def listen_forever():
+        await asyncio.Event().wait()
+
+    published: list[tuple[str, str]] = []
+
+    class FakeRedis:
+        async def publish(self, channel, message):
+            published.append((channel, message))
+
+    worker_queues = {"mexc": asyncio.Queue()}
+    results_queue: asyncio.Queue = asyncio.Queue()
+    subscriber = asyncio.create_task(listen_forever())
+    results = asyncio.create_task(results_worker(FakeRedis(), results_queue))
+    workers = [asyncio.create_task(worker(worker_queues["mexc"], results_queue, Never()))]
+    # A result already produced must still be published before the exit.
+    await results_queue.put(("t-1_lmb_es", "order", "{'id': 'venue-1'}"))
+
+    await asyncio.wait_for(
+        wind_down(subscriber, results, workers, worker_queues, results_queue), timeout=2
+    )
+
+    assert subscriber.cancelled()
+    assert results.done() and workers[0].done()
+    assert published == [("t-1_lmb_es", "order|{'id': 'venue-1'}")]
