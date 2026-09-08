@@ -173,7 +173,9 @@ async def check_control(venue: str, report: Report) -> None:
     try:
         while time.time() < end:
             try:
-                await asyncio.wait_for(client.watch_order_book(CONTROL_SYMBOL), end - time.time() + 0.1)
+                await asyncio.wait_for(
+                    client.watch_order_book(CONTROL_SYMBOL), end - time.time() + 0.1
+                )
                 count += 1
             except asyncio.TimeoutError:
                 break
@@ -183,12 +185,21 @@ async def check_control(venue: str, report: Report) -> None:
                 rate_limited += 1
                 await asyncio.sleep(5)
             except Exception as e:  # noqa: BLE001
-                report.add("control feed", False, f"{type(e).__name__}: {str(e)[:80]}", "transport or venue problem, fix before reading other checks")
+                report.add(
+                    "control feed",
+                    False,
+                    f"{type(e).__name__}: {str(e)[:80]}",
+                    "transport or venue problem, fix before reading other checks",
+                )
                 return
     finally:
         await client.close()
     if rate_limited:
-        report.add("control rate limit", None, f"{rate_limited} rate-limit responses while subscribing; space out runs against this venue")
+        report.add(
+            "control rate limit",
+            None,
+            f"{rate_limited} rate-limit responses while subscribing; space out runs against this venue",
+        )
     report.add(
         "control feed",
         count >= 10,
@@ -225,7 +236,9 @@ async def check_book(venue: str, symbol: str, seconds: int, report: Report) -> N
     try:
         while time.time() < end:
             try:
-                book = await asyncio.wait_for(client.watch_order_book(symbol), max(1.0, end - time.time()))
+                book = await asyncio.wait_for(
+                    client.watch_order_book(symbol), max(1.0, end - time.time())
+                )
             except asyncio.TimeoutError:
                 break
             except Exception as e:  # noqa: BLE001
@@ -247,7 +260,11 @@ async def check_book(venue: str, symbol: str, seconds: int, report: Report) -> N
         await client.close()
 
     checksum_errors = errors.get("ChecksumError", 0) + errors.get("UnsubscribeError", 0)
-    other = {k: v for k, v in errors.items() if k not in ("ChecksumError", "UnsubscribeError")}
+    other = {
+        k: v
+        for k, v in errors.items()
+        if k not in ("ChecksumError", "UnsubscribeError")
+    }
     report.add(
         "book first message",
         first_at is not None,
@@ -266,7 +283,12 @@ async def check_book(venue: str, symbol: str, seconds: int, report: Report) -> N
         f"{dict(other) if other else 'none'}",
         "add the error type to RESUBSCRIBE_ERRORS or RECONNECT_ERRORS in watcher.py, or it will crash the watcher",
     )
-    report.add("book depth", depth >= 20, f"{depth} levels, rows of {row_len}", "fewer than book_depth levels; pass a limit or lower market_data.book_depth")
+    report.add(
+        "book depth",
+        depth >= 20,
+        f"{depth} levels, rows of {row_len}",
+        "fewer than book_depth levels; pass a limit or lower market_data.book_depth",
+    )
     report.add(
         "book ts_exch",
         ts_null == 0,
@@ -274,7 +296,11 @@ async def check_book(venue: str, symbol: str, seconds: int, report: Report) -> N
         "lead-lag research on this venue will have to use ts_recv only",
     )
     if lags:
-        report.add("book lag", None, f"p50 {statistics.median(lags):.0f} ms, max {max(lags):.0f} ms (exchange to receive)")
+        report.add(
+            "book lag",
+            None,
+            f"p50 {statistics.median(lags):.0f} ms, max {max(lags):.0f} ms (exchange to receive)",
+        )
 
 
 async def check_trades(venue: str, symbol: str, seconds: int, report: Report) -> None:
@@ -298,14 +324,22 @@ async def check_trades(venue: str, symbol: str, seconds: int, report: Report) ->
     consecutive_overlap: int | None = None
     try:
         try:
-            first = await asyncio.wait_for(client.watch_trades(symbol), min(seconds, FIRST_MESSAGE_TIMEOUT))
+            first = await asyncio.wait_for(
+                client.watch_trades(symbol), min(seconds, FIRST_MESSAGE_TIMEOUT)
+            )
             try:
                 nxt = await asyncio.wait_for(client.watch_trades(symbol), 30)
-                consecutive_overlap = len({trade_key(t) for t in first} & {trade_key(t) for t in nxt})
+                consecutive_overlap = len(
+                    {trade_key(t) for t in first} & {trade_key(t) for t in nxt}
+                )
             except asyncio.TimeoutError:
                 pass
         except asyncio.TimeoutError:
-            report.add("trades first batch", None, f"no trades within {min(seconds, FIRST_MESSAGE_TIMEOUT)}s, quiet market; rerun on a busier pair to test trades")
+            report.add(
+                "trades first batch",
+                None,
+                f"no trades within {min(seconds, FIRST_MESSAGE_TIMEOUT)}s, quiet market; rerun on a busier pair to test trades",
+            )
             return
         await client.close()
         client = make_client(venue, auth=False)
@@ -322,22 +356,32 @@ async def check_trades(venue: str, symbol: str, seconds: int, report: Report) ->
     report.add(
         "trade ids",
         None,
-        f"{ids_present}/{len(first)} carry an id" + ("" if ids_present == len(first) else "; dedupe falls back to timestamp/price/amount"),
+        f"{ids_present}/{len(first)} carry an id"
+        + (
+            ""
+            if ids_present == len(first)
+            else "; dedupe falls back to timestamp/price/amount"
+        ),
     )
     report.add(
         "trades newUpdates",
         consecutive_overlap in (None, 0),
-        "consecutive calls return only new trades" if consecutive_overlap in (None, 0) else f"{consecutive_overlap} trades repeated between consecutive calls",
+        "consecutive calls return only new trades"
+        if consecutive_overlap in (None, 0)
+        else f"{consecutive_overlap} trades repeated between consecutive calls",
         "the watcher relies on CCXT newUpdates; investigate this venue's watch_trades in ccxt.pro",
     )
     report.add(
         "trades cache replay",
         None,
-        f"{replay} trades replayed after resubscribe" + (" (handled by watcher dedupe)" if replay else ""),
+        f"{replay} trades replayed after resubscribe"
+        + (" (handled by watcher dedupe)" if replay else ""),
     )
 
 
-async def check_shared_client(venue: str, symbol: str, seconds: int, report: Report) -> None:
+async def check_shared_client(
+    venue: str, symbol: str, seconds: int, report: Report
+) -> None:
     """
     Run book and trade loops on one client without closing it, as the watcher does.
 
@@ -403,15 +447,28 @@ async def check_auth(venue: str, report: Report) -> None:
     client = make_client(venue, auth=True)
     try:
         balance = await asyncio.wait_for(client.fetch_balance(), 30)
-        assets = {k: v.get("total") for k, v in balance.items() if isinstance(v, dict) and v.get("total")}
+        assets = {
+            k: v.get("total")
+            for k, v in balance.items()
+            if isinstance(v, dict) and v.get("total")
+        }
         report.add("auth fetch_balance", True, f"ok, non-zero: {assets or 'nothing'}")
         try:
             await asyncio.wait_for(client.watch_balance(), 20)
             report.add("auth watch_balance", True, "first push within 20s")
         except asyncio.TimeoutError:
-            report.add("auth watch_balance", None, "no push within 20s (normal: venues push on change only, the handler seeds with fetch_balance)")
+            report.add(
+                "auth watch_balance",
+                None,
+                "no push within 20s (normal: venues push on change only, the handler seeds with fetch_balance)",
+            )
     except Exception as e:  # noqa: BLE001
-        report.add("auth fetch_balance", False, f"{type(e).__name__}: {str(e)[:100]}", "check key, secret, passphrase and IP whitelist for the sub-account")
+        report.add(
+            "auth fetch_balance",
+            False,
+            f"{type(e).__name__}: {str(e)[:100]}",
+            "check key, secret, passphrase and IP whitelist for the sub-account",
+        )
     finally:
         await client.close()
 
@@ -459,11 +516,17 @@ async def run(venue: str, symbol: str, seconds: int, auth: bool) -> bool:
 
 def main() -> None:
     """Parse arguments and run."""
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("venue", help="CCXT short id, e.g. bitget")
     parser.add_argument("symbol", help="CCXT symbol, e.g. ALPH/USDT")
-    parser.add_argument("--seconds", type=int, default=90, help="observation window (default 90)")
-    parser.add_argument("--no-auth", action="store_true", help="skip the credential check")
+    parser.add_argument(
+        "--seconds", type=int, default=90, help="observation window (default 90)"
+    )
+    parser.add_argument(
+        "--no-auth", action="store_true", help="skip the credential check"
+    )
     args = parser.parse_args()
     ok = asyncio.run(run(args.venue, args.symbol, args.seconds, not args.no_auth))
     sys.exit(0 if ok else 1)

@@ -93,11 +93,15 @@ class FakeClient:
         """Return the next scripted REST result."""
         return await self._rest("fetch_open_orders", since)
 
-    async def fetch_closed_orders(self, symbol: str, since=None, limit=None, params=None):
+    async def fetch_closed_orders(
+        self, symbol: str, since=None, limit=None, params=None
+    ):
         """Return the next scripted REST result."""
         return await self._rest("fetch_closed_orders", since)
 
-    async def fetch_canceled_orders(self, symbol: str, since=None, limit=None, params=None):
+    async def fetch_canceled_orders(
+        self, symbol: str, since=None, limit=None, params=None
+    ):
         """Return the next scripted REST result."""
         return await self._rest("fetch_canceled_orders", since)
 

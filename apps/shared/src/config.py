@@ -344,7 +344,9 @@ class AppConfig(msgspec.Struct, frozen=True):
             if feed in s.feeds
         }
 
-    def venue_symbol_pairs(self, production: bool | None = None) -> set[tuple[str, str]]:
+    def venue_symbol_pairs(
+        self, production: bool | None = None
+    ) -> set[tuple[str, str]]:
         """
         Return distinct (venue, symbol) tuples across selected strategies.
 

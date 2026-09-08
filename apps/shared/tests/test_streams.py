@@ -104,7 +104,11 @@ def test_configured_streams_covers_feeds_venues_and_oms():
                     "type": "latency_arb",
                     "production": True,
                     "subscriptions": [
-                        {"venue": "gate", "symbol": "BTC/USDT", "feeds": ["book", "trade"]},
+                        {
+                            "venue": "gate",
+                            "symbol": "BTC/USDT",
+                            "feeds": ["book", "trade"],
+                        },
                         {"venue": "mexc", "symbol": "SOL/USDT"},
                     ],
                 },
@@ -134,7 +138,9 @@ def test_configured_streams_covers_feeds_venues_and_oms():
 def test_stream_path_layout():
     """Stream names map to nested directories with safe symbol names."""
     root = Path("/tmp/rec")
-    assert stream_path(root, "md:book:gate:ALPH/USDT") == root / "md/book/gate/ALPH-USDT"
+    assert (
+        stream_path(root, "md:book:gate:ALPH/USDT") == root / "md/book/gate/ALPH-USDT"
+    )
     assert stream_path(root, "acct:balance:gate") == root / "acct/balance/gate"
     assert stream_path(root, "oms:events") == root / "oms/events"
 

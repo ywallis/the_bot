@@ -154,7 +154,10 @@ def test_successive_updates_report_the_fill_between_them():
     memory = BoundedDict(10)
     event_from_order("mexc", ccxt_order(filled=10, average=0.351), 1, memory)
     second = event_from_order(
-        "mexc", ccxt_order(status="closed", filled=40, remaining=0, average=0.352), 2, memory
+        "mexc",
+        ccxt_order(status="closed", filled=40, remaining=0, average=0.352),
+        2,
+        memory,
     )
 
     assert second.state is OrderState.FILLED
@@ -171,7 +174,9 @@ def test_a_cancelled_order_is_reported_as_cancelled():
 
 def test_amounts_avoid_binary_float_noise():
     """Money-touching figures go through Decimal by way of the string form."""
-    event = event_from_order("mexc", ccxt_order(filled=0.1, remaining=0.2), 1, BoundedDict(10))
+    event = event_from_order(
+        "mexc", ccxt_order(filled=0.1, remaining=0.2), 1, BoundedDict(10)
+    )
 
     assert event.filled == Decimal("0.1")
     assert event.remaining == Decimal("0.2")
@@ -373,8 +378,12 @@ async def test_reconciliation_fetches_from_before_the_last_delivery(monkeypatch)
     with pytest.raises(StopWatching):
         await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
 
-    (_name, since), = client.rest_calls
-    assert before - RECONCILE_MARGIN_MS - 2000 <= since <= before - RECONCILE_MARGIN_MS + 5000
+    ((_name, since),) = client.rest_calls
+    assert (
+        before - RECONCILE_MARGIN_MS - 2000
+        <= since
+        <= before - RECONCILE_MARGIN_MS + 5000
+    )
 
 
 @pytest.mark.asyncio
@@ -396,14 +405,22 @@ async def test_reconciliation_does_not_republish_what_the_socket_reported(monkey
     redis = fakeredis.FakeRedis(decode_responses=True)
     client = FakeClient(
         "mexc",
-        [[ccxt_order()], NetworkError("gone"), [ccxt_order()], [ccxt_order(status="closed")]],
+        [
+            [ccxt_order()],
+            NetworkError("gone"),
+            [ccxt_order()],
+            [ccxt_order(status="closed")],
+        ],
         rest_results=[[ccxt_order()]],
     )
 
     with pytest.raises(StopWatching):
         await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
 
-    assert [e.state for e in await events_on(redis)] == [OrderState.OPEN, OrderState.FILLED]
+    assert [e.state for e in await events_on(redis)] == [
+        OrderState.OPEN,
+        OrderState.FILLED,
+    ]
 
 
 @pytest.mark.asyncio
@@ -426,7 +443,9 @@ async def test_a_failed_reconciliation_does_not_take_the_feed_down(monkeypatch):
 @pytest.mark.asyncio
 async def test_fetch_orders_since_uses_one_call_where_the_venue_has_it():
     """MEXC has fetchOrders."""
-    client = FakeClient("mexc", [], rest_results=[[ccxt_order()]], has={"fetchOrders": True})
+    client = FakeClient(
+        "mexc", [], rest_results=[[ccxt_order()]], has={"fetchOrders": True}
+    )
     assert len(await fetch_orders_since(client, "ALPH/USDT", 1)) == 1
     assert [name for name, _ in client.rest_calls] == ["fetch_orders"]
 
@@ -437,8 +456,15 @@ async def test_fetch_orders_since_combines_endpoints_where_it_must():
     client = FakeClient(
         "bitget",
         [],
-        rest_results=[[ccxt_order()], [ccxt_order(status="closed"), ccxt_order(status="canceled")]],
-        has={"fetchOrders": False, "fetchOpenOrders": True, "fetchCanceledAndClosedOrders": True},
+        rest_results=[
+            [ccxt_order()],
+            [ccxt_order(status="closed"), ccxt_order(status="canceled")],
+        ],
+        has={
+            "fetchOrders": False,
+            "fetchOpenOrders": True,
+            "fetchCanceledAndClosedOrders": True,
+        },
     )
     orders = await fetch_orders_since(client, "ALPH/USDT", 1)
     assert len(orders) == 3
@@ -454,8 +480,16 @@ async def test_fetch_orders_since_falls_back_to_closed_and_cancelled():
     client = FakeClient(
         "other",
         [],
-        rest_results=[[], [ccxt_order(status="closed")], [ccxt_order(status="canceled")]],
-        has={"fetchOpenOrders": True, "fetchClosedOrders": True, "fetchCanceledOrders": True},
+        rest_results=[
+            [],
+            [ccxt_order(status="closed")],
+            [ccxt_order(status="canceled")],
+        ],
+        has={
+            "fetchOpenOrders": True,
+            "fetchClosedOrders": True,
+            "fetchCanceledOrders": True,
+        },
     )
     assert len(await fetch_orders_since(client, "ALPH/USDT", 1)) == 2
     assert [name for name, _ in client.rest_calls] == [

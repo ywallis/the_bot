@@ -63,6 +63,13 @@ pythonpath = [".", "apps/maker/src"]
 testpaths = ["apps/maker/tests", "apps/shared/tests", "apps/strategies/tests"]
 asyncio_default_fixture_loop_scope = "function"
 
+[tool.ruff]
+# apps/strategies is a separate private repository with its own lifecycle.
+# Style there is its own business, and excluding it here means `ruff format`
+# run from this repo cannot silently rewrite a submodule you did not intend to
+# touch. Correctness is still shared: ty and pytest do cover it.
+extend-exclude = ["apps/strategies"]
+
 [tool.ruff.lint]
 select = ["D"]
 ignore = ["D100"]

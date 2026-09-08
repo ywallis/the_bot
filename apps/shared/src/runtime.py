@@ -681,7 +681,9 @@ class Runtime:
             target_intent_id=target_intent_id,
         )
         await self.publisher.publish(self.redis, intent)
-        logger.debug(f"Submitted {intent.intent_id} for {target_intent_id or 'resting'}")
+        logger.debug(
+            f"Submitted {intent.intent_id} for {target_intent_id or 'resting'}"
+        )
         return intent
 
     # Reading ---------------------------------------------------------------
@@ -773,7 +775,9 @@ class Runtime:
                 try:
                     event = from_stream_fields(fields)
                 except Exception as error:  # noqa: BLE001, keep reading
-                    logger.error(f"Undecodable entry {entry_id!r} on {stream_name}: {error}")
+                    logger.error(
+                        f"Undecodable entry {entry_id!r} on {stream_name}: {error}"
+                    )
                     continue
                 await self.dispatch(event)
                 delivered += 1

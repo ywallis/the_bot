@@ -132,7 +132,10 @@ def test_stream_fields_roundtrip(event):
     fields = events.to_stream_fields(event)
     assert fields["type"] == events.event_type(event).value
     assert events.from_stream_fields(fields) == event
-    as_bytes = {k.encode(): (v if isinstance(v, bytes) else v.encode()) for k, v in fields.items()}
+    as_bytes = {
+        k.encode(): (v if isinstance(v, bytes) else v.encode())
+        for k, v in fields.items()
+    }
     assert events.from_stream_fields(as_bytes) == event
 
 

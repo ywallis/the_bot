@@ -181,7 +181,9 @@ async def test_wind_down_stops_every_task():
     results_queue: asyncio.Queue = asyncio.Queue()
     subscriber = asyncio.create_task(listen_forever())
     results = asyncio.create_task(results_worker(FakeRedis(), results_queue))
-    workers = [asyncio.create_task(worker(worker_queues["mexc"], results_queue, Never()))]
+    workers = [
+        asyncio.create_task(worker(worker_queues["mexc"], results_queue, Never()))
+    ]
     # A result already produced must still be published before the exit.
     await results_queue.put(("t-1_lmb_es", "order", "{'id': 'venue-1'}"))
 

@@ -66,6 +66,7 @@ def test_a_module_exporting_strategy_is_native():
 
 def test_a_module_without_strategy_is_legacy():
     """No ``STRATEGY`` means the legacy coroutine is looked up by type."""
+
     async def fake_maker(redis: Any, strategy: dict[str, Any]) -> None:
         pass
 
@@ -79,7 +80,9 @@ def test_a_strategy_that_is_not_a_strategy_is_refused():
     with pytest.raises(TypeError):
         runtime_strategy_class(module("m", STRATEGY=object))
     with pytest.raises(TypeError):
-        runtime_strategy_class(module("m", **{STRATEGY_ATTRIBUTE: Native(strategy_config("x"))}))
+        runtime_strategy_class(
+            module("m", **{STRATEGY_ATTRIBUTE: Native(strategy_config("x"))})
+        )
 
 
 def test_a_module_with_neither_shape_is_an_error():
@@ -93,7 +96,9 @@ async def test_run_hands_a_native_strategy_its_config(monkeypatch: pytest.Monkey
     """The runtime path constructs the class with the ``StrategyConfig``."""
     seen: dict[str, Any] = {}
 
-    async def fake_run_strategy(redis: Any, config: AppConfig, strategy: StrategyConfig, handler: Strategy) -> None:
+    async def fake_run_strategy(
+        redis: Any, config: AppConfig, strategy: StrategyConfig, handler: Strategy
+    ) -> None:
         seen.update(redis=redis, strategy=strategy, handler=handler)
 
     monkeypatch.setattr("apps.maker.src.launcher.run_strategy", fake_run_strategy)
@@ -108,7 +113,9 @@ async def test_run_hands_a_native_strategy_its_config(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
-async def test_run_hands_a_legacy_strategy_the_flat_dict(monkeypatch: pytest.MonkeyPatch):
+async def test_run_hands_a_legacy_strategy_the_flat_dict(
+    monkeypatch: pytest.MonkeyPatch,
+):
     """The legacy path passes the flattened dict with ``refresh_speed``."""
     seen: dict[str, Any] = {}
 

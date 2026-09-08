@@ -212,7 +212,9 @@ async def test_the_cursor_survives_a_non_decoding_client(decode: bool):
 def test_legacy_order_type_prefers_the_tag():
     """A bridged intent keeps the order type the legacy message carried."""
     assert legacy_order_type(order_intent(legacy=OrderType.UNIQUE)) is OrderType.UNIQUE
-    assert legacy_order_type(order_intent(legacy=OrderType.REPLACE)) is OrderType.REPLACE
+    assert (
+        legacy_order_type(order_intent(legacy=OrderType.REPLACE)) is OrderType.REPLACE
+    )
 
 
 def test_legacy_order_type_derived_for_native_intents():
@@ -629,9 +631,7 @@ async def test_events_about_other_orders_are_ignored(
 ):
     """An order id we know on a venue we did not use is a different order."""
     await submit(manager, order_intent(intent_id="resting"))
-    manager.apply_order_event(
-        order_event("resting", OrderState.FILLED, venue="bitget")
-    )
+    manager.apply_order_event(order_event("resting", OrderState.FILLED, venue="bitget"))
 
     assert ("mexc", "resting") in manager.orders
 
@@ -646,9 +646,7 @@ async def test_follow_order_events_applies_what_it_reads(
     await asyncio.sleep(0.05)
 
     publisher = StreamPublisher(maxlen=1000)
-    await publisher.publish(
-        manager.redis, order_event("resting", OrderState.FILLED)
-    )
+    await publisher.publish(manager.redis, order_event("resting", OrderState.FILLED))
     await asyncio.sleep(0.1)
     follower.cancel()
 
@@ -974,9 +972,7 @@ async def test_an_intent_that_goes_stale_while_queued_is_rejected(decode: bool):
     """
     redis = fakeredis.FakeRedis(decode_responses=decode)
     settings = OmsConfig(block_ms=10, batch=10, max_intent_age_s=0.05)
-    order_manager = OrderManager(
-        msgspec.structs.replace(config(), oms=settings), redis
-    )
+    order_manager = OrderManager(msgspec.structs.replace(config(), oms=settings), redis)
     await order_manager.ensure_group()
     await order_manager.consume_once()
 
@@ -997,10 +993,7 @@ async def test_an_intent_that_goes_stale_while_queued_is_rejected(decode: bool):
     await settle(order_manager)
 
     assert [m["id"] for m in broker.orders] == ["first"]
-    events = [
-        e
-        for e in cast(list[Any], await redis.xrange(ORDER_EVENTS_STREAM))
-    ]
+    events = [e for e in cast(list[Any], await redis.xrange(ORDER_EVENTS_STREAM))]
     rejected = [
         e
         for e in (from_stream_fields(f) for _id, f in events)

@@ -49,14 +49,16 @@ async def get_order_status(
                 open_sell_orders_total += float(order["remaining"])
             if details:
                 print(
-                    f"Open {order['side']} {ticker.split("/")[0]} order on {client.name} at {order['price']}, "
+                    f"Open {order['side']} {ticker.split('/')[0]} order on {client.name} at {order['price']}, "
                     f"{round(float(order['remaining']), 2)} of {round(float(order['amount']), 2)} remaining."
                 )
         if open_buy_orders_total != 0:
-            print(f"Total of {round(open_buy_orders_total, 2)} {ticker.split("/")[0]} buys open on {client.name}.")
+            print(
+                f"Total of {round(open_buy_orders_total, 2)} {ticker.split('/')[0]} buys open on {client.name}."
+            )
         if open_sell_orders_total != 0:
             print(
-                f"Total of {round(open_sell_orders_total, 2)} {ticker.split("/")[0]} sells open on {client.name}."
+                f"Total of {round(open_sell_orders_total, 2)} {ticker.split('/')[0]} sells open on {client.name}."
             )
 
 

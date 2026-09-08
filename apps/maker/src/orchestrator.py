@@ -84,7 +84,9 @@ def module_of(cmd: Sequence[str]) -> str:
     return cmd[cmd.index("-m") + 1].rsplit(".", 1)[-1]
 
 
-def shutdown_phases(processes: Sequence[Process]) -> list[tuple[str, list[Process], float]]:
+def shutdown_phases(
+    processes: Sequence[Process],
+) -> list[tuple[str, list[Process], float]]:
     """
     Group processes into the order they are stopped in.
 
@@ -181,7 +183,9 @@ def stop_processes(
         try:
             process[1].wait(timeout=remaining)
         except subprocess.TimeoutExpired:
-            logger.error(f"{module_of(process[0])} ignored SIGTERM for {grace_s}s, killing")
+            logger.error(
+                f"{module_of(process[0])} ignored SIGTERM for {grace_s}s, killing"
+            )
             kill(process[1])
             killed.append(process)
     return killed
@@ -260,7 +264,9 @@ def main() -> None:
     while True:
         for cmd, proc in processes:
             if proc.poll() is not None:
-                logger.error(f"Process {module_of(cmd)} crashed unexpectedly, winding down.")
+                logger.error(
+                    f"Process {module_of(cmd)} crashed unexpectedly, winding down."
+                )
                 cleanup_and_exit(1)
         time.sleep(2)
 
