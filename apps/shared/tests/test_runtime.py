@@ -476,9 +476,7 @@ async def test_nothing_published_between_reads_is_lost(redis: Any):
 async def test_the_clock_follows_delivered_events(redis: Any):
     """Each delivered event advances the runtime's clock."""
     handler = Recorder()
-    runtime = Runtime(
-        redis, config(), strategy_config(), handler, clock=Clock.replay()
-    )
+    runtime = Runtime(redis, config(), strategy_config(), handler, clock=Clock.replay())
     await runtime.start()
     await publish(redis, book(ts_recv=T0), book(ts_recv=T0 + 5))
     await runtime.step()

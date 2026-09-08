@@ -77,7 +77,9 @@ def test_shutdown_phases_order_strategies_oms_feeds_recorder():
         (cmd("unknown_tool"), FakeProc()),
     ]
     phases = shutdown_phases(processes)
-    by_name = {name: sorted(module_of(c) for c, _ in group) for name, group, _ in phases}
+    by_name = {
+        name: sorted(module_of(c) for c, _ in group) for name, group, _ in phases
+    }
     assert [name for name, _, _ in phases] == [
         "strategies",
         "order manager",
@@ -108,7 +110,11 @@ def test_stop_processes_terminates_then_kills_the_stubborn():
     polite = FakeProc(exits_on_term=True)
     stubborn = FakeProc(exits_on_term=False)
     gone = FakeProc(running=False)
-    processes = [(cmd("watcher"), polite), (cmd("broker"), stubborn), (cmd("matcher"), gone)]
+    processes = [
+        (cmd("watcher"), polite),
+        (cmd("broker"), stubborn),
+        (cmd("matcher"), gone),
+    ]
 
     killed = stop_processes(processes, grace_s=0.01, terminate=terminate, kill=kill)
 
@@ -138,7 +144,13 @@ def test_shutdown_stops_phases_in_order(monkeypatch):
     assert order[0] == "launcher"
     assert order[1] == "message_processor"
     assert order[-1] == "recorder"
-    assert set(order[2:-1]) == {"broker", "watcher", "order_watcher", "matcher", "balance"}
+    assert set(order[2:-1]) == {
+        "broker",
+        "watcher",
+        "order_watcher",
+        "matcher",
+        "balance",
+    }
 
 
 def test_check_identifiers_rejects_missing_and_duplicate():

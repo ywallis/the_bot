@@ -7,12 +7,16 @@ from apps.maker.src.enums import MessageType, OrderType, OrderSide
 from apps.maker.src.structs import OrderMessage
 from apps.maker.src.ccxt_abstractions import create_and_return_order
 
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("order_kind,expected_type", [
-    (OrderType.MARKET, "market"),
-    (OrderType.UNIQUE, "limit"),
-    (OrderType.REPLACE, "limit"),
-])
+@pytest.mark.parametrize(
+    "order_kind,expected_type",
+    [
+        (OrderType.MARKET, "market"),
+        (OrderType.UNIQUE, "limit"),
+        (OrderType.REPLACE, "limit"),
+    ],
+)
 async def test_create_and_return_order_type(order_kind, expected_type):
     """Test creating an order with different order types."""
     # Mock order

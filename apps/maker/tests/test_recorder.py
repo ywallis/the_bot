@@ -55,7 +55,11 @@ def test_format_line_embeds_raw_payload():
     """The payload is spliced in verbatim and the line parses as JSON."""
     line = rec.format_line("1-0", "book", b'{"a":1,"b":[1.5,2]}')
     assert line.endswith(b"\n")
-    assert json.loads(line) == {"id": "1-0", "type": "book", "data": {"a": 1, "b": [1.5, 2]}}
+    assert json.loads(line) == {
+        "id": "1-0",
+        "type": "book",
+        "data": {"a": 1, "b": [1.5, 2]},
+    }
 
 
 def test_last_recorded_id(tmp_path: Path):
@@ -170,7 +174,9 @@ async def test_recorder_records_batches_and_resumes(tmp_path: Path):
     recorder.close()
 
     directory = stream_path(tmp_path, STREAM)
-    lines = [json.loads(line) for line in next(directory.iterdir()).read_bytes().splitlines()]
+    lines = [
+        json.loads(line) for line in next(directory.iterdir()).read_bytes().splitlines()
+    ]
     assert [line["data"]["seq"] for line in lines] == [1, 2, 3]
     assert all(line["type"] == "book" for line in lines)
     last_id = lines[-1]["id"]
@@ -182,7 +188,9 @@ async def test_recorder_records_batches_and_resumes(tmp_path: Path):
     response = await redis.xread(dict(restarted.cursors), count=10)
     assert restarted.record_batch(response) == 1
     restarted.close()
-    lines = [json.loads(line) for line in next(directory.iterdir()).read_bytes().splitlines()]
+    lines = [
+        json.loads(line) for line in next(directory.iterdir()).read_bytes().splitlines()
+    ]
     assert [line["data"]["seq"] for line in lines] == [1, 2, 3, 4]
 
 
@@ -191,7 +199,9 @@ async def test_recorder_run_loop_writes_and_flushes(tmp_path: Path):
     """The blocking loop picks up entries published while it runs."""
     redis = fakeredis.FakeRedis(decode_responses=False)
     publisher = StreamPublisher(maxlen=1000)
-    settings = RecorderConfig(root=str(tmp_path), block_ms=20, batch=100, flush_interval_s=0.01)
+    settings = RecorderConfig(
+        root=str(tmp_path), block_ms=20, batch=100, flush_interval_s=0.01
+    )
     recorder = rec.Recorder(tmp_path, [STREAM], settings)
 
     task = asyncio.create_task(recorder.run(redis))

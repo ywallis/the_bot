@@ -204,12 +204,7 @@ def test_the_same_order_id_on_two_venues_is_hedged_separately():
     """Order ids are unique per venue, so the dedupe key carries the venue."""
     hedged = LimitedSet(HEDGE_MEMORY)
     assert should_hedge(fill_event(venue="mexc"), SHOULD_MATCH, hedged) == "bitget"
-    assert (
-        should_hedge(
-            fill_event(venue="gate"), {"lmb": "bitget"}, hedged
-        )
-        == "bitget"
-    )
+    assert should_hedge(fill_event(venue="gate"), {"lmb": "bitget"}, hedged) == "bitget"
 
 
 # Publication ---------------------------------------------------------------
@@ -240,7 +235,11 @@ async def test_an_event_that_needs_no_hedge_publishes_nothing():
     publisher = StreamPublisher(maxlen=100)
 
     intent = await handle_order_event(
-        redis, publisher, fill_event(state=OrderState.OPEN), SHOULD_MATCH, LimitedSet(10)
+        redis,
+        publisher,
+        fill_event(state=OrderState.OPEN),
+        SHOULD_MATCH,
+        LimitedSet(10),
     )
 
     assert intent is None

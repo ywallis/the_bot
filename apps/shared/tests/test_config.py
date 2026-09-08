@@ -30,9 +30,7 @@ def new_strategy(**overrides):
 
 def test_new_strategy_shape():
     """Explicit subscriptions and params are parsed and exposed."""
-    config = parse_app_config(
-        {"venues": VENUES, "strategies": [new_strategy()]}
-    )
+    config = parse_app_config({"venues": VENUES, "strategies": [new_strategy()]})
     strategy = config.strategies[0]
     assert strategy.params == {"lag_ms": 400, "threshold": 0.002}
     assert strategy.subscriptions[0].feeds == ("book", "trade")
@@ -109,7 +107,10 @@ def test_duplicate_identifier_across_groups_allowed():
     config = parse_app_config(
         {
             "venues": VENUES,
-            "strategies": [new_strategy(production=True), new_strategy(production=False)],
+            "strategies": [
+                new_strategy(production=True),
+                new_strategy(production=False),
+            ],
         }
     )
     assert len(config.strategies) == 2
@@ -236,7 +237,11 @@ def test_venue_options_default_and_parsed():
     """Per-venue CCXT options are optional and passed through untouched."""
     venues = [
         {"id": "gate", "name": "Gate.io"},
-        {"id": "mexc", "name": "Mexc", "options": {"watchOrderBook": {"checksum": False}}},
+        {
+            "id": "mexc",
+            "name": "Mexc",
+            "options": {"watchOrderBook": {"checksum": False}},
+        },
     ]
     config = parse_app_config({"venues": venues, "strategies": [new_strategy()]})
     by_id = {v.id: v for v in config.venues}

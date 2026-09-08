@@ -150,7 +150,7 @@ def last_recorded_id(directory: Path) -> str:
             continue
         try:
             entry_id = json.loads(tail)["id"]
-        except (ValueError, KeyError, TypeError):
+        except ValueError, KeyError, TypeError:
             logger.warning(f"Unreadable last line in {path}, resuming from start")
             return STREAM_START
         return str(entry_id)
@@ -327,7 +327,9 @@ class Recorder:
         Last consumed id per stream, the ``XREAD`` start positions.
     """
 
-    def __init__(self, root: Path, streams: list[str], settings: RecorderConfig) -> None:
+    def __init__(
+        self, root: Path, streams: list[str], settings: RecorderConfig
+    ) -> None:
         """
         Initialize the recorder and resume positions from disk.
 
@@ -386,7 +388,9 @@ class Recorder:
         """
         written = 0
         for stream_raw, entries in response:
-            stream = stream_raw.decode() if isinstance(stream_raw, bytes) else stream_raw
+            stream = (
+                stream_raw.decode() if isinstance(stream_raw, bytes) else stream_raw
+            )
             for entry_id_raw, fields in entries:
                 entry_id = (
                     entry_id_raw.decode()

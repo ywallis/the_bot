@@ -22,7 +22,11 @@ def order_book(best_bid: float) -> dict:
         "symbol": "ALPH/USDT",
         "timestamp": 1_757_160_000_000,
         "bids": [[best_bid, 10.0], [best_bid - 0.01, 20.0], [best_bid - 0.02, 30.0]],
-        "asks": [[best_bid + 0.01, 5.0], [best_bid + 0.02, 6.0], [best_bid + 0.03, 7.0]],
+        "asks": [
+            [best_bid + 0.01, 5.0],
+            [best_bid + 0.02, 6.0],
+            [best_bid + 0.03, 7.0],
+        ],
     }
 
 
@@ -108,7 +112,10 @@ def test_trade_key_falls_back_without_id():
     """Venues without trade ids are keyed on timestamp, price and amount."""
     assert watcher.trade_key({"id": 7}) == ("id", "7")
     assert watcher.trade_key({"timestamp": 1, "price": 2.0, "amount": 3.0}) == (
-        "fields", 1, 2.0, 3.0
+        "fields",
+        1,
+        2.0,
+        3.0,
     )
 
 
@@ -155,7 +162,11 @@ def test_build_tasks_follows_subscriptions():
                     "type": "x",
                     "production": True,
                     "subscriptions": [
-                        {"venue": "gate", "symbol": "BTC/USDT", "feeds": ["book", "trade"]},
+                        {
+                            "venue": "gate",
+                            "symbol": "BTC/USDT",
+                            "feeds": ["book", "trade"],
+                        },
                         {"venue": "mexc", "symbol": "SOL/USDT"},
                     ],
                 },

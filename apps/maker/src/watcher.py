@@ -198,9 +198,13 @@ async def handle_feed_error(
     """
     name = type(error).__name__
     if isinstance(error, RESUBSCRIBE_ERRORS):
-        logger.warning(f"{name} in {feed} for {client.id} {ticker}, resubscribing: {error}")
+        logger.warning(
+            f"{name} in {feed} for {client.id} {ticker}, resubscribing: {error}"
+        )
     elif isinstance(error, RECONNECT_ERRORS):
-        logger.error(f"{name} in {feed} for {client.id} {ticker}, reconnecting: {error}")
+        logger.error(
+            f"{name} in {feed} for {client.id} {ticker}, reconnecting: {error}"
+        )
         await client.close()
     else:
         logger.error(f"Error in {feed} for {client.id} {ticker}: {error}")

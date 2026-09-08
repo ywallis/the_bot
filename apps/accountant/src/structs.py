@@ -2,6 +2,7 @@
 
 from typing import TypedDict, Literal, NotRequired
 
+
 class ccxtFee(TypedDict):
     """
     Represents the fee structure returned by CCXT.
@@ -16,6 +17,7 @@ class ccxtFee(TypedDict):
 
     cost: str
     currency: str
+
 
 class ccxtItem(TypedDict):
     """

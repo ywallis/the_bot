@@ -158,6 +158,7 @@ def dict_to_text(d: ccxtItem) -> dict[str, str]:
     dict[str, str]
         The dictionary with string values.
     """
+
     def convert(i_value: object) -> str:
         if isinstance(i_value, str):
             return i_value
@@ -298,9 +299,7 @@ def export_to_sql(
         logger.info(f"Data for {client_name} inserted successfully in {table} table!")
 
 
-def unaddressed_imbalances(
-    pair: str, imbalances: DataFrame, orders: list[str]
-):
+def unaddressed_imbalances(pair: str, imbalances: DataFrame, orders: list[str]):
     """
     Identify and report unaddressed imbalances.
 

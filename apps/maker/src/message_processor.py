@@ -322,7 +322,7 @@ def venue_ack_ns(confirmation: dict[str, Any]) -> int | None:
         return None
     try:
         return int(timestamp) * 1_000_000
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -399,9 +399,7 @@ class OrderManager:
             await self.redis.xgroup_create(
                 INTENTS_STREAM, OMS_CONSUMER_GROUP, id="$", mkstream=True
             )
-            logger.info(
-                f"Created group {OMS_CONSUMER_GROUP} on {INTENTS_STREAM}"
-            )
+            logger.info(f"Created group {OMS_CONSUMER_GROUP} on {INTENTS_STREAM}")
         except ResponseError as error:
             if "BUSYGROUP" not in str(error):
                 raise
