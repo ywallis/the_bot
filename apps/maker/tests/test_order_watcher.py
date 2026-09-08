@@ -11,10 +11,12 @@ from fakeredis import aioredis as fakeredis
 from apps.maker.src import watcher
 from apps.maker.src.order_watcher import (
     ORDER_TAG,
+    RECONCILE_MARGIN_MS,
     STRATEGY_TAG,
     BoundedDict,
     build_tasks,
     event_from_order,
+    fetch_orders_since,
     oid_components,
     strategy_key,
     update_key,
@@ -315,3 +317,149 @@ async def test_watch_orders_asks_only_for_what_happens_from_now():
 
     assert client.since is not None
     assert abs(client.since - started_ms) < 5000
+
+
+# Reconciliation after a reconnect -------------------------------------------
+
+
+async def events_on(redis: Any) -> list[Any]:
+    """Return every order event published, oldest first."""
+    return [from_stream_fields(f) for _id, f in await redis.xrange(ORDER_EVENTS_STREAM)]
+
+
+@pytest.mark.asyncio
+async def test_a_reconnect_publishes_the_fill_the_socket_missed(monkeypatch):
+    """An order placed and filled while the socket was down is reported from REST."""
+    monkeypatch.setattr(watcher, "RETRY_DELAY_S", 0)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    filled_in_the_gap = ccxt_order(
+        clientOrderId="t-250906120001000000_lmb_es",
+        id="venue-100",
+        status="closed",
+        filled=40,
+        remaining=0,
+        average=0.35,
+    )
+    client = FakeClient(
+        "mexc",
+        [[ccxt_order()], NetworkError("gone"), [ccxt_order(status="canceled")]],
+        rest_results=[[ccxt_order(), filled_in_the_gap]],
+    )
+
+    with pytest.raises(StopWatching):
+        await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
+
+    events = await events_on(redis)
+    assert [(e.intent_id[-6:], e.state) for e in events] == [
+        ("lmb_eb", OrderState.OPEN),
+        ("lmb_es", OrderState.FILLED),
+        ("lmb_eb", OrderState.CANCELLED),
+    ]
+    filled = events[1]
+    assert filled.filled == Decimal(40)
+    assert filled.last_fill is not None and filled.last_fill.amount == Decimal(40)
+    assert filled.tags[STRATEGY_TAG] == "lmb"
+    assert [name for name, _ in client.rest_calls] == ["fetch_orders"]
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_fetches_from_before_the_last_delivery(monkeypatch):
+    """The REST window starts a margin before the last update the socket delivered."""
+    monkeypatch.setattr(watcher, "RETRY_DELAY_S", 0)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    client = FakeClient("mexc", [[ccxt_order()], NetworkError("gone"), [ccxt_order()]])
+    before = int(time.time() * 1000)
+
+    with pytest.raises(StopWatching):
+        await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
+
+    (_name, since), = client.rest_calls
+    assert before - RECONCILE_MARGIN_MS - 2000 <= since <= before - RECONCILE_MARGIN_MS + 5000
+
+
+@pytest.mark.asyncio
+async def test_no_reconciliation_without_a_reconnect():
+    """A healthy socket never triggers a REST fetch."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    client = FakeClient("mexc", [[ccxt_order()], [ccxt_order(status="closed")]])
+
+    with pytest.raises(StopWatching):
+        await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
+
+    assert client.rest_calls == []
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_does_not_republish_what_the_socket_reported(monkeypatch):
+    """REST returning a state already published adds nothing."""
+    monkeypatch.setattr(watcher, "RETRY_DELAY_S", 0)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    client = FakeClient(
+        "mexc",
+        [[ccxt_order()], NetworkError("gone"), [ccxt_order()], [ccxt_order(status="closed")]],
+        rest_results=[[ccxt_order()]],
+    )
+
+    with pytest.raises(StopWatching):
+        await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
+
+    assert [e.state for e in await events_on(redis)] == [OrderState.OPEN, OrderState.FILLED]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_reconciliation_does_not_take_the_feed_down(monkeypatch):
+    """A REST error is logged and the socket loop carries on."""
+    monkeypatch.setattr(watcher, "RETRY_DELAY_S", 0)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    client = FakeClient(
+        "mexc",
+        [NetworkError("gone"), [ccxt_order()]],
+        rest_results=[RuntimeError("rest is down too")],
+    )
+
+    with pytest.raises(StopWatching):
+        await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
+
+    assert [e.state for e in await events_on(redis)] == [OrderState.OPEN]
+
+
+@pytest.mark.asyncio
+async def test_fetch_orders_since_uses_one_call_where_the_venue_has_it():
+    """MEXC has fetchOrders."""
+    client = FakeClient("mexc", [], rest_results=[[ccxt_order()]], has={"fetchOrders": True})
+    assert len(await fetch_orders_since(client, "ALPH/USDT", 1)) == 1
+    assert [name for name, _ in client.rest_calls] == ["fetch_orders"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_orders_since_combines_endpoints_where_it_must():
+    """Bitget has no fetchOrders: open plus cancelled-and-closed cover every state."""
+    client = FakeClient(
+        "bitget",
+        [],
+        rest_results=[[ccxt_order()], [ccxt_order(status="closed"), ccxt_order(status="canceled")]],
+        has={"fetchOrders": False, "fetchOpenOrders": True, "fetchCanceledAndClosedOrders": True},
+    )
+    orders = await fetch_orders_since(client, "ALPH/USDT", 1)
+    assert len(orders) == 3
+    assert [name for name, _ in client.rest_calls] == [
+        "fetch_open_orders",
+        "fetch_canceled_and_closed_orders",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_fetch_orders_since_falls_back_to_closed_and_cancelled():
+    """A venue with separate closed and cancelled endpoints gets both asked."""
+    client = FakeClient(
+        "other",
+        [],
+        rest_results=[[], [ccxt_order(status="closed")], [ccxt_order(status="canceled")]],
+        has={"fetchOpenOrders": True, "fetchClosedOrders": True, "fetchCanceledOrders": True},
+    )
+    assert len(await fetch_orders_since(client, "ALPH/USDT", 1)) == 2
+    assert [name for name, _ in client.rest_calls] == [
+        "fetch_open_orders",
+        "fetch_closed_orders",
+        "fetch_canceled_orders",
+    ]

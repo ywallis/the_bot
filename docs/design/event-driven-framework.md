@@ -287,6 +287,18 @@ The order watcher is a feed handler (`order_watcher.py`) that turns CCXT
 `oms:events` like any strategy; it no longer holds an exchange connection at
 all, which is what makes it movable to the strategies repo.
 
+After every websocket drop it survives, the order watcher reconciles over
+REST: it fetches every order that changed since five seconds before the
+last update the socket delivered and publishes whatever has not been
+published, deduplicated by the same update keys the socket path uses. The
+venue's replay after a resubscription only covers open orders, so an order
+placed and finished inside the gap, a fill included, never comes back over
+the socket. The overnight run of 2026-09-08 saw two such orders in one
+four-second reconnect. Venues differ in what they expose, so the fetch is
+`fetch_orders` where the venue has it (MEXC) and open plus cancelled-and-
+closed orders otherwise (Bitget). A failed reconciliation is logged and the
+socket loop carries on; the next drop reconciles again.
+
 ### 6.1 The legacy bridge
 
 Until phase 4, strategies published dicts on the `messageprocessor` pubsub
@@ -649,7 +661,7 @@ version, and `XADD` intents. No shared code is required. The Python
 
    Findings from that run, none of them in the unit suite's reach:
 
-   - **The order watcher is blind while it reconnects.** Venues closed
+   - **The order watcher was blind while it reconnected.** Venues closed
      websockets 26 times in fourteen hours, in clusters at roughly ten past
      the hour, and every loop reconnected. But two quotes placed and
      cancelled inside the seconds of a MEXC order-feed reconnect at 07:20
@@ -657,18 +669,19 @@ version, and `XADD` intents. No shared code is required. The Python
      cache replay after resubscription does not include orders already
      closed. The order manager's book was right, because it works over
      REST. A fill in that window would have been invisible to the matcher
-     and gone unhedged. The watcher must reconcile over REST after every
-     reconnect, fetching orders and trades since the drop and publishing
-     what the socket missed. Phase 5 item.
-   - **Shutdown kills the recorder and the watcher before the order manager
-     finishes.** The orchestrator signals every process at once. The order
-     manager then spends about 300 ms cancelling what rests, and publishes
-     the `cancelled` event at 07:42:53.030; the recorder had stopped at
-     07:42:52.728 and the last event on disk is from 07:42:44. The final
-     cancellation is on the bus and at the venue but not in the recording,
-     and the watcher's confirmation of it was never produced. The
-     orchestrator should stop strategies first, then the order manager, and
-     only then the feed handlers and the recorder. Phase 5 item.
+     and gone unhedged. Fixed the same day: the watcher reconciles over
+     REST after every reconnect (section 6).
+   - **Shutdown killed the recorder and the watcher before the order
+     manager finished.** The orchestrator signalled every process at once.
+     The order manager then spent about 300 ms cancelling what rested and
+     published the `cancelled` event at 07:42:53.030; the recorder had
+     stopped at 07:42:52.728 and the last event on disk was from 07:42:44.
+     The final cancellation was on the bus and at the venue but not in the
+     recording, and the watcher's confirmation of it was never produced.
+     Fixed the same day: the orchestrator now stops in phases, strategies,
+     then the order manager with a twenty second grace, then feed handlers
+     and broker, then the recorder, each phase fully down before the next
+     is signalled (section 12).
    - **A stream's Redis window is short at this quote rate.** `oms:events`
      holds 10,000 entries, which was about four hours of the overnight run;
      any analysis over a longer span must read the recorder files, which
@@ -726,6 +739,16 @@ it is roughly 15 GB/day and about a week.
   the order manager already reads an empty `target_intent_id` as "whatever
   rests", so the vocabulary exists, and a field that is only meaningful
   when another is null is a worse contract than a sentinel.
+- The orchestrator winds down in phases rather than signalling everything
+  at once: strategies, then the order manager, then feed handlers and the
+  broker, then the recorder. The order manager needs the broker alive to
+  cancel what rests, the order watcher alive to confirm it, and the
+  recorder alive to record it; stopping them together lost the final
+  cancellations from the recording in the first overnight run.
+- The order watcher reconciles over REST after every reconnect instead of
+  trusting the venue's replay, because the replay covers open orders only
+  and a fill that happened during the gap is exactly the order that is no
+  longer open.
 - Consumers resolve the tail of a stream once and then advance through
   concrete entry ids, rather than passing `$` on every `XREAD`. `$` is
   re-resolved per call, so an entry published while a consumer sits between
@@ -734,10 +757,6 @@ it is roughly 15 GB/day and about a week.
 
 ## 13. Open questions
 
-- How the order watcher reconciles after a websocket reconnect, so a fill
-  during the gap still reaches the matcher (section 11, phase 4 findings).
-- Shutdown ordering in the orchestrator: order manager before recorder
-  and feed handlers, so the last cancellations are recorded and confirmed.
 - Whether the orchestrator should restart crashed processes in production
   once intents are durable and replayable.
 - Whether balances should also be published as deltas for strategies that
