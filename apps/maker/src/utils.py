@@ -96,7 +96,7 @@ def parse_message(
             for order in message["orders"]:
                 if type(order) is not dict:
                     order = json.loads(order)
-                if order.get("kind") == MessageType.ORDER.value:  # type: ignore
+                if order.get("kind") == MessageType.ORDER.value:
                     result = parse_message(order)
                     if result is not None:
                         order_list.append(cast(OrderMessage, result))

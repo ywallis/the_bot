@@ -8,7 +8,7 @@ This is a Python-based event-driven liquidity arbitrage framework. The project u
 - Python 3.14+
 - pytest with pytest-asyncio for testing
 - ruff for linting (docstrings only)
-- mypy for type checking
+- ty for type checking
 - CCXT for cryptocurrency exchange integrations
 
 ## Confidentiality
@@ -58,17 +58,22 @@ Run tests with verbose output:
 pytest -v
 ```
 
-Run tests with coverage (if configured):
-```bash
-pytest --cov=apps/maker/src --cov=apps/shared/src
-```
-
 ### Linting
 
 Run ruff linter (installed as a dev dependency):
 ```bash
 uv run ruff check apps/
 ```
+
+Formatting is `ruff format`, and CI gates on it:
+```bash
+uv run ruff format apps/          # apply
+uv run ruff format --check apps/  # what CI runs
+```
+
+`apps/strategies` is excluded from ruff: it is a separate private repository
+and its style is its own business. ty and pytest do still cover it, so a
+submodule bump that breaks types or tests fails here.
 
 The project only lints docstrings (D rules), ignoring D100 (missing module docstring):
 ```toml
@@ -82,14 +87,24 @@ convention = "numpy"
 
 ### Type Checking
 
-Run mypy:
+Run ty (installed as a dev dependency):
 ```bash
-mypy apps/
+uv run ty check --exit-zero-on-warning apps/
 ```
 
-The project uses these mypy settings (from pyproject.toml):
-- Python path: `apps/maker/src`
-- Extensions: mypy-extensions
+`apps/*/src` is expected to stay clean. `--exit-zero-on-warning` keeps
+warning-level diagnostics visible without failing the run; drop it to see
+whether a warning is one you introduced.
+
+Test files are checked more loosely: `[[tool.ty.overrides]]` in
+`pyproject.toml` turns off the rules that only fire because redis-py reply
+types are broad unions and because test doubles stand in for real clients.
+Tightening that means typed reply helpers in `conftest.py`, not per-line
+suppressions.
+
+Suppress a diagnostic with `# ty: ignore[rule-name]`, using ty's rule name
+(`invalid-argument-type`, not mypy's `arg-type`). ty reports an ignore that
+suppresses nothing, so stale ones do not accumulate.
 
 ## Code Style Guidelines
 

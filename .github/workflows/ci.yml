@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to a branch makes the previous run's answer irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      # apps/strategies is a separate private repo and holds config.toml, which
+      # most modules load at import time. Without it pytest fails at collection,
+      # so the deploy key is not optional. GITHUB_TOKEN cannot reach that repo.
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          ssh-key: ${{ secrets.STRATEGIES_DEPLOY_KEY }}
+          persist-credentials: false
+
+      # Pinned to an exact version on purpose: setup-uv stopped publishing
+      # moving major tags after v7, so `@v10` does not resolve.
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+          python-version: "3.14"
+
+      # --locked fails if uv.lock is stale against pyproject.toml, so it doubles
+      # as the lockfile check.
+      - name: Install dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Format
+        run: uv run ruff format --check apps/
+
+      - name: Lint
+        run: uv run ruff check apps/
+
+      # Warnings are reported but do not fail the build; errors do.
+      - name: Type check
+        run: uv run ty check --exit-zero-on-warning apps/
+
+      # fakeredis stands in for Redis, so no service containers are needed.
+      - name: Test
+        run: uv run pytest -q

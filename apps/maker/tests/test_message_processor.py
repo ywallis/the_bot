@@ -143,7 +143,7 @@ async def manager(request: pytest.FixtureRequest):
 def broker(manager: OrderManager) -> FakeBroker:
     """Attach a fake broker to the manager and return it."""
     fake = FakeBroker()
-    manager.send_to_broker = fake  # type: ignore[method-assign]
+    manager.send_to_broker = fake  # ty: ignore[invalid-assignment]
     return fake
 
 
@@ -197,7 +197,7 @@ async def test_the_cursor_survives_a_non_decoding_client(decode: bool):
     publisher = StreamPublisher(maxlen=1000)
     await publisher.publish(redis, order_intent(intent_id="one"))
     fake = FakeBroker()
-    order_manager.send_to_broker = fake  # type: ignore[assignment]
+    order_manager.send_to_broker = fake  # ty: ignore[invalid-assignment]
     await order_manager.consume_once()
     await settle(order_manager)
 
@@ -436,7 +436,7 @@ async def test_a_rejected_order_is_reported_and_forgotten(manager: OrderManager)
     async def failing(_msg: Any) -> Response:
         return Response(kind=MessageType.ERROR, text="venue said no")
 
-    manager.send_to_broker = failing  # type: ignore[assignment]
+    manager.send_to_broker = failing  # ty: ignore[invalid-assignment]
     await submit(manager, order_intent())
 
     states = [e.state for e in await events_on(manager, ORDER_EVENTS_STREAM)]
@@ -556,7 +556,7 @@ async def test_a_cancellation_with_nothing_to_cancel_is_acknowledged(
 async def test_a_failed_cancellation_keeps_the_order(manager: OrderManager):
     """An order the broker could not cancel stays in the book."""
     placements = FakeBroker()
-    manager.send_to_broker = placements  # type: ignore[method-assign]
+    manager.send_to_broker = placements  # ty: ignore[invalid-assignment]
     await submit(manager, order_intent(intent_id="resting"))
 
     async def refuse(msg: Any) -> Response:
@@ -564,7 +564,7 @@ async def test_a_failed_cancellation_keeps_the_order(manager: OrderManager):
             return Response(kind=MessageType.ERROR, text="cannot cancel")
         return await placements(msg)
 
-    manager.send_to_broker = refuse  # type: ignore[method-assign]
+    manager.send_to_broker = refuse  # ty: ignore[invalid-assignment]
     await submit(manager, cancel_intent())
 
     assert ("mexc", "resting") in manager.orders
@@ -699,7 +699,7 @@ async def test_pending_intents_are_replayed_after_a_crash(
     restarted = OrderManager(config(), manager.redis)
     await restarted.ensure_group()
     replayed = FakeBroker()
-    restarted.send_to_broker = replayed  # type: ignore[method-assign]
+    restarted.send_to_broker = replayed  # ty: ignore[invalid-assignment]
     # The first read is the pending list, which is exactly what was in flight.
     await restarted.consume_once()
     await settle(restarted)
@@ -767,7 +767,7 @@ async def test_place_order_raises_broker_error(manager: OrderManager):
     async def failing(_msg: Any) -> Response:
         return Response(kind=MessageType.ERROR, text="error")
 
-    manager.send_to_broker = failing  # type: ignore[assignment]
+    manager.send_to_broker = failing  # ty: ignore[invalid-assignment]
     with pytest.raises(BrokerError):
         await manager.place_order(broker_order_from_intent(order_intent()))
 
@@ -779,7 +779,7 @@ async def test_place_order_rejects_an_unreadable_confirmation(manager: OrderMana
     async def nonsense(_msg: Any) -> Response:
         return Response(kind=MessageType.ORDER, text="{'no': 'id'}")
 
-    manager.send_to_broker = nonsense  # type: ignore[assignment]
+    manager.send_to_broker = nonsense  # ty: ignore[invalid-assignment]
     with pytest.raises(BrokerError):
         await manager.place_order(broker_order_from_intent(order_intent()))
 
@@ -907,7 +907,7 @@ async def test_a_pending_entry_is_acted_on_once_while_draining(
     await restarted.ensure_group()
     replayed = FakeBroker()
     replayed.gate = asyncio.Event()
-    restarted.send_to_broker = replayed  # type: ignore[assignment]
+    restarted.send_to_broker = replayed  # ty: ignore[invalid-assignment]
 
     # Several passes while the entry is still unacknowledged, as `run` does.
     for _ in range(5):
@@ -978,7 +978,7 @@ async def test_an_intent_that_goes_stale_while_queued_is_rejected(decode: bool):
 
     broker = FakeBroker()
     broker.gate = asyncio.Event()
-    order_manager.send_to_broker = broker  # type: ignore[assignment]
+    order_manager.send_to_broker = broker  # ty: ignore[invalid-assignment]
 
     publisher = StreamPublisher(maxlen=1000)
     await publisher.publish(redis, order_intent(intent_id="first"))

@@ -19,8 +19,6 @@ dependencies = [
 	"hiredis>=3.0.0",
 	"idna>=3.10",
 	"multidict>=6.1.0",
-	"mypy-extensions>=1.0.0",
-	"mypy>=1.13.0",
 	"numpy>=1.26.4",
 	"pandas>=2.2.3",
 	"psycopg>=3.2.3",
@@ -55,11 +53,13 @@ dependencies = [
 [dependency-groups]
 dev = [
 	"fakeredis>=2.37.1",
+	"pytest-cov>=7.0.0",
 	"ruff>=0.13.0",
+	"ty>=0.0.79",
 ]
 
 [tool.pytest.ini_options]
-pythonpath = [".", "apps/maker/src"]
+pythonpath = ["."]
 testpaths = ["apps/maker/tests", "apps/shared/tests", "apps/strategies/tests"]
 asyncio_default_fixture_loop_scope = "function"
 
@@ -76,3 +76,40 @@ ignore = ["D100"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
+
+[tool.ty.environment]
+python-version = "3.14"
+
+# Test files are checked, but more loosely than src. Two things there are
+# beyond what a checker can see: redis-py reply types are broad unions
+# (`dict[bytes | str, bytes | str] | None` and friends) that tests index into
+# directly, and test doubles are substituted for the real clients. Tightening
+# this means typed reply helpers in conftest, not per-line suppressions.
+[[tool.ty.overrides]]
+include = ["apps/*/tests/**"]
+
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"
+no-matching-overload = "ignore"
+not-iterable = "ignore"
+not-subscriptable = "ignore"
+unresolved-attribute = "ignore"
+
+[tool.coverage.run]
+branch = true
+source = [
+	"apps/accountant/src",
+	"apps/maker/src",
+	"apps/shared/src",
+	"apps/strategies/src",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_also = ["if __name__ == .__main__.:"]
+# A ratchet, not a target: it is the level the suite actually reaches today.
+# apps/accountant/src has no tests at all and is what holds this down; the
+# other three trees sit around 79%. Raise this as coverage improves, and do
+# not lower it to make a red build green.
+fail_under = 64

@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from psycopg import sql
 
 import apps.shared.src.logging_config as logging_config
+from apps.accountant.src.structs import UnaddressedImbalance
 from apps.shared.src.structs import CustomExchange, ccxtItem
 
 # Initializing centralized logging
@@ -333,7 +334,7 @@ def unaddressed_imbalances(pair: str, imbalances: DataFrame, orders: list[str]):
                 amount = round(float(row["delta"]), 2)
                 imbalance_dict[index] = amount
 
-    all_unaddressed_imbalances = []
+    all_unaddressed_imbalances: list[UnaddressedImbalance] = []
 
     # Core loop, iterates over all imbalances and checks for a pending order. If none exists, they will be counted.
 
@@ -345,7 +346,7 @@ def unaddressed_imbalances(pair: str, imbalances: DataFrame, orders: list[str]):
             else:
                 side = "sell"
 
-            order_data = {
+            order_data: UnaddressedImbalance = {
                 "id": order_no,
                 "amount": abs(imbalance_dict[order_no]),
                 "side": side,
@@ -354,9 +355,9 @@ def unaddressed_imbalances(pair: str, imbalances: DataFrame, orders: list[str]):
             all_unaddressed_imbalances.append(order_data)
 
     buy_counter = 0
-    buy_total = 0
+    buy_total = 0.0
     sell_counter = 0
-    sell_total = 0
+    sell_total = 0.0
 
     for imbalance in all_unaddressed_imbalances:
         if imbalance["side"] == "buy":

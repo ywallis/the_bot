@@ -1,5 +1,6 @@
 """Data structures for the accountant application."""
 
+from collections.abc import Hashable
 from typing import TypedDict, Literal, NotRequired
 
 
@@ -60,3 +61,22 @@ class ccxtItem(TypedDict):
     usdt_value: NotRequired[str]
     asset_net_q: NotRequired[str]
     exchange: NotRequired[str]
+
+
+class UnaddressedImbalance(TypedDict):
+    """
+    An imbalance with no pending order to address it.
+
+    Attributes
+    ----------
+    id : Hashable
+        The client order id the imbalance is recorded against.
+    amount : float
+        The absolute size of the imbalance.
+    side : {"buy", "sell"}
+        The side an order would have to take to address it.
+    """
+
+    id: Hashable
+    amount: float
+    side: Literal["buy", "sell"]
