@@ -13,10 +13,11 @@ it the natural candidate to move into the strategies repo. See
 ``docs/design/event-driven-framework.md`` section 6.
 """
 
+import argparse
 import asyncio
 import logging
 from decimal import Decimal
-from typing import Any, cast
+from typing import Any
 
 from redis.asyncio import ConnectionPool, Redis
 
@@ -31,10 +32,12 @@ from apps.shared.src.events import (
     OrderKind,
     OrderState,
     Side,
-    from_stream_fields,
+    backtest_prefix,
     now_ns,
+    prefixed,
 )
-from apps.shared.src.streams import StreamPublisher, entry_id_str, stream_tail
+from apps.shared.src.runtime import Clock, StreamReader
+from apps.shared.src.streams import StreamPublisher, replay_closed_key
 from apps.shared.src.utils import production
 
 logging_config.setup_logging()
@@ -127,7 +130,11 @@ def hedge_price(event: OrderEvent) -> float | None:
 
 
 def hedge_intent(
-    event: OrderEvent, matching_venue: str, quantity: float, price: float
+    event: OrderEvent,
+    matching_venue: str,
+    quantity: float,
+    price: float,
+    ts_recv: int | None = None,
 ) -> OrderIntent:
     """
     Build the market order that flattens a fill.
@@ -143,6 +150,9 @@ def hedge_intent(
     price : float
         Price the fill executed at, passed through for venues that size a
         market order by cost.
+    ts_recv : int | None
+        Creation time to stamp, the wall clock if omitted. Under replay it
+        is the clock's event time, like every other intent on the bus.
 
     Returns
     -------
@@ -152,7 +162,7 @@ def hedge_intent(
     """
     side = Side.BUY if event.side is Side.SELL else Side.SELL
     return OrderIntent(
-        ts_recv=now_ns(),
+        ts_recv=now_ns() if ts_recv is None else ts_recv,
         intent_id=event.intent_id,
         strategy="matching",
         venue=matching_venue,
@@ -209,18 +219,19 @@ def should_hedge(
 
 
 async def handle_order_event(
-    redis: Redis,
+    redis: Any,
     publisher: StreamPublisher,
     event: OrderEvent,
     should_match: dict[str, str],
     hedged: LimitedSet,
+    clock: Clock | None = None,
 ) -> OrderIntent | None:
     """
     Hedge one order event, if it needs hedging.
 
     Parameters
     ----------
-    redis : Redis
+    redis : Any
         The Redis client.
     publisher : StreamPublisher
         Publisher writing to ``oms:intents``.
@@ -230,6 +241,8 @@ async def handle_order_event(
         Taker venue per strategy identifier.
     hedged : LimitedSet
         Orders already hedged.
+    clock : Clock | None
+        The clock the hedge is stamped by; the wall clock if omitted.
 
     Returns
     -------
@@ -248,60 +261,79 @@ async def handle_order_event(
     quantity = hedge_quantity(
         event.venue, matching_venue, event.side or Side.BUY, float(event.filled), price
     )
-    intent = hedge_intent(event, matching_venue, quantity, price)
+    ts_recv = None
+    if clock is not None:
+        clock.advance(event.ts_recv)
+        ts_recv = clock.now()
+    intent = hedge_intent(event, matching_venue, quantity, price, ts_recv)
     await publisher.publish(redis, intent)
     logger.info(f"Matching order was sent: {intent}")
     return intent
 
 
 async def consume_order_events(
-    redis: Redis,
+    redis: Any,
     publisher: StreamPublisher,
     should_match: dict[str, str],
     block_ms: int,
     batch: int,
+    *,
+    prefix: str = "",
+    clock: Clock | None = None,
 ) -> None:
     """
     Read ``oms:events`` and hedge every fill that calls for one.
 
-    Reading starts at the tail of the stream as it stands when this begins:
-    a fill from before then has either been hedged already or is old enough
-    that hedging it now would open a new position rather than close one.
-    The tail is resolved once rather than passed as ``$`` on every read,
-    which would silently drop a fill published between two reads.
+    Live, reading starts at the tail of the stream as it stands when this
+    begins: a fill from before then has either been hedged already or is old
+    enough that hedging it now would open a new position rather than close
+    one. The tail is resolved once rather than passed as ``$`` on every
+    read, which would silently drop a fill published between two reads.
+
+    Under replay, the stream is read from its start and the loop ends once
+    the simulated broker has marked the run closed and everything has been
+    read: the wind-down cancels partially filled orders, and those are fills
+    to hedge too.
 
     Parameters
     ----------
-    redis : Redis
+    redis : Any
         The Redis client.
     publisher : StreamPublisher
-        Publisher writing to ``oms:intents``.
+        Publisher writing to ``oms:intents``, under the same prefix.
     should_match : dict[str, str]
         Taker venue per strategy identifier.
     block_ms : int
         How long a blocking read waits when no event is available.
     batch : int
         Maximum events fetched per read.
+    prefix : str
+        Backtest prefix, empty live.
+    clock : Clock | None
+        The clock hedges are stamped by; a live one if omitted.
     """
     hedged = LimitedSet(HEDGE_MEMORY)
-    cursor = await stream_tail(redis, ORDER_EVENTS_STREAM)
+    replay = clock is not None and not clock.live
+    stream = prefixed(prefix, ORDER_EVENTS_STREAM)
+    reader = StreamReader(redis, [stream], batch=batch, from_start=replay)
+    await reader.start()
     while True:
-        response = await redis.xread(
-            {ORDER_EVENTS_STREAM: cursor}, count=batch, block=block_ms
-        )
-        # redis-py types the reply as list or dict (RESP3); the client is
-        # RESP2 here so it is always the list form.
-        for _stream, entries in cast(list[Any], response or []):
-            for entry_id, fields in entries:
-                cursor = entry_id_str(entry_id)
-                try:
-                    event = from_stream_fields(fields)
-                except Exception as error:  # noqa: BLE001, keep consuming
-                    logger.error(f"Undecodable order event {entry_id}: {error}")
-                    continue
-                if not isinstance(event, OrderEvent):
-                    continue
-                await handle_order_event(redis, publisher, event, should_match, hedged)
+        blocks = await reader.read(block_ms)
+        delivered = 0
+        for name, entries in blocks:
+            for entry_id, event in entries:
+                reader.advance(name, entry_id)
+                delivered += 1
+                if isinstance(event, OrderEvent):
+                    await handle_order_event(
+                        redis, publisher, event, should_match, hedged, clock
+                    )
+        if replay and delivered == 0 and await redis.get(replay_closed_key(prefix)):
+            if await reader.at_tail():
+                logger.info(
+                    "The simulated broker has closed the run; nothing left to hedge"
+                )
+                return
 
 
 def matching_venues(config: AppConfig) -> dict[str, str]:
@@ -326,29 +358,66 @@ def matching_venues(config: AppConfig) -> dict[str, str]:
     return should_match
 
 
-async def main(config: AppConfig) -> None:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """
-    Run the matcher until cancelled.
+    Parse the command line.
+
+    Parameters
+    ----------
+    argv : list[str] | None
+        Arguments, ``sys.argv[1:]`` if omitted.
+
+    Returns
+    -------
+    argparse.Namespace
+        ``replay``, a backtest run id or None.
+    """
+    parser = argparse.ArgumentParser(
+        description="Hedge maker fills on the taker venue."
+    )
+    parser.add_argument(
+        "--replay",
+        metavar="RUN_ID",
+        default=None,
+        help="hedge under bt:<RUN_ID> with a replay clock instead of the live bus",
+    )
+    return parser.parse_args(argv)
+
+
+async def main(config: AppConfig, replay: str | None = None) -> None:
+    """
+    Run the matcher until cancelled, or under replay until the run is closed.
 
     Parameters
     ----------
     config : AppConfig
         The application configuration.
+    replay : str | None
+        A backtest run id to hedge under instead of the live bus.
     """
     should_match = matching_venues(config)
+    prefix = backtest_prefix(replay) if replay else ""
+    clock = Clock.replay() if replay else Clock()
     pool = ConnectionPool(
         host=config.redis.host, port=config.redis.port, db=0, max_connections=20
     )
     redis = Redis(decode_responses=True, connection_pool=pool)
-    publisher = StreamPublisher(maxlen=config.oms.stream_maxlen)
-    logger.info(f"Matching fills for {sorted(should_match)} (production={production})")
+    publisher = StreamPublisher(maxlen=config.oms.stream_maxlen, prefix=prefix)
+    where = f"under {prefix}" if prefix else f"(production={production})"
+    logger.info(f"Matching fills for {sorted(should_match)} {where}")
     try:
         await consume_order_events(
-            redis, publisher, should_match, config.oms.block_ms, config.oms.batch
+            redis,
+            publisher,
+            should_match,
+            config.oms.block_ms,
+            config.oms.batch,
+            prefix=prefix,
+            clock=clock,
         )
     finally:
         await redis.aclose()
 
 
 if __name__ == "__main__":
-    asyncio.run(main(load_app_config()))
+    asyncio.run(main(load_app_config(), parse_args().replay))

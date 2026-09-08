@@ -28,6 +28,7 @@ from apps.shared.src.config import (
     Subscription,
 )
 from apps.shared.src.events import (
+    prefixed,
     INTENTS_STREAM,
     Fill,
     OrderEvent,
@@ -38,7 +39,8 @@ from apps.shared.src.events import (
     from_stream_fields,
     now_ns,
 )
-from apps.shared.src.streams import StreamPublisher
+from apps.shared.src.runtime import Clock
+from apps.shared.src.streams import StreamPublisher, replay_closed_key
 
 SHOULD_MATCH = {"lmb": "bitget"}
 
@@ -71,9 +73,9 @@ def fill_event(
     )
 
 
-async def intents_on(redis: Any) -> list[OrderIntent]:
+async def intents_on(redis: Any, prefix: str = "") -> list[OrderIntent]:
     """Return every order intent published to the intents stream."""
-    entries = cast(list[Any], await redis.xrange(INTENTS_STREAM))
+    entries = cast(list[Any], await redis.xrange(prefixed(prefix, INTENTS_STREAM)))
     decoded = (from_stream_fields(fields) for _id, fields in entries)
     return [event for event in decoded if isinstance(event, OrderIntent)]
 
@@ -342,3 +344,49 @@ def test_matching_venues_reads_every_strategy_that_hedges():
     )
 
     assert matching_venues(config) == {"lmb": "bitget"}
+
+
+def test_hedge_intent_is_stamped_with_the_time_it_is_given():
+    """Under replay a hedge carries event time, live the wall clock."""
+    stamped = hedge_intent(fill_event(), "bitget", 40.0, 0.35, ts_recv=123)
+    assert stamped.ts_recv == 123
+    assert (
+        hedge_intent(fill_event(), "bitget", 40.0, 0.35).ts_recv > 1_700_000_000 * 10**9
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_replay_clock_stamps_the_hedge_with_the_fill_time():
+    """The clock advances to the fill's receive time and the hedge carries it."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100, prefix="bt:r1")
+    event = fill_event()
+    intent = await handle_order_event(
+        redis, publisher, event, SHOULD_MATCH, LimitedSet(10), Clock.replay()
+    )
+    assert intent is not None and intent.ts_recv == event.ts_recv
+    assert [i.intent_id for i in await intents_on(redis, "bt:r1")] == [event.intent_id]
+
+
+@pytest.mark.asyncio
+async def test_consume_under_replay_reads_from_the_start_and_stops_when_closed():
+    """Every fill on the replayed stream is hedged, then the closed key ends the loop."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100, prefix="bt:r1")
+    await publisher.publish(redis, fill_event(intent_id="before"))
+    consumer = asyncio.create_task(
+        consume_order_events(
+            redis, publisher, SHOULD_MATCH, 10, 10, prefix="bt:r1", clock=Clock.replay()
+        )
+    )
+    await asyncio.sleep(0.05)
+    await publisher.publish(redis, fill_event(intent_id="after"))
+    await asyncio.sleep(0.05)
+    assert not consumer.done()
+    await redis.set(replay_closed_key("bt:r1"), 1)
+    await asyncio.wait_for(consumer, timeout=1)
+    assert [i.intent_id for i in await intents_on(redis, "bt:r1")] == [
+        "before",
+        "after",
+    ]
+    assert await redis.xlen(INTENTS_STREAM) == 0

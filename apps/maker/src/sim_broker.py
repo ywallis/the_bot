@@ -101,6 +101,7 @@ from apps.shared.src.runtime import StreamReader
 from apps.shared.src.streams import (
     StreamPublisher,
     read_progress,
+    replay_closed_key,
     replay_done_key,
     replay_progress_key,
 )
@@ -1711,6 +1712,7 @@ class SimulatedBroker:
                 (venue, self.balances.totals(venue)) for venue in self.balances.venues
             )
         }
+        await self.redis.set(replay_closed_key(self.prefix), self.clock)
         logger.info(f"Simulation over: {json.dumps(self.report.as_dict(), indent=2)}")
 
     def _release_action(self, key: str) -> Action:

@@ -201,6 +201,7 @@ async def stream_tail(redis: Any, stream: str) -> str:
 
 REPLAY_PROGRESS_KEY = "replay:progress"
 REPLAY_DONE_KEY = "replay:done"
+REPLAY_CLOSED_KEY = "replay:closed"
 
 
 def replay_progress_key(prefix: str, name: str) -> str:
@@ -238,6 +239,28 @@ def replay_done_key(prefix: str) -> str:
         ``<prefix>:replay:done``; its value is the last ``ts_recv`` published.
     """
     return prefixed(prefix, REPLAY_DONE_KEY)
+
+
+def replay_closed_key(prefix: str) -> str:
+    """
+    Return the key the simulated broker sets once it has wound down.
+
+    The replayer's done key says the market data is over; this one says the
+    venue side is too, resting orders cancelled and their events published.
+    A consumer of ``oms:events`` that stops on the done key alone would miss
+    the fills and cancellations of the wind-down.
+
+    Parameters
+    ----------
+    prefix : str
+        Backtest prefix.
+
+    Returns
+    -------
+    str
+        ``<prefix>:replay:closed``; its value is the broker's final clock.
+    """
+    return prefixed(prefix, REPLAY_CLOSED_KEY)
 
 
 async def read_progress(

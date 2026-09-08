@@ -46,6 +46,7 @@ from apps.shared.src.events import (
 )
 from apps.shared.src.streams import (
     StreamPublisher,
+    replay_closed_key,
     replay_done_key,
     replay_progress_key,
 )
@@ -705,6 +706,7 @@ async def test_run_winds_down_cancelling_what_rests_and_reports():
     assert report.latency[A]["source"] == "assumed"
     assert report.as_dict()["volume"] == {}
     assert h.broker.orders == {}
+    assert int(await h.redis.get(replay_closed_key(PREFIX))) == h.broker.clock
 
 
 @pytest.mark.asyncio
