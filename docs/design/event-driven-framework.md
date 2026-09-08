@@ -517,15 +517,31 @@ timer.
 
 Backtesting is replay plus simulation, reusing the live components:
 
-- A replayer reads recorder files and `XADD`s them into streams under a
-  separate key prefix (`bt:{run_id}:`), preserving relative `ts_recv`
-  spacing or running as fast as possible. It runs on the archive host and
-  resolves files through a helper that opens `.jsonl` and `.jsonl.zst`
-  interchangeably, so it never hardcodes a tier's layout. Selecting a time
-  range is a filename filter over hourly buckets; ordering across streams is
-  a merge on `ts_recv`, not on the Redis entry id, which carries publish
-  jitter and would desynchronise the merge from the `Clock`. A replay that
-  crosses a `seq` gap or reset is reported, never silently spliced.
+- A replayer (`apps/maker/src/replayer.py`) reads recorder files and
+  `XADD`s them into streams under a separate key prefix (`bt:{run_id}:`),
+  preserving relative `ts_recv` spacing at a chosen speed or running as
+  fast as possible, which is the default. It runs on the archive host and
+  opens `.jsonl` and `.jsonl.zst` interchangeably, so it never hardcodes a
+  tier's layout. Selecting a time range is a filename filter over hourly
+  buckets widened by one bucket either side (section 7.4, item 4), then a
+  `ts_recv` filter over what those files hold. Ordering across streams is a
+  merge on `ts_recv`, not on the Redis entry id, which carries publish
+  jitter and would desynchronise the merge from the `Clock`; but the merge
+  only chooses between stream heads and never reorders within a stream, so
+  every entry is republished with its **original id** and its payload byte
+  for byte. That makes a replay of the same recording into the same prefix
+  a Redis error rather than a duplicate, and keeps the recorder's bucket
+  arithmetic meaningful on a recorded backtest. A replay that crosses a
+  `seq` gap or reset is reported, never silently spliced. Two things the
+  first version added to this list: a ranged replay primes every book and
+  balance stream with the last entry before the range start, because a
+  balance is published on change and the one in force at 14:00 was recorded
+  hours earlier, and a strategy without one judges every quote insolvent
+  (section 8); and the order management streams are left out unless asked
+  for, since a backtest produces its own and the simulated broker must not
+  see orders it never placed. Replayed streams are not trimmed: a backtest
+  is bounded by its range, and a consumer that falls behind an unpaced
+  replay must still find every entry when it gets there.
 - A simulated broker consumes `bt:{run_id}:oms:intents`. For each intent it
   draws an arrival delay from the per-venue latency model built from
   `oms:latency` records, looks up the recorded book at `ts_created + delay`,
@@ -747,7 +763,11 @@ version, and `XADD` intents. No shared code is required. The Python
      drift between consecutive quotes, is where the downtime actually is.
      Both are questions about what a different tolerance or an overlapped
      replace would have earned, which is to say phase 5 questions.
-5. Replayer and simulated broker.
+5. Replayer and simulated broker. The replayer landed 2026-09-08 as
+   described in section 9, tested against synthetic recordings on
+   `fakeredis` including a runtime priming itself from a replayed prefix;
+   it has not yet been run against a real recording, which lives on the
+   trading host.
 
 Each phase leaves the system runnable with the current strategies.
 
