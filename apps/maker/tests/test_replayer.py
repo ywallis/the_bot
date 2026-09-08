@@ -1,5 +1,6 @@
 """Tests for the stream replayer."""
 
+import asyncio
 from compression import zstd
 from pathlib import Path
 from typing import Any
@@ -29,7 +30,11 @@ from apps.shared.src.events import (
     prefixed,
 )
 from apps.shared.src.runtime import Clock, Runtime, Strategy
-from apps.shared.src.streams import stream_path
+from apps.shared.src.streams import (
+    replay_done_key,
+    replay_progress_key,
+    stream_path,
+)
 
 # 2026-09-06T14:00:00Z in nanoseconds; the tests live in the hours around it.
 T14 = 1_788_703_200 * rp.NS_PER_S
@@ -605,3 +610,99 @@ async def test_main_replays_under_bt_run_id(
     report = await rp.main(config, args)
     assert report.published == {BOOK_A: 6, BOOK_B: 2, BALANCE_A: 2}
     assert await redis.xlen("bt:run7:" + BOOK_B) == 2
+
+
+# Balances and coordination -------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_balance_mode_prime_publishes_only_the_snapshot_in_force(tmp_path: Path):
+    """With a start, the primed balance and nothing after it; without, the first."""
+    expected = recording(tmp_path)
+    redis = fakeredis.FakeRedis()
+    await rp.Replayer(
+        tmp_path, [BALANCE_A], "bt:a", start_ns=T14, balances=rp.BALANCES_PRIME
+    ).run(redis)
+    entries = await redis.xrange(prefixed("bt:a", BALANCE_A))
+    assert [from_stream_fields(f) for _, f in entries] == [expected[BALANCE_A][0]]
+
+    await rp.Replayer(tmp_path, [BALANCE_A], "bt:b", balances=rp.BALANCES_PRIME).run(
+        redis
+    )
+    entries = await redis.xrange(prefixed("bt:b", BALANCE_A))
+    assert [from_stream_fields(f) for _, f in entries] == [expected[BALANCE_A][0]]
+
+    report = await rp.Replayer(
+        tmp_path, [BALANCE_A, BOOK_B], "bt:c", balances=rp.BALANCES_NONE
+    ).run(redis)
+    assert report.published == {BOOK_B: 2}
+    with pytest.raises(ValueError):
+        rp.Replayer(tmp_path, [BALANCE_A], "bt:d", balances="some")
+
+
+@pytest.mark.asyncio
+async def test_a_replay_marks_itself_done_with_its_last_time(tmp_path: Path):
+    """Consumers learn the recording is over from the done key."""
+    recording(tmp_path)
+    redis = fakeredis.FakeRedis()
+    report = await rp.Replayer(tmp_path, [BOOK_B], "bt:r1").run(redis)
+    assert int(await redis.get(replay_done_key("bt:r1"))) == report.last_ts_recv
+
+
+@pytest.mark.asyncio
+async def test_a_following_replay_waits_for_its_consumers_and_keeps_within_the_lookahead(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Nothing is published before the consumers exist, then never far ahead of them."""
+    recording(tmp_path)
+    redis = fakeredis.FakeRedis()
+    lookahead_s = 60.0
+    replayer = rp.Replayer(
+        tmp_path,
+        [BOOK_A],
+        "bt:r1",
+        start_ns=T14,
+        end_ns=T14 + HOUR,
+        follow=["s1", "s2"],
+        lookahead_s=lookahead_s,
+        batch=1,
+    )
+    # (what had been published so far, the slowest consumer) at each publish.
+    seen: list[tuple[int | None, int | None]] = []
+    real_publish = replayer.publish
+
+    async def publish(redis_: Any, records: list[rp.Record]) -> None:
+        seen.append(
+            (replayer.report.last_ts_recv, await replayer.slowest_consumer(redis))
+        )
+        await real_publish(redis_, records)
+
+    monkeypatch.setattr(replayer, "publish", publish)
+    task = asyncio.create_task(replayer.run(redis))
+    await asyncio.sleep(0.05)
+    assert seen == []  # consumers have not appeared
+
+    # A consumer that keeps up: whenever the replay publishes, it reads to the tail.
+    async def consumer(name: str) -> None:
+        await redis.set(replay_progress_key("bt:r1", name), 0)
+        while not task.done():
+            entries = await redis.xrevrange(prefixed("bt:r1", BOOK_A), count=1)
+            if entries:
+                ts = from_stream_fields(entries[0][1]).ts_recv
+                await redis.set(replay_progress_key("bt:r1", name), ts)
+            await asyncio.sleep(0.001)
+
+    consumers = [
+        asyncio.create_task(consumer("s1")),
+        asyncio.create_task(consumer("s2")),
+    ]
+    report = await asyncio.wait_for(task, timeout=5)
+    for c in consumers:
+        c.cancel()
+    assert report.published == {BOOK_A: 4}
+    assert len(seen) == 4
+    # Every batch after the first went out only once the slowest consumer was
+    # within one lookahead of everything published before it.
+    for published, slowest in seen[1:]:
+        assert published is not None and slowest is not None
+        assert published - slowest <= lookahead_s * rp.NS_PER_S

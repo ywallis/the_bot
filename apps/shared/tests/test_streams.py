@@ -12,7 +12,10 @@ from apps.shared.src.streams import (
     StreamPublisher,
     bucket_of_file,
     configured_streams,
+    read_progress,
     recording_files,
+    replay_done_key,
+    replay_progress_key,
     sealed_files,
     stream_path,
     stream_tail,
@@ -238,3 +241,19 @@ async def test_stream_tail_of_an_empty_stream_is_the_start():
     """A stream with no entries yet has nothing to skip."""
     redis = fakeredis.FakeRedis(decode_responses=True)
     assert await stream_tail(redis, "md:book:gate:BTC/USDT") == "0-0"
+
+
+def test_replay_keys_live_under_the_prefix():
+    """Progress and done keys are namespaced per backtest run."""
+    assert replay_progress_key("bt:r1", "fmb") == "bt:r1:replay:progress:fmb"
+    assert replay_done_key("bt:r1") == "bt:r1:replay:done"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decode", [True, False], ids=["decoded", "bytes"])
+async def test_read_progress_reports_missing_consumers_as_none(decode: bool):
+    """A consumer that has not written yet reads as None, the others as ints."""
+    redis = fakeredis.FakeRedis(decode_responses=decode)
+    await redis.set(replay_progress_key("bt:r1", "a"), 123)
+    assert await read_progress(redis, "bt:r1", ["a", "b"]) == {"a": 123, "b": None}
+    assert await read_progress(redis, "bt:r1", []) == {}

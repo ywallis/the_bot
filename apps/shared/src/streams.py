@@ -191,6 +191,85 @@ async def stream_tail(redis: Any, stream: str) -> str:
     return entry_id_str(entries[0][0])
 
 
+# Replay coordination keys, under the backtest prefix ------------------------
+#
+# A replayed runtime writes the ``ts_recv`` it has reached after every read,
+# the replayer follows the slowest of them so market data is never more than a
+# lookahead ahead of the strategies, and the simulated broker never processes a
+# market event the strategies have not seen. The replayer marks the end of
+# the recording so consumers can stop once they have read everything.
+
+REPLAY_PROGRESS_KEY = "replay:progress"
+REPLAY_DONE_KEY = "replay:done"
+
+
+def replay_progress_key(prefix: str, name: str) -> str:
+    """
+    Return the key a replayed consumer writes its progress to.
+
+    Parameters
+    ----------
+    prefix : str
+        Backtest prefix, e.g. ``bt:run1``.
+    name : str
+        Consumer name, a strategy identifier or a process name.
+
+    Returns
+    -------
+    str
+        ``<prefix>:replay:progress:<name>``; its value is the last
+        ``ts_recv`` delivered, nanoseconds.
+    """
+    return prefixed(prefix, f"{REPLAY_PROGRESS_KEY}:{name}")
+
+
+def replay_done_key(prefix: str) -> str:
+    """
+    Return the key the replayer sets once the recording is fully published.
+
+    Parameters
+    ----------
+    prefix : str
+        Backtest prefix.
+
+    Returns
+    -------
+    str
+        ``<prefix>:replay:done``; its value is the last ``ts_recv`` published.
+    """
+    return prefixed(prefix, REPLAY_DONE_KEY)
+
+
+async def read_progress(
+    redis: Any, prefix: str, names: list[str]
+) -> dict[str, int | None]:
+    """
+    Read the progress of several replayed consumers.
+
+    Parameters
+    ----------
+    redis : Any
+        A ``redis.asyncio.Redis`` client, replies bytes or str.
+    prefix : str
+        Backtest prefix.
+    names : list[str]
+        Consumer names.
+
+    Returns
+    -------
+    dict[str, int | None]
+        Last ``ts_recv`` delivered per name, None for one that has not
+        written yet.
+    """
+    if not names:
+        return {}
+    values = await redis.mget([replay_progress_key(prefix, name) for name in names])
+    return {
+        name: None if value is None else int(value)
+        for name, value in zip(names, values, strict=True)
+    }
+
+
 def configured_streams(config: AppConfig, production: bool | None) -> list[str]:
     """
     Enumerate every stream the running system can produce.

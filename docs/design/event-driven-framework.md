@@ -558,6 +558,27 @@ Backtesting is replay plus simulation, reusing the live components:
   see orders it never placed. Replayed streams are not trimmed: a backtest
   is bounded by its range, and a consumer that falls behind an unpaced
   replay must still find every entry when it gets there.
+- **Coordination.** Three processes read the same replayed prefix, the
+  replayer, the strategy and the simulated broker, and only the replayer
+  knows how far the recording has been published. Every replayed runtime
+  writes the `ts_recv` it has reached after each read to
+  `bt:{run_id}:replay:progress:<name>`; the replayer, told which consumers
+  to `--follow`, waits for all of them to appear and then never publishes
+  more than a `--lookahead` (one recorded second by default) beyond the
+  slowest, which bounds how far the market data in Redis runs ahead of the
+  strategies. When the recording is exhausted it sets
+  `bt:{run_id}:replay:done` to the last time published, and a replayed
+  runtime stops once that key exists and it has read every stream to its
+  tail. The lookahead is not only about memory: the simulated broker must
+  not process a market event before the strategies have seen it, or it
+  would fill an order at a time when the strategy's cancel, created
+  earlier in recorded time but not yet published, should already have
+  reached the venue. It therefore follows the strategies' progress too and
+  holds every market event until they are past it. The replayer's
+  `--balances prime` mode is the other half of that contract: the recorded
+  balance changes are the live run's fills, so a backtest replays only the
+  balance in force at the start and lets the simulated broker publish the
+  rest.
 - A simulated broker consumes `bt:{run_id}:oms:intents`. For each intent it
   draws an arrival delay from the per-venue latency model built from
   `oms:latency` records, looks up the recorded book at `ts_created + delay`,

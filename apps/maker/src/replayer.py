@@ -33,12 +33,13 @@ import heapq
 import io
 import logging
 import time
+from itertools import islice
 from collections.abc import AsyncIterator, Iterable, Iterator
 from compression import zstd
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import msgspec
 from redis.asyncio import ConnectionPool, Redis
@@ -60,7 +61,9 @@ from apps.shared.src.streams import (
     COMPRESSED_SUFFIX,
     bucket_of_file,
     configured_streams,
+    read_progress,
     recording_files,
+    replay_done_key,
     stream_path,
 )
 from apps.shared.src.utils import production
@@ -73,7 +76,21 @@ NS_PER_S = 1_000_000_000
 # hand the simulated broker orders it never placed.
 OMS_STREAMS = frozenset({INTENTS_STREAM, ORDER_EVENTS_STREAM, LATENCY_STREAM})
 # Streams whose latest entry is complete state, see ``runtime.snapshot_streams``.
-SNAPSHOT_STREAM_PREFIXES = ("md:book:", "acct:balance:")
+BOOK_STREAM_PREFIX = "md:book:"
+BALANCE_STREAM_PREFIX = "acct:balance:"
+SNAPSHOT_STREAM_PREFIXES = (BOOK_STREAM_PREFIX, BALANCE_STREAM_PREFIX)
+
+# How much of a balance stream to replay. A backtest with a simulated broker
+# wants the balance in force at the start and nothing after it, since the
+# recorded changes are the fills of the live run, not the simulated one.
+BALANCES_PRIME = "prime"
+BALANCES_ALL = "all"
+BALANCES_NONE = "none"
+BALANCE_MODES = (BALANCES_PRIME, BALANCES_ALL, BALANCES_NONE)
+
+# How often a following replayer re-reads consumer progress while it waits.
+FOLLOW_POLL_S = 0.01
+FOLLOW_LOG_EVERY_S = 5.0
 
 
 # Records ------------------------------------------------------------------
@@ -384,6 +401,23 @@ def in_range(ts_recv: int, start_ns: int | None, end_ns: int | None) -> bool:
     if start_ns is not None and ts_recv < start_ns:
         return False
     return end_ns is None or ts_recv < end_ns
+
+
+def is_balance_stream(stream: str) -> bool:
+    """
+    Return whether a stream carries balance snapshots.
+
+    Parameters
+    ----------
+    stream : str
+        Unprefixed stream name.
+
+    Returns
+    -------
+    bool
+        True for ``acct:balance:*``.
+    """
+    return stream.startswith(BALANCE_STREAM_PREFIX)
 
 
 def is_snapshot_stream(stream: str) -> bool:
@@ -754,6 +788,9 @@ class Replayer:
         end_ns: int | None = None,
         speed: float = 0.0,
         batch: int = 500,
+        balances: str = BALANCES_ALL,
+        follow: Iterable[str] = (),
+        lookahead_s: float = 1.0,
     ) -> None:
         """
         Initialize the replayer.
@@ -775,14 +812,31 @@ class Replayer:
             Recorded seconds per wall second, 0 for as fast as possible.
         batch : int
             Entries per pipeline when several are due at once.
+        balances : str
+            ``BALANCES_ALL`` replays balance streams like any other,
+            ``BALANCES_PRIME`` publishes only the snapshot in force at the
+            start (the primed one, or the first in range when there is no
+            start), ``BALANCES_NONE`` skips them.
+        follow : Iterable[str]
+            Consumer names whose ``replay_progress_key`` this replayer
+            follows: it waits for all of them to appear and then never
+            publishes more than ``lookahead_s`` of recorded time beyond the
+            slowest. Empty to publish freely.
+        lookahead_s : float
+            Recorded seconds the replay may run ahead of a followed consumer.
 
         Raises
         ------
         ValueError
-            If the prefix is empty, which would publish onto the live streams.
+            If the prefix is empty, which would publish onto the live
+            streams, or the balance mode is unknown.
         """
         if not prefix:
             raise ValueError("A replay needs a prefix; an empty one is the live bus")
+        if balances not in BALANCE_MODES:
+            raise ValueError(
+                f"Balance mode must be one of {BALANCE_MODES}, got {balances!r}"
+            )
         self.root = root
         self.streams = list(streams)
         self.prefix = prefix
@@ -790,6 +844,9 @@ class Replayer:
         self.end_ns = end_ns
         self.pacer = Pacer(speed)
         self.batch = batch
+        self.balances = balances
+        self.follow = list(follow)
+        self.lookahead_ns = int(lookahead_s * NS_PER_S)
         self.report = ReplayReport()
 
     def records(self) -> Iterator[Record]:
@@ -804,20 +861,26 @@ class Replayer:
         primed: list[Record] = []
         iterators: list[Iterator[Record]] = []
         for stream in self.streams:
+            if is_balance_stream(stream) and self.balances == BALANCES_NONE:
+                continue
             directory = stream_path(self.root, stream)
             if not recording_files(directory):
                 logger.warning(f"No recording for {stream} under {directory}")
                 continue
+            latest = None
             if self.start_ns is not None and is_snapshot_stream(stream):
                 latest = latest_before(stream, directory, self.start_ns)
                 if latest is not None:
                     primed.append(latest)
                     self.report.primed.append(stream)
-            iterators.append(
-                iter_stream(
-                    stream, directory, self.start_ns, self.end_ns, self.report.malformed
-                )
+            records = iter_stream(
+                stream, directory, self.start_ns, self.end_ns, self.report.malformed
             )
+            if is_balance_stream(stream) and self.balances == BALANCES_PRIME:
+                # Only the balance in force at the start: the primed one if
+                # there was one, else the first in range stands in for it.
+                records = iter(()) if latest is not None else islice(records, 1)
+            iterators.append(records)
         yield from sorted(primed, key=lambda record: record.ts_recv)
         yield from merge(iterators)
 
@@ -914,6 +977,7 @@ class Replayer:
             What was published, primed, skipped and refused.
         """
         gaps = GapDetector()
+        await self.wait_for_consumers(redis)
         async for batch in self.batches():
             for record in batch:
                 gap = gaps.check(record)
@@ -924,8 +988,74 @@ class Replayer:
                         f"{gap.previous} -> {gap.current}"
                     )
                     self.report.gaps.append(gap)
+            await self.throttle(redis)
             await self.publish(redis, batch)
+        await redis.set(replay_done_key(self.prefix), self.report.last_ts_recv or 0)
         return self.report
+
+    async def slowest_consumer(self, redis: Any) -> int | None:
+        """
+        Return the progress of the followed consumer that is furthest behind.
+
+        Parameters
+        ----------
+        redis : Any
+            A ``redis.asyncio.Redis`` client.
+
+        Returns
+        -------
+        int | None
+            The smallest ``ts_recv`` any followed consumer has reached, or
+            None if one has not reported yet or nothing is followed.
+        """
+        if not self.follow:
+            return None
+        progress = await read_progress(redis, self.prefix, self.follow)
+        if any(value is None for value in progress.values()):
+            return None
+        return min(cast(dict[str, int], progress).values())
+
+    async def wait_for_consumers(self, redis: Any) -> None:
+        """
+        Block until every followed consumer has reported progress once.
+
+        Parameters
+        ----------
+        redis : Any
+            A ``redis.asyncio.Redis`` client.
+        """
+        if not self.follow:
+            return
+        waited = 0.0
+        while await self.slowest_consumer(redis) is None:
+            if waited % FOLLOW_LOG_EVERY_S < FOLLOW_POLL_S:
+                progress = await read_progress(redis, self.prefix, self.follow)
+                missing = sorted(
+                    name for name, value in progress.items() if value is None
+                )
+                logger.info(f"Waiting for {missing} to start under {self.prefix}")
+            await self.sleep(FOLLOW_POLL_S)
+            waited += FOLLOW_POLL_S
+
+    async def throttle(self, redis: Any) -> None:
+        """
+        Wait until the slowest followed consumer is within the lookahead.
+
+        Parameters
+        ----------
+        redis : Any
+            A ``redis.asyncio.Redis`` client.
+        """
+        if not self.follow or self.report.last_ts_recv is None:
+            return
+        while True:
+            slowest = await self.slowest_consumer(redis)
+            if (
+                slowest is not None
+                and self.report.last_ts_recv - slowest <= self.lookahead_ns
+            ):
+                return
+            await self.sleep(FOLLOW_POLL_S)
 
 
 def log_report(report: ReplayReport, prefix: str) -> None:
@@ -967,7 +1097,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     -------
     argparse.Namespace
         ``run_id``, ``start``, ``end`` (nanoseconds or None), ``speed``,
-        ``root`` (Path or None) and ``include_oms``.
+        ``root`` (Path or None), ``include_oms``, ``balances``, ``follow``
+        and ``lookahead``.
     """
     parser = argparse.ArgumentParser(
         description="Replay a recording onto Redis under bt:<run_id>."
@@ -992,6 +1123,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--include-oms",
         action="store_true",
         help="also replay the recorded order management streams",
+    )
+    parser.add_argument(
+        "--balances",
+        choices=BALANCE_MODES,
+        default=BALANCES_ALL,
+        help="how much of the balance streams to replay; 'prime' for a simulated broker",
+    )
+    parser.add_argument(
+        "--follow",
+        metavar="NAME",
+        action="append",
+        default=[],
+        help="consumer to stay within the lookahead of; repeatable",
+    )
+    parser.add_argument(
+        "--lookahead",
+        type=float,
+        default=1.0,
+        help="recorded seconds the replay may run ahead of a followed consumer",
     )
     return parser.parse_args(argv)
 
@@ -1021,6 +1171,9 @@ async def main(config: AppConfig, args: argparse.Namespace) -> ReplayReport:
         start_ns=args.start,
         end_ns=args.end,
         speed=args.speed,
+        balances=args.balances,
+        follow=args.follow,
+        lookahead_s=args.lookahead,
     )
     window = f"{args.start or 'start'} to {args.end or 'end'}"
     logger.info(

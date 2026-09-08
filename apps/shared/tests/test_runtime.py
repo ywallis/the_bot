@@ -41,6 +41,7 @@ from apps.shared.src.runtime import (
     Clock,
     Runtime,
     Strategy,
+    StreamReader,
     owner_of,
     snapshot_streams,
     strategy_key,
@@ -48,7 +49,11 @@ from apps.shared.src.runtime import (
     time_stamp,
     validate_identifier,
 )
-from apps.shared.src.streams import StreamPublisher
+from apps.shared.src.streams import (
+    StreamPublisher,
+    replay_done_key,
+    replay_progress_key,
+)
 
 T0 = 1_757_200_000_000_000_000  # 2025-09-06T23:06:40Z
 
@@ -652,3 +657,90 @@ async def test_no_timer_without_an_interval(redis: Any):
     await runtime.step()
     assert handler.timers == 0
     assert runtime._block_ms() == 10
+
+
+# StreamReader ---------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reader_starts_at_the_tail_or_at_the_start(redis: Any):
+    """Live readers skip what exists; replay readers read it all."""
+    await publish(redis, book(seq=1))
+    stream = "md:book:mexc:ALPH/USDT"
+    live = StreamReader(redis, [stream, "empty"])
+    await live.start()
+    assert live.cursors["empty"] == "0-0"
+    assert live.cursors[stream] != "0-0"
+    assert await live.at_tail()
+    replay = StreamReader(redis, [stream], from_start=True)
+    await replay.start()
+    assert replay.cursors == {stream: "0-0"}
+    assert not await replay.at_tail()
+
+
+@pytest.mark.asyncio
+async def test_reader_read_does_not_move_the_cursors_until_advanced(redis: Any):
+    """A read hands back decoded blocks; the caller decides what it consumed."""
+    stream = "md:book:mexc:ALPH/USDT"
+    await publish(redis, book(seq=1), book(seq=2))
+    await redis.xadd(stream, {"type": "book", "data": "{"})
+    reader = StreamReader(redis, [stream], from_start=True)
+    await reader.start()
+    blocks = await reader.read(block_ms=1)
+    assert len(blocks) == 1
+    name, entries = blocks[0]
+    assert name == stream
+    assert [e.seq if e is not None else None for _, e in entries] == [1, 2, None]  # type: ignore[union-attr]
+    # Not advanced: the same entries come back.
+    again = await reader.read(block_ms=1)
+    assert [i for i, _ in again[0][1]] == [i for i, _ in entries]
+    reader.advance(stream, entries[-1][0])
+    assert await reader.read(block_ms=1) == []
+    assert await reader.at_tail()
+
+
+# Replay coordination --------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_replayed_runtime_reports_its_progress(redis: Any):
+    """After every step the clock is written under the prefix; live writes nothing."""
+    handler = Recorder()
+    runtime = Runtime(
+        redis, config(), strategy_config(), handler, clock=Clock.replay(), prefix="bt:1"
+    )
+    await runtime.start()
+    await publish(redis, book(ts_recv=T0 + 7), prefix="bt:1")
+    await runtime.step()
+    assert int(await redis.get(replay_progress_key("bt:1", "fmb"))) == T0 + 7
+
+    live = Runtime(redis, config(), strategy_config(), Recorder())
+    await live.start()
+    await live.step()
+    assert await redis.get(replay_progress_key("", "fmb")) is None
+
+
+@pytest.mark.asyncio
+async def test_a_replayed_runtime_stops_once_the_replay_is_done_and_read(redis: Any):
+    """``run`` returns after the done key appears and every stream is drained."""
+    handler = Recorder()
+    runtime = Runtime(
+        redis,
+        config(),
+        strategy_config(),
+        handler,
+        clock=Clock.replay(),
+        prefix="bt:1",
+        block_ms=10,
+    )
+    await publish(redis, book(seq=1, ts_recv=T0), prefix="bt:1")
+    task = asyncio.create_task(runtime.run())
+    await asyncio.sleep(0.05)
+    assert not task.done()  # nothing says the replay is over yet
+    await publish(redis, book(seq=2, ts_recv=T0 + 1), prefix="bt:1")
+    await redis.set(replay_done_key("bt:1"), T0 + 1)
+    await asyncio.wait_for(task, timeout=1)
+    assert [e.seq for e in handler.events] == [1, 2]  # type: ignore[union-attr]
+    assert not await Runtime(
+        redis, config(), strategy_config(), Recorder()
+    ).replay_finished()

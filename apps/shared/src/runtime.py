@@ -55,6 +55,8 @@ from apps.shared.src.streams import (
     STREAM_START,
     StreamPublisher,
     entry_id_str,
+    replay_done_key,
+    replay_progress_key,
     stream_tail,
 )
 
@@ -414,6 +416,137 @@ class Strategy:
         """Run when ``timer_interval_s`` of clock time has elapsed."""
 
 
+class StreamReader:
+    """
+    Read several streams from concrete cursors and decode what comes back.
+
+    The reading half of ``Runtime``, on its own so that other replayed
+    consumers, the simulated broker first of all, read the bus the same way:
+    tails resolved once live, the start of every stream under replay, then
+    concrete entry ids. The caller advances the cursors, because a consumer
+    may deliver only part of what a read returned and wants the rest again.
+
+    Attributes
+    ----------
+    redis : Any
+        A ``redis.asyncio.Redis`` client. Replies may be bytes or str.
+    streams : list[str]
+        Streams read, already prefixed.
+    batch : int
+        Maximum entries fetched per stream per read.
+    from_start : bool
+        Whether ``start`` positions the cursors at the start of every stream
+        rather than at its tail.
+    cursors : dict[str, str]
+        Last entry id consumed per stream, the ``XREAD`` start positions.
+    """
+
+    def __init__(
+        self,
+        redis: Any,
+        streams: list[str],
+        *,
+        batch: int = 100,
+        from_start: bool = False,
+    ) -> None:
+        """
+        Initialize the reader.
+
+        Parameters
+        ----------
+        redis : Any
+            A ``redis.asyncio.Redis`` client.
+        streams : list[str]
+            Streams to read, already prefixed.
+        batch : int
+            Maximum entries fetched per stream per read.
+        from_start : bool
+            True to read every stream from its beginning, which is what a
+            replayed prefix wants: it is the past, and its tail is the end.
+        """
+        self.redis = redis
+        self.streams = list(streams)
+        self.batch = batch
+        self.from_start = from_start
+        self.cursors: dict[str, str] = {}
+
+    async def start(self) -> None:
+        """Position every cursor, at the tail as it stands now or at the start."""
+        if self.from_start:
+            self.cursors = {stream: STREAM_START for stream in self.streams}
+            return
+        self.cursors = {
+            stream: await stream_tail(self.redis, stream) for stream in self.streams
+        }
+
+    async def read(
+        self, block_ms: int
+    ) -> list[tuple[str, list[tuple[str, AnyEvent | None]]]]:
+        """
+        Perform one blocking read and decode it, without moving the cursors.
+
+        Parameters
+        ----------
+        block_ms : int
+            How long to wait when nothing is available.
+
+        Returns
+        -------
+        list[tuple[str, list[tuple[str, AnyEvent | None]]]]
+            One block per stream that had entries, in the order Redis
+            returned them: the stream name and its entries as text ids with
+            their decoded events, None for an entry that did not decode,
+            which is logged and meant to be stepped over.
+        """
+        response = await self.redis.xread(
+            dict(self.cursors), count=self.batch, block=block_ms
+        )
+        # redis-py types the reply as list or dict (RESP3); the client is
+        # RESP2 here so it is always the list form.
+        return [
+            (_text(stream), self._decode(_text(stream), entries))
+            for stream, entries in cast(list[Any], response or [])
+        ]
+
+    def advance(self, stream: str, entry_id: str) -> None:
+        """
+        Move a stream's cursor past an entry.
+
+        Parameters
+        ----------
+        stream : str
+            The stream.
+        entry_id : str
+            The entry consumed.
+        """
+        self.cursors[stream] = entry_id
+
+    async def at_tail(self) -> bool:
+        """
+        Return whether every cursor sits at its stream's current tail.
+
+        Returns
+        -------
+        bool
+            True if nothing remains to read right now.
+        """
+        for stream, cursor in self.cursors.items():
+            if await stream_tail(self.redis, stream) != cursor:
+                return False
+        return True
+
+    @staticmethod
+    def _decode(stream: str, entries: list[Any]) -> list[tuple[str, AnyEvent | None]]:
+        decoded: list[tuple[str, AnyEvent | None]] = []
+        for entry_id, fields in entries:
+            try:
+                decoded.append((_text(entry_id), from_stream_fields(fields)))
+            except Exception as error:  # noqa: BLE001, keep reading
+                logger.error(f"Undecodable entry {entry_id!r} on {stream}: {error}")
+                decoded.append((_text(entry_id), None))
+        return decoded
+
+
 class Runtime:
     """
     Read a strategy's streams and dispatch them to its handler.
@@ -434,8 +567,9 @@ class Runtime:
         Key prefix for every stream read or written, empty live.
     streams : list[str]
         Prefixed streams read, see ``subscribed_streams``.
-    cursors : dict[str, str]
-        Last entry id delivered per stream, the ``XREAD`` start positions.
+    reader : StreamReader
+        The reader over those streams; its ``cursors`` are the ``XREAD``
+        start positions.
     submitted : dict[str, OrderIntent]
         Recently submitted intents by id, bounded by ``SUBMITTED_MEMORY``.
     """
@@ -490,7 +624,9 @@ class Runtime:
         self.batch = batch
         self.publisher = StreamPublisher(maxlen=config.oms.stream_maxlen, prefix=prefix)
         self.streams = subscribed_streams(strategy, prefix)
-        self.cursors: dict[str, str] = {}
+        self.reader = StreamReader(
+            redis, self.streams, batch=batch, from_start=not self.clock.live
+        )
         self.submitted: dict[str, OrderIntent] = {}
         self._last_stamp = 0
         self._cancel_seq = 0
@@ -712,6 +848,18 @@ class Runtime:
         """
         return owner_of(event) == self.identifier
 
+    @property
+    def cursors(self) -> dict[str, str]:
+        """
+        Return the last entry id delivered per stream.
+
+        Returns
+        -------
+        dict[str, str]
+            The reader's cursors.
+        """
+        return self.reader.cursors
+
     async def start(self) -> None:
         """
         Position the cursors, run ``on_start``, then prime the strategy's state.
@@ -732,12 +880,7 @@ class Runtime:
         clock to the end and drop everything before it. The replayer primes
         the pre-range snapshots itself, as the first entries on each stream.
         """
-        if self.clock.live:
-            self.cursors = {
-                stream: await stream_tail(self.redis, stream) for stream in self.streams
-            }
-        else:
-            self.cursors = {stream: STREAM_START for stream in self.streams}
+        await self.reader.start()
         logger.info(f"{self.identifier} reading {self.streams}")
         self._arm_timer()
         await self.handler.on_start(self)
@@ -790,30 +933,26 @@ class Runtime:
         unread. Held-back entries are simply re-read: the cursor of their
         stream stays where delivery stopped.
 
+        Under replay the runtime's progress, the clock after the step, is
+        written to ``replay_progress_key`` so the replayer and the simulated
+        broker can follow it.
+
         Returns
         -------
         int
             Number of entries delivered.
         """
-        response = await self.redis.xread(
-            dict(self.cursors), count=self.batch, block=self._block_ms()
-        )
-        # redis-py types the reply as list or dict (RESP3); the client is
-        # RESP2 here so it is always the list form.
-        decoded = [
-            (_text(stream), self._decode_entries(_text(stream), entries))
-            for stream, entries in cast(list[Any], response or [])
-        ]
+        blocks = await self.reader.read(self._block_ms())
         watermark = min(
             (
                 entries[-1][1].ts_recv
-                for _stream, entries in decoded
+                for _stream, entries in blocks
                 if len(entries) >= self.batch and entries[-1][1] is not None
             ),
             default=None,
         )
         runs: list[list[tuple[str, AnyEvent]]] = []
-        for stream, entries in decoded:
+        for stream, entries in blocks:
             run: list[tuple[str, AnyEvent]] = []
             for entry_id, event in entries:
                 if (
@@ -822,7 +961,7 @@ class Runtime:
                     and event.ts_recv > watermark
                 ):
                     break
-                self.cursors[stream] = entry_id
+                self.reader.advance(stream, entry_id)
                 if event is not None:
                     run.append((entry_id, event))
             runs.append(run)
@@ -831,41 +970,41 @@ class Runtime:
             await self.dispatch(event)
             delivered += 1
         await self._fire_timer_if_due()
+        if not self.clock.live:
+            await self.redis.set(
+                replay_progress_key(self.prefix, self.identifier), self.clock.now()
+            )
         return delivered
 
-    def _decode_entries(
-        self, stream: str, entries: list[Any]
-    ) -> list[tuple[str, AnyEvent | None]]:
+    async def run(self) -> None:
         """
-        Decode one stream's block of an ``XREAD`` reply.
+        Start, then read and dispatch until ``stop`` is called.
 
-        Parameters
-        ----------
-        stream : str
-            The stream, for the log.
-        entries : list[Any]
-            ``[(entry_id, fields), ...]`` as returned.
+        Under replay, also until the replayer has marked the recording done
+        and every stream has been read to its tail.
+        """
+        await self.start()
+        while not self._stopped:
+            delivered = await self.step()
+            if delivered == 0 and not self.clock.live and await self.replay_finished():
+                logger.info(f"{self.identifier} reached the end of the replay")
+                break
+
+    async def replay_finished(self) -> bool:
+        """
+        Return whether the replay is over and fully read.
 
         Returns
         -------
-        list[tuple[str, AnyEvent | None]]
-            Entry ids as text with their events, None for an entry that did
-            not decode, which is logged and will be stepped over.
+        bool
+            True once ``replay_done_key`` is set and every cursor is at its
+            tail. Always False live, where there is no end.
         """
-        decoded: list[tuple[str, AnyEvent | None]] = []
-        for entry_id, fields in entries:
-            try:
-                decoded.append((_text(entry_id), from_stream_fields(fields)))
-            except Exception as error:  # noqa: BLE001, keep reading
-                logger.error(f"Undecodable entry {entry_id!r} on {stream}: {error}")
-                decoded.append((_text(entry_id), None))
-        return decoded
-
-    async def run(self) -> None:
-        """Start, then read and dispatch until ``stop`` is called."""
-        await self.start()
-        while not self._stopped:
-            await self.step()
+        if self.clock.live:
+            return False
+        if await self.redis.get(replay_done_key(self.prefix)) is None:
+            return False
+        return await self.reader.at_tail()
 
     def stop(self) -> None:
         """Make ``run`` return after the read in progress."""
