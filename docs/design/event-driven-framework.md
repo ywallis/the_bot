@@ -500,6 +500,19 @@ churn. The strategies also learned to free a slot on a terminal order
 event, which the polling versions never did, so a filled quote is not
 "replaced" by naming an order that is gone.
 
+A vanished quote condition does not have to cancel at once.
+`cancel_grace_s`, off unless a strategy's config sets it, turns that cancel
+into a deadline: the slot is marked, every later event re-evaluates it, and
+the cancel goes out only if the grace runs out with the condition still
+gone. A condition that comes back inside the grace finds its order still
+resting, so it is kept or replaced rather than quoted into an empty slot.
+The grace holds an order the strategy has stopped asking for, so it is
+bounded a second way, by `hedgeable`: an order whose size the taker book no
+longer holds at the strategy's own minimum edge is cancelled immediately,
+whatever its deadline says. The deadline is checked on every delivered
+event and, so that a market going quiet cannot stretch it, on the runtime's
+timer.
+
 ## 9. Backtesting
 
 Backtesting is replay plus simulation, reusing the live components:
@@ -638,7 +651,9 @@ version, and `XADD` intents. No shared code is required. The Python
    condition before the other's restored it. Correct, but each such pair
    costs the same two round trips as a replace and leaves the slot empty
    in between. A grace period before cancelling on a vanished condition is
-   the obvious mitigation and is not yet built.
+   the obvious mitigation. It was built after the fifth run: the mechanism
+   is in section 8, the sizing in that run's note below, and the sizing is
+   the interesting part.
 
    Latency over 181 native placements, no bridge hop: strategy to order
    manager 0.3 to 2.2 ms, median 0.6; inside the order manager median 0.6
@@ -705,9 +720,33 @@ version, and `XADD` intents. No shared code is required. The Python
    - **The cancel-then-requote churn is a quiet-market effect.** In slow
      hours three quotes in four were cancelled and requoted into an empty
      slot; in the busy morning session replacements outnumbered cancels.
-     Over the whole run 1173 replacements against 985 cancels on request. A
-     grace period before cancelling on a vanished condition remains the
-     mitigation.
+     Over the whole run 1173 replacements against 985 cancels on request.
+     The grace period was sized against this run's recorded intents, and
+     it buys less than the ratio suggests. Of 953 cancel-and-requote pairs
+     on the side that quoted, 83% requoted within 500 ms, median 371 ms,
+     which is the lag between the two venues' book updates and is what the
+     grace is for. But a held order is only free when the returning
+     condition wants it unchanged, and that is 12% of those pairs; the
+     other 88% come back wanting a different price or size, and the replace
+     they then make costs the same two round trips the cancel and the
+     requote cost. The measured prize is about 6% of broker round trips
+     and a minute or so of the run's 41 minutes of empty slot, on a slot
+     that already rested 94.7% of the time. It is still worth having: the
+     12% is free, and 64% of the pairs requoted at a lower price, meaning
+     the order held through the grace was one whose hedge had got cheaper,
+     not dearer. The configured 500 ms covers the body of the distribution
+     and is the same order of magnitude as the round trip it saves.
+
+   - **The empty slot is a round trip, not the churn.** The same run's
+     order events put a resting order in the book 94.7% of the time, and
+     of the 41 missing minutes only about ten are in gaps under 500 ms.
+     Every requote leaves the slot empty for roughly one round trip
+     (median 316 ms) whether it is a replace or a cancel and a requote,
+     because the order manager cancels before it places. That, and a
+     requote rate set by a 0.01% price tolerance against a 0.02% median
+     drift between consecutive quotes, is where the downtime actually is.
+     Both are questions about what a different tolerance or an overlapped
+     replace would have earned, which is to say phase 5 questions.
 5. Replayer and simulated broker.
 
 Each phase leaves the system runnable with the current strategies.
