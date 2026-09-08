@@ -8,6 +8,8 @@ import pytest
 from apps.maker.src.launcher import (
     STRATEGY_ATTRIBUTE,
     legacy_entry_point,
+    parse_args,
+    replay_options,
     run,
     runtime_strategy_class,
 )
@@ -18,7 +20,7 @@ from apps.shared.src.config import (
     StrategyConfig,
     Subscription,
 )
-from apps.shared.src.runtime import Strategy
+from apps.shared.src.runtime import Clock, Strategy
 
 
 def strategy_config(type_: str) -> StrategyConfig:
@@ -130,3 +132,52 @@ async def test_run_hands_a_legacy_strategy_the_flat_dict(
     assert seen["strategy"]["identifier"] == "fmb"
     assert seen["strategy"]["a"] == 1
     assert seen["strategy"]["refresh_speed"] == 0.5
+
+
+@pytest.mark.asyncio
+async def test_run_under_replay_hands_the_runtime_a_prefix_and_a_replay_clock(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """``--replay`` becomes the ``bt:`` prefix and an event-time clock."""
+    seen: dict[str, Any] = {}
+
+    async def fake_run_strategy(
+        redis: Any,
+        config: AppConfig,
+        strategy: StrategyConfig,
+        handler: Strategy,
+        **options: Any,
+    ) -> None:
+        seen.update(options)
+
+    monkeypatch.setattr("apps.maker.src.launcher.run_strategy", fake_run_strategy)
+    monkeypatch.setattr(
+        "apps.maker.src.launcher.load_strategy_module",
+        lambda strategy: module("m", STRATEGY=Native),
+    )
+    await run("redis", config(), strategy_config("fake_maker"), replay="r1")
+    assert seen["prefix"] == "bt:r1"
+    assert isinstance(seen["clock"], Clock) and not seen["clock"].live
+    assert replay_options(None) == {}
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_strategy_cannot_be_replayed(monkeypatch: pytest.MonkeyPatch):
+    """A polling strategy reads keys the replayer does not write."""
+
+    async def fake_maker(redis: Any, strategy: dict[str, Any]) -> None:
+        raise AssertionError("must not run")
+
+    monkeypatch.setattr(
+        "apps.maker.src.launcher.load_strategy_module",
+        lambda strategy: module("m", fake_maker=fake_maker),
+    )
+    with pytest.raises(RuntimeError):
+        await run("redis", config(), strategy_config("fake_maker"), replay="r1")
+
+
+def test_parse_args_reads_the_index_and_the_replay_flag():
+    """The index stays positional; ``--replay`` is optional."""
+    assert parse_args(["2"]).strategy_index == 2
+    assert parse_args(["2"]).replay is None
+    assert parse_args(["0", "--replay", "r1"]).replay == "r1"

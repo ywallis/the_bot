@@ -53,6 +53,7 @@ from apps.shared.src.events import (
     LATENCY_STREAM,
     ORDER_EVENTS_STREAM,
     TYPE_FIELD,
+    backtest_prefix,
     prefixed,
 )
 from apps.shared.src.streams import (
@@ -68,8 +69,6 @@ logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
 NS_PER_S = 1_000_000_000
-# Namespace every backtest replays into: ``bt:<run_id>:<stream>``.
-BACKTEST_PREFIX = "bt"
 # Streams a backtest produces itself. Replaying the live ones alongside would
 # hand the simulated broker orders it never placed.
 OMS_STREAMS = frozenset({INTENTS_STREAM, ORDER_EVENTS_STREAM, LATENCY_STREAM})
@@ -1013,7 +1012,7 @@ async def main(config: AppConfig, args: argparse.Namespace) -> ReplayReport:
     ReplayReport
         The report.
     """
-    prefix = f"{BACKTEST_PREFIX}:{args.run_id}"
+    prefix = backtest_prefix(args.run_id)
     root = args.root if args.root is not None else Path(config.recorder.root)
     replayer = Replayer(
         root,

@@ -513,7 +513,7 @@ async def test_paced_batches_flush_before_every_wait(
 
 @pytest.mark.asyncio
 async def test_a_runtime_under_the_prefix_reads_the_replay(tmp_path: Path):
-    """A strategy on a replay clock primes from the replayed snapshots."""
+    """A strategy on a replay clock reads the replay from its start, in time order."""
     recording(tmp_path)
     redis = fakeredis.FakeRedis(decode_responses=True)
     await rp.Replayer(
@@ -543,7 +543,17 @@ async def test_a_runtime_under_the_prefix_reads_the_replay(tmp_path: Path):
         redis, config, strategy, Probe(), clock=Clock.replay(), prefix="bt:r1"
     )
     await runtime.start()
-    assert [type(e).__name__ for e in seen] == ["BalanceEvent", "BookEvent"]
+    assert seen == []  # a replayed prefix is read from its start, not primed
+    await runtime.step()
+    # The primed snapshots first, then the range, merged across streams.
+    assert [(type(e).__name__, e.ts_recv) for e in seen] == [
+        ("BalanceEvent", T14 - 5 * HOUR),
+        ("BookEvent", T14 - 30 * MINUTE),
+        ("BookEvent", T14 + 5 * MINUTE),
+        ("BalanceEvent", T14 + 10 * MINUTE),
+        ("BookEvent", T14 + 20 * MINUTE),
+        ("BookEvent", T14 + 40 * MINUTE),
+    ]
     assert runtime.clock.now() == T14 + 40 * MINUTE
 
 

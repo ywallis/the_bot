@@ -32,6 +32,8 @@ from apps.shared.src.events import (
 # may still append to them and compressed once sealed and shipped.
 FILE_SUFFIX = ".jsonl"
 COMPRESSED_SUFFIX = ".jsonl.zst"
+# The id before any entry: an ``XREAD`` from it returns a stream from its start.
+STREAM_START = "0-0"
 
 
 class StreamPublisher:
@@ -185,7 +187,7 @@ async def stream_tail(redis: Any, stream: str) -> str:
     """
     entries = await redis.xrevrange(stream, count=1)
     if not entries:
-        return "0-0"
+        return STREAM_START
     return entry_id_str(entries[0][0])
 
 

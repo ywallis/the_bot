@@ -11,7 +11,9 @@ at start. The runtime
   orders;
 - runs a single ``XREAD`` over all of them, resolving each tail once and then
   advancing through concrete entry ids, so nothing published between two
-  reads is lost;
+  reads is lost; under a replay clock it reads from the start of every
+  stream instead, since a replayed prefix is the past and its tail is the
+  end of the recording;
 - drives a ``Clock`` from the ``ts_recv`` of every delivered event, which is
   what makes the same strategy code run live and under replay;
 - turns intents into ``XADD``s on ``oms:intents`` under whatever key prefix it
@@ -23,6 +25,7 @@ stream contract directly. See ``docs/design/event-driven-framework.md``
 section 8.
 """
 
+import heapq
 import logging
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -48,7 +51,12 @@ from apps.shared.src.events import (
     prefixed,
     trade_stream,
 )
-from apps.shared.src.streams import StreamPublisher, entry_id_str, stream_tail
+from apps.shared.src.streams import (
+    STREAM_START,
+    StreamPublisher,
+    entry_id_str,
+    stream_tail,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -706,24 +714,37 @@ class Runtime:
 
     async def start(self) -> None:
         """
-        Resolve stream tails, run ``on_start``, then prime the strategy's state.
+        Position the cursors, run ``on_start``, then prime the strategy's state.
 
-        Tails are resolved before ``on_start`` so that an event published in
-        reaction to something the strategy does at start is not missed. The
-        latest entry of every snapshot stream (``snapshot_streams``) is then
-        delivered as if it had just arrived. Without that a strategy starting
-        after the feed handlers, which the orchestrator guarantees, would not
-        see a balance until one changed, and a balance changes when an order
-        fills, which no quote is sent without a balance to fund it. The first
-        live run of the runtime stood still for eight minutes on exactly that.
+        Live, the cursors are the stream tails, resolved before ``on_start``
+        so that an event published in reaction to something the strategy does
+        at start is not missed, and the latest entry of every snapshot stream
+        (``snapshot_streams``) is then delivered as if it had just arrived.
+        Without that a strategy starting after the feed handlers, which the
+        orchestrator guarantees, would not see a balance until one changed,
+        and a balance changes when an order fills, which no quote is sent
+        without a balance to fund it. The first live run of the runtime stood
+        still for eight minutes on exactly that.
+
+        Under a replay clock the streams are a recording, so the cursors are
+        their starts and nothing is primed: the tail of a replayed stream is
+        the end of the recording, and delivering it first would jump the
+        clock to the end and drop everything before it. The replayer primes
+        the pre-range snapshots itself, as the first entries on each stream.
         """
-        self.cursors = {
-            stream: await stream_tail(self.redis, stream) for stream in self.streams
-        }
+        if self.clock.live:
+            self.cursors = {
+                stream: await stream_tail(self.redis, stream) for stream in self.streams
+            }
+        else:
+            self.cursors = {stream: STREAM_START for stream in self.streams}
         logger.info(f"{self.identifier} reading {self.streams}")
         self._arm_timer()
         await self.handler.on_start(self)
-        await self.prime()
+        if self.clock.live:
+            await self.prime()
+        else:
+            logger.info(f"{self.identifier} replaying from the start, not primed")
 
     async def prime(self) -> int:
         """
@@ -755,7 +776,19 @@ class Runtime:
 
     async def step(self) -> int:
         """
-        Perform one blocking read and dispatch everything it returned.
+        Perform one blocking read and dispatch what it returned, in time order.
+
+        ``XREAD`` answers with one block of entries per stream, so a read
+        spanning several streams has lost the order events were received
+        in. Delivering it as returned would hand a strategy a second of one
+        venue's books and then the other venue's, which live is a slow
+        consumer's problem and under an unpaced replay is every read. So a
+        batch is merged on ``ts_recv`` across streams (never reordered
+        within one), and when a stream filled its batch, anything on the
+        other streams received after that stream's last entry is held back
+        for the next read, since that stream may have earlier entries still
+        unread. Held-back entries are simply re-read: the cursor of their
+        stream stays where delivery stopped.
 
         Returns
         -------
@@ -765,24 +798,68 @@ class Runtime:
         response = await self.redis.xread(
             dict(self.cursors), count=self.batch, block=self._block_ms()
         )
-        delivered = 0
         # redis-py types the reply as list or dict (RESP3); the client is
         # RESP2 here so it is always the list form.
-        for stream, entries in cast(list[Any], response or []):
-            stream_name = _text(stream)
-            for entry_id, fields in entries:
-                self.cursors[stream_name] = _text(entry_id)
-                try:
-                    event = from_stream_fields(fields)
-                except Exception as error:  # noqa: BLE001, keep reading
-                    logger.error(
-                        f"Undecodable entry {entry_id!r} on {stream_name}: {error}"
-                    )
-                    continue
-                await self.dispatch(event)
-                delivered += 1
+        decoded = [
+            (_text(stream), self._decode_entries(_text(stream), entries))
+            for stream, entries in cast(list[Any], response or [])
+        ]
+        watermark = min(
+            (
+                entries[-1][1].ts_recv
+                for _stream, entries in decoded
+                if len(entries) >= self.batch and entries[-1][1] is not None
+            ),
+            default=None,
+        )
+        runs: list[list[tuple[str, AnyEvent]]] = []
+        for stream, entries in decoded:
+            run: list[tuple[str, AnyEvent]] = []
+            for entry_id, event in entries:
+                if (
+                    event is not None
+                    and watermark is not None
+                    and event.ts_recv > watermark
+                ):
+                    break
+                self.cursors[stream] = entry_id
+                if event is not None:
+                    run.append((entry_id, event))
+            runs.append(run)
+        delivered = 0
+        for _entry_id, event in heapq.merge(*runs, key=lambda item: item[1].ts_recv):
+            await self.dispatch(event)
+            delivered += 1
         await self._fire_timer_if_due()
         return delivered
+
+    def _decode_entries(
+        self, stream: str, entries: list[Any]
+    ) -> list[tuple[str, AnyEvent | None]]:
+        """
+        Decode one stream's block of an ``XREAD`` reply.
+
+        Parameters
+        ----------
+        stream : str
+            The stream, for the log.
+        entries : list[Any]
+            ``[(entry_id, fields), ...]`` as returned.
+
+        Returns
+        -------
+        list[tuple[str, AnyEvent | None]]
+            Entry ids as text with their events, None for an entry that did
+            not decode, which is logged and will be stepped over.
+        """
+        decoded: list[tuple[str, AnyEvent | None]] = []
+        for entry_id, fields in entries:
+            try:
+                decoded.append((_text(entry_id), from_stream_fields(fields)))
+            except Exception as error:  # noqa: BLE001, keep reading
+                logger.error(f"Undecodable entry {entry_id!r} on {stream}: {error}")
+                decoded.append((_text(entry_id), None))
+        return decoded
 
     async def run(self) -> None:
         """Start, then read and dispatch until ``stop`` is called."""

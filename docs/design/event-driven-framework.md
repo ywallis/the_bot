@@ -445,7 +445,15 @@ the streams. A strategy subclasses `Strategy`, overrides the hooks it needs
   subscribed venue, and `oms:events` filtered to the strategy's own orders
   (those whose strategy key starts with its identifier);
 - runs one `XREAD` over all of them, resolving each tail once and then
-  advancing through concrete entry ids (section 12);
+  advancing through concrete entry ids (section 12). `XREAD` answers one
+  block per stream, so a read spanning several streams has lost the order
+  the events were received in; the runtime merges a batch on `ts_recv`
+  across streams, never reordering within one, and when a stream filled
+  its batch it holds back whatever the other streams received after that
+  stream's last entry, since the full stream may have earlier entries
+  still unread. Live that only matters to a consumer that fell behind;
+  under an unpaced replay it is every read, and without it a strategy
+  would see a second of one venue's books and then the other venue's;
 - owns the `Clock` and advances it with the `ts_recv` of every delivered
   event before dispatching;
 - builds intents through `order_intent`, which stamps them with the clock,
@@ -468,7 +476,15 @@ the streams. A strategy subclasses `Strategy`, overrides the hooks it needs
   until one changed, and a balance changes when an order fills, which no
   quote is sent without a balance to fund it;
 - reads and writes every stream under an optional key prefix, so a backtest
-  is a prefix and a replay clock away.
+  is a prefix and a replay clock away. Under a replay clock the cursors
+  start at the beginning of every stream and nothing is primed: a replayed
+  prefix is the past, its tail is the end of the recording, and priming
+  from it would jump the clock to the end and drop everything before. The
+  replayer publishes the pre-range snapshots as the first entries instead
+  (section 9). The launcher exposes this as
+  `uv run -m apps.maker.src.launcher <index> --replay <run_id>`; a legacy
+  strategy, which polls snapshot keys the replayer does not write, is
+  refused under replay.
 
 The clock has two modes. Live, `now()` is the wall clock, which is what the
 order manager's staleness guard and the latency records expect. Under replay

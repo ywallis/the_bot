@@ -460,6 +460,85 @@ async def test_reading_starts_at_the_tail(redis: Any):
 
 
 @pytest.mark.asyncio
+async def test_a_replay_clock_reads_from_the_start_and_does_not_prime(redis: Any):
+    """A replayed prefix is the past: read it all, in order, never from its tail."""
+    await publish(
+        redis,
+        balance(ts_recv=T0 - 10),
+        book(seq=1, ts_recv=T0),
+        trade(ts_recv=T0 + 1),
+        book(seq=2, ts_recv=T0 + 2),
+        prefix="bt:1",
+    )
+    handler = Recorder()
+    runtime = Runtime(
+        redis, config(), strategy_config(), handler, clock=Clock.replay(), prefix="bt:1"
+    )
+    await runtime.start()
+    assert handler.events == []  # nothing primed
+    assert runtime.clock.now() == 0
+    await runtime.step()
+    assert [type(e).__name__ for e in handler.events] == [
+        "BalanceEvent",
+        "BookEvent",
+        "TradeEvent",
+        "BookEvent",
+    ]
+    assert runtime.clock.now() == T0 + 2
+
+
+@pytest.mark.asyncio
+async def test_a_batch_is_delivered_in_receive_order_across_streams(redis: Any):
+    """Entries of one read are merged on ``ts_recv``, not handed over stream by stream."""
+    await publish(
+        redis,
+        book(venue="bitget", seq=1, ts_recv=T0 + 1),
+        book(venue="bitget", seq=2, ts_recv=T0 + 3),
+        book(seq=1, ts_recv=T0),
+        book(seq=2, ts_recv=T0 + 2),
+        prefix="bt:1",
+    )
+    handler = Recorder()
+    runtime = Runtime(
+        redis, config(), strategy_config(), handler, clock=Clock.replay(), prefix="bt:1"
+    )
+    await runtime.start()
+    await runtime.step()
+    assert [e.ts_recv for e in handler.events] == [T0, T0 + 1, T0 + 2, T0 + 3]
+
+
+@pytest.mark.asyncio
+async def test_a_full_batch_holds_back_what_the_other_streams_received_after_it(
+    redis: Any,
+):
+    """A stream that filled its batch may have earlier entries unread; nothing overtakes them."""
+    await publish(
+        redis,
+        book(seq=1, ts_recv=T0 + 1),
+        book(seq=2, ts_recv=T0 + 2),
+        book(seq=3, ts_recv=T0 + 3),
+        book(venue="bitget", seq=1, ts_recv=T0 + 10),
+        prefix="bt:1",
+    )
+    handler = Recorder()
+    runtime = Runtime(
+        redis,
+        config(),
+        strategy_config(),
+        handler,
+        clock=Clock.replay(),
+        prefix="bt:1",
+        batch=2,
+    )
+    await runtime.start()
+    assert await runtime.step() == 2  # the two first books; the other venue waits
+    assert [e.ts_recv for e in handler.events] == [T0 + 1, T0 + 2]
+    assert await runtime.step() == 2
+    assert [e.ts_recv for e in handler.events] == [T0 + 1, T0 + 2, T0 + 3, T0 + 10]
+    assert await runtime.step() == 0
+
+
+@pytest.mark.asyncio
 async def test_nothing_published_between_reads_is_lost(redis: Any):
     """The cursor is a concrete id, so an entry added between reads is read."""
     handler = Recorder()

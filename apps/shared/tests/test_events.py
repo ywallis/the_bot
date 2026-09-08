@@ -216,3 +216,14 @@ def test_stream_for_routes_every_event():
 def test_now_ns_is_nanoseconds():
     """The clock helper returns nanosecond precision epoch time."""
     assert events.now_ns() > 1_700_000_000 * 10**9
+
+
+def test_backtest_prefix_is_bt_and_the_run_id():
+    """A run id becomes ``bt:<run_id>``; an empty or colon-bearing one is refused."""
+    assert events.backtest_prefix("run1") == "bt:run1"
+    assert events.prefixed(events.backtest_prefix("run1"), "oms:intents") == (
+        "bt:run1:oms:intents"
+    )
+    for bad in ("", "a:b"):
+        with pytest.raises(ValueError):
+            events.backtest_prefix(bad)

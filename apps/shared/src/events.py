@@ -125,6 +125,37 @@ def prefixed(prefix: str, stream: str) -> str:
     return f"{prefix}:{stream}" if prefix else stream
 
 
+# Namespace every backtest replays into and runs under: ``bt:<run_id>:<stream>``.
+BACKTEST_PREFIX = "bt"
+
+
+def backtest_prefix(run_id: str) -> str:
+    """
+    Return the key prefix of a backtest run.
+
+    Parameters
+    ----------
+    run_id : str
+        The run id, unique per replay.
+
+    Returns
+    -------
+    str
+        ``bt:<run_id>``, to be passed wherever a prefix is accepted.
+
+    Raises
+    ------
+    ValueError
+        If the run id is empty or contains a colon, which the stream naming
+        reserves as its separator.
+    """
+    if not run_id or ":" in run_id:
+        raise ValueError(
+            f"Backtest run id must be non-empty and free of ':', got {run_id!r}"
+        )
+    return f"{BACKTEST_PREFIX}:{run_id}"
+
+
 def now_ns() -> int:
     """
     Return the current wall clock time in nanoseconds since the epoch.
