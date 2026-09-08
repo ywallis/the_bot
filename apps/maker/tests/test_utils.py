@@ -1,14 +1,9 @@
 """Tests for utility functions."""
 
-import os
-import sys
-
-from apps.maker.src.structs import CancellationMessage, OrderBatchMessage, OrderMessage
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import json
 
-from src.utils import (
+from apps.maker.src.structs import CancellationMessage, OrderBatchMessage, OrderMessage
+from apps.maker.src.utils import (
     cancellation_from_order,
     is_cancellation_message,
     is_order_message,
