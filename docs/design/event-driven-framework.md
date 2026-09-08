@@ -558,37 +558,107 @@ Backtesting is replay plus simulation, reusing the live components:
   see orders it never placed. Replayed streams are not trimmed: a backtest
   is bounded by its range, and a consumer that falls behind an unpaced
   replay must still find every entry when it gets there.
-- **Coordination.** Three processes read the same replayed prefix, the
-  replayer, the strategy and the simulated broker, and only the replayer
-  knows how far the recording has been published. Every replayed runtime
-  writes the `ts_recv` it has reached after each read to
-  `bt:{run_id}:replay:progress:<name>`; the replayer, told which consumers
-  to `--follow`, waits for all of them to appear and then never publishes
-  more than a `--lookahead` (one recorded second by default) beyond the
-  slowest, which bounds how far the market data in Redis runs ahead of the
-  strategies. When the recording is exhausted it sets
-  `bt:{run_id}:replay:done` to the last time published, and a replayed
-  runtime stops once that key exists and it has read every stream to its
-  tail. The lookahead is not only about memory: the simulated broker must
-  not process a market event before the strategies have seen it, or it
-  would fill an order at a time when the strategy's cancel, created
-  earlier in recorded time but not yet published, should already have
-  reached the venue. It therefore follows the strategies' progress too and
-  holds every market event until they are past it. The replayer's
-  `--balances prime` mode is the other half of that contract: the recorded
-  balance changes are the live run's fills, so a backtest replays only the
-  balance in force at the start and lets the simulated broker publish the
-  rest.
-- A simulated broker consumes `bt:{run_id}:oms:intents`. For each intent it
-  draws an arrival delay from the per-venue latency model built from
-  `oms:latency` records, looks up the recorded book at `ts_created + delay`,
-  and fills against it. Limit orders that do not cross rest in a simple
-  queue and fill when the recorded book trades through them.
-- The strategy runs unchanged, pointed at the `bt:` prefix, with the clock
-  driven by replayed timestamps.
+- **Coordination.** Four processes read the same replayed prefix, the
+  replayer, the strategies, the simulated broker and the matcher, and only
+  the replayer knows how far the recording has been published. It keeps the
+  last `ts_recv` it published in `bt:{run_id}:replay:frontier`. Every
+  replayed consumer writes the time it has reached after each read to
+  `bt:{run_id}:replay:progress:<name>`: its clock, or the frontier when the
+  read found nothing, since a consumer at the tail of its streams has
+  processed everything published even if its own streams are quiet or the
+  recording has a gap; without that rule a strategy on one venue would
+  stall the replay through every reconnect of that venue's feed. The
+  replayer, told which consumers to `--follow`, waits for all of them to
+  appear, splits its batches so none spans more than half the
+  `--lookahead` (one recorded second by default), and publishes a batch
+  only once every follower has caught up or the batch ends within the
+  lookahead of the slowest. That bounds how far the data in Redis runs
+  ahead of the strategies, which is not only about memory: the simulated
+  broker must not process a market event before the strategies have seen
+  it, or it would fill an order at a time when the strategy's cancel,
+  created earlier in recorded time but not yet published, should already
+  have reached the venue. So the broker follows the strategies' progress
+  too and holds every market event until they are past it, and processes
+  buffered events in `ts_recv` order, market before intent at a tie.
 
-The latency model is the part that decides whether a latency arbitrage
-backtest is honest. It must come from measured data, never from a constant.
+  Three more keys end a run in order. The replayer sets
+  `bt:{run_id}:replay:done` when the recording is exhausted. The broker
+  sets `bt:{run_id}:replay:broker` when it joins and
+  `bt:{run_id}:replay:closed` once it has wound down: run out its
+  timeline, cancelled what rested as at shutdown, published the events. A
+  replayed runtime stops when done is set and its streams are drained,
+  unless a broker joined, in which case it waits for closed, so a strategy
+  still sees the fills of the last seconds; the matcher stops on closed
+  too, because a partially filled order cancelled at wind-down is a fill
+  to hedge. The replayer's `--balances prime` mode is the other half of
+  the contract: the recorded balance changes are the live run's fills, so
+  a backtest replays only the balance in force at the start and lets the
+  broker publish the rest.
+- **The simulated broker** (`apps/maker/src/sim_broker.py`) stands in for
+  the order manager, the broker, the order watcher and the balance
+  watcher. It reads the replayed books, trades and opening balances and
+  `bt:{run_id}:oms:intents`, and publishes `OrderEvent`s, a
+  `LatencyRecord` per placement and a `BalanceEvent` on every change, each
+  stamped with the time the live process would have published it, so the
+  strategies and the matcher run unchanged. It reproduces the order
+  manager's contract because the strategies were written against it: one
+  resting order per strategy key, a superseding intent cancelling what
+  rests before it places, the cancel and the placement serialised per key,
+  a quote arriving while its key is busy coalescing with the one waiting
+  and the older rejected as superseded, `ACCEPTED` when the request leaves,
+  `OPEN` on the reply, `CANCELLED` on confirmation, fill states as the
+  watcher reports them. The venue side is a discrete-event simulation on
+  a timeline of scheduled actions: an intent reaches the order manager
+  after the strategy-to-bus leg, the venue half a round trip after it is
+  sent, the reply a round trip after; a fill at the venue reaches the bus
+  half a round trip later. A crossing order fills against the recorded
+  book as it stood when it reached the venue (the broker keeps
+  `backtest.history_s` of books per feed for that), level by level at
+  taker fee; a market order that exhausts the recorded depth fills the
+  rest at the worst recorded level and the report counts it; post-only,
+  immediate-or-cancel and fill-or-kill behave as named. A resting order
+  joins the queue behind the size the recorded book showed at its price,
+  never more than the size shown since; a recorded trade at its price
+  consumes that queue first and fills it with what is left, a trade
+  through its price fills it whole, since price-time priority means its
+  level was taken, and a book whose far side crosses its price fills it
+  whole at its own price. Fees come from `backtest.fees` per venue and are
+  charged in the asset received; a venue without an entry trades free and
+  the broker says so at startup. Balances are adopted from the first
+  recorded snapshot per venue and then owned by the simulation, holds
+  included. The report counts intents, placements, rejections,
+  cancellations, fills, volume and fees, and carries the opening and
+  closing totals and the latency model's summary.
+- **The latency model** (`apps/maker/src/latency.py`) is the part that
+  decides whether a latency arbitrage backtest is honest, and it comes from
+  measured data: every `LatencyRecord` in the recording, the whole
+  recording rather than the backtest's range, grouped per venue, each
+  record kept as one sample of its three legs so a slow round trip stays
+  with the queueing that went with it. Draws pick whole samples with a
+  per-venue seed derived from a checksum, not `hash`, so a run repeats. A
+  venue with no measured placement has no model and the broker refuses to
+  start, unless a round trip is assumed for it with `--assume-rtt-ms
+  VENUE=MS`; the assumption is labelled as such in the report, and a
+  cross-venue conclusion that rests on it is worth less than one resting
+  on data. Today that is the hedge venue's situation: over two thousand
+  placements measured on the maker venue, none on the other, because
+  nothing has filled live yet.
+- The strategy runs unchanged, pointed at the `bt:` prefix, with the clock
+  driven by replayed timestamps
+  (`uv run -m apps.maker.src.launcher <index> --replay <run_id>`), and so
+  does the matcher (`uv run -m apps.maker.src.matcher --replay <run_id>`),
+  which stamps its hedges with the fill's event time rather than the wall
+  clock.
+
+What the simulation does not do, so that nobody reads more into a number
+than it holds: the recording does not react. A simulated fill consumes no
+liquidity the recorded market had, the other participants never saw the
+simulated order, and a recorded trade that fills it would in reality have
+filled someone else too. Every fill count is an upper bound for an order of
+that size. The queue model has never been calibrated against a live fill,
+because there has not been one; the first live fills are what will say
+whether "the size shown at the level, consumed by trades at the price" is
+about right or generous. `docs/runbooks/backtest.md` is how to run one.
 
 ## 10. Language interoperability
 
@@ -800,11 +870,25 @@ version, and `XADD` intents. No shared code is required. The Python
      drift between consecutive quotes, is where the downtime actually is.
      Both are questions about what a different tolerance or an overlapped
      replace would have earned, which is to say phase 5 questions.
-5. Replayer and simulated broker. The replayer landed 2026-09-08 as
-   described in section 9, tested against synthetic recordings on
-   `fakeredis` including a runtime priming itself from a replayed prefix;
-   it has not yet been run against a real recording, which lives on the
-   trading host.
+5. Replayer and simulated broker. Built 2026-09-08 as described in
+   section 9: the replayer, the coordination keys and the runtime's replay
+   mode (read from the start, no priming, batches merged on `ts_recv` with
+   a hold-back for a stream that filled its batch, progress reporting,
+   stopping on the done or closed key), the `--replay` flag on the launcher
+   and the matcher, the `[backtest]` config section, the latency model and
+   the simulated broker with its fill model and report. Everything is
+   tested on `fakeredis`, including one test that runs replayer, strategy,
+   simulated broker and matcher together: a quote rests, a recorded sweep
+   fills it, the matcher hedges it on the other venue against that venue's
+   book of the moment, the requote is cancelled at wind-down and every
+   process stops on its own. Two things the build changed in the runtime
+   for live trading as well: a multi-stream `XREAD` batch is delivered in
+   receive order rather than stream by stream, and a stream that filled
+   its batch holds back what the others received after it. Nothing has yet
+   been run against a real recording, which lives on the trading host: the
+   first real backtest, the two questions the overnight run left (a wider
+   price tolerance, an overlapped replace), and the calibration of the
+   queue model against the first live fills are what comes next.
 
 Each phase leaves the system runnable with the current strategies.
 
@@ -860,6 +944,19 @@ it is roughly 15 GB/day and about a week.
   trusting the venue's replay, because the replay covers open orders only
   and a fill that happened during the gap is exactly the order that is no
   longer open.
+- The replayer republishes entries with their original ids and payloads
+  rather than fresh ids: a replay of the same recording into the same
+  prefix is then a Redis error rather than a silent duplicate, and the
+  recorder's bucket arithmetic still holds on a recorded backtest. It
+  follows that the merge across streams must never reorder within one.
+- A replayed consumer's progress is its clock, or the replay frontier when
+  a read found nothing, rather than its clock alone: a consumer whose
+  streams are quiet has processed everything published, and following its
+  clock would stall the replay through every gap in its own feeds.
+- The simulated broker follows the strategies rather than the strategies
+  following the broker: causality in a backtest is "no market event is
+  processed by the venue side before the strategy has reacted to it", and
+  only the strategy's progress says when that is.
 - Consumers resolve the tail of a stream once and then advance through
   concrete entry ids, rather than passing `$` on every `XREAD`. `$` is
   re-resolved per call, so an entry published while a consumer sits between
@@ -872,3 +969,12 @@ it is roughly 15 GB/day and about a week.
   once intents are durable and replayable.
 - Whether balances should also be published as deltas for strategies that
   care about inventory changes.
+- How generous the simulated broker's queue model is. It has no live fill
+  to compare against; the first ones will say whether "behind the size
+  shown, consumed by trades at the price" over- or under-fills.
+- Whether the hedge venue's round trip should be measured deliberately,
+  with a few small placements, rather than waiting for the first hedge.
+  Every cross-venue backtest until then rests on an assumed number.
+- Whether the backtest should be driven by one orchestrating process
+  rather than four commands and a runbook, once it has been run by hand a
+  few times and the useful knobs are known.
