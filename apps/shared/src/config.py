@@ -127,6 +127,49 @@ class OmsConfig(msgspec.Struct, frozen=True):
     max_intent_age_s: float = 5.0
 
 
+class FeeConfig(msgspec.Struct, frozen=True):
+    """
+    Trading fees of one venue, as fractions of the traded notional.
+
+    The simulated broker charges the fee in the asset received: quote on a
+    sell, base on a buy, which is how the venues traded so far bill a spot
+    fill. A venue that bills differently needs a field here, not a guess.
+
+    Attributes
+    ----------
+    maker : float
+        Fee on a fill of a resting order.
+    taker : float
+        Fee on a fill that crossed the book.
+    """
+
+    maker: float = 0.0
+    taker: float = 0.0
+
+
+class BacktestConfig(msgspec.Struct, frozen=True):
+    """
+    Settings for the simulated broker.
+
+    Attributes
+    ----------
+    fees : dict[str, FeeConfig]
+        Fees per venue id. A venue without an entry trades free, and the
+        broker says so at startup.
+    history_s : float
+        Recorded seconds of books and trades the broker keeps per feed, so
+        an order can be matched against the market as it stood when the
+        order reached the venue rather than when the broker heard of it.
+    idle_s : float
+        Wall seconds without a new intent, once the replay is done and every
+        followed strategy has finished, before the broker winds down.
+    """
+
+    fees: dict[str, FeeConfig] = {}
+    history_s: float = 60.0
+    idle_s: float = 3.0
+
+
 class VenueConfig(msgspec.Struct, frozen=True):
     """
     A trading venue.
@@ -261,6 +304,8 @@ class AppConfig(msgspec.Struct, frozen=True):
         Stream recorder settings.
     oms : OmsConfig
         Order manager settings.
+    backtest : BacktestConfig
+        Simulated broker settings.
     """
 
     redis: RedisConfig
@@ -270,6 +315,7 @@ class AppConfig(msgspec.Struct, frozen=True):
     refresh_speed: float | None = None
     recorder: RecorderConfig = RecorderConfig()
     oms: OmsConfig = OmsConfig()
+    backtest: BacktestConfig = BacktestConfig()
 
     @property
     def venue_ids(self) -> set[str]:
@@ -493,6 +539,11 @@ def _validate(config: AppConfig) -> None:
         undeclared venues or unknown feed names.
     """
     venue_ids = config.venue_ids
+    unknown_fee_venues = set(config.backtest.fees) - venue_ids
+    if unknown_fee_venues:
+        raise ConfigError(
+            f"backtest.fees names undeclared venues {sorted(unknown_fee_venues)}"
+        )
     for production in (True, False):
         seen: set[str] = set()
         for strategy in config.active_strategies(production):
@@ -543,6 +594,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
         market_data = msgspec.convert(raw.get("market_data", {}), MarketDataConfig)
         recorder = msgspec.convert(raw.get("recorder", {}), RecorderConfig)
         oms = msgspec.convert(raw.get("oms", {}), OmsConfig)
+        backtest = msgspec.convert(raw.get("backtest", {}), BacktestConfig)
         venues = msgspec.convert(raw.get("venues", []), tuple[VenueConfig, ...])
     except msgspec.ValidationError as e:
         raise ConfigError(str(e)) from e
@@ -562,6 +614,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
         refresh_speed=refresh_speed,
         recorder=recorder,
         oms=oms,
+        backtest=backtest,
     )
     _validate(config)
     return config

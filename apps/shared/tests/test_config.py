@@ -270,3 +270,28 @@ def test_oms_settings_are_overridable():
     assert config.oms.max_intent_age_s == 0.5
     assert config.oms.batch == 5
     assert config.oms.block_ms == 1000
+
+
+def test_backtest_settings_default_and_override():
+    """Fees are per venue and must name declared venues; the rest has defaults."""
+    config = parse_app_config({"venues": VENUES, "strategies": [new_strategy()]})
+    assert config.backtest.fees == {}
+    assert config.backtest.history_s == 60.0
+    config = parse_app_config(
+        {
+            "venues": VENUES,
+            "strategies": [new_strategy()],
+            "backtest": {"fees": {"gate": {"maker": 0.0, "taker": 0.001}}, "idle_s": 1},
+        }
+    )
+    assert config.backtest.fees["gate"].taker == 0.001
+    assert config.backtest.fees["gate"].maker == 0.0
+    assert config.backtest.idle_s == 1.0
+    with pytest.raises(ConfigError):
+        parse_app_config(
+            {
+                "venues": VENUES,
+                "strategies": [new_strategy()],
+                "backtest": {"fees": {"nowhere": {"taker": 0.001}}},
+            }
+        )
