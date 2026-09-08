@@ -632,6 +632,54 @@ version, and `XADD` intents. No shared code is required. The Python
    manager 0.3 to 2.2 ms, median 0.6; inside the order manager median 0.6
    ms, up to 961 ms for a replace waiting on its cancel round trip; broker
    round trip median 313 ms, range 290 to 813 ms.
+
+   A fifth run at the new spread went overnight, 17:44 on 2026-09-07 to
+   07:43 on 2026-09-08, just under fourteen hours, with a checkpoint every
+   thirty minutes that compared the order manager's book with the venue's
+   open orders. 2233 quotes, 2159 placements each with a latency record,
+   2158 cancellations, 74 superseded in the queue, no duplicate placement,
+   nothing in limbo, one resting order per slot at all 27 checkpoints and
+   the venue agreeing every time, balances unchanged, no traceback in
+   15,600 log lines. Broker round trip over 2159 placements: median 305
+   ms, range 285 to 1261 ms. Still no fill: the nearest a MEXC trade came
+   to a resting quote was 0.04% below it, and the median gap was 0.40%,
+   because the quote is repriced off the Bitget ask on every update and
+   moves with the market. It fills on an aggressive sweep, and there was
+   none in 500-odd MEXC trades.
+
+   Findings from that run, none of them in the unit suite's reach:
+
+   - **The order watcher is blind while it reconnects.** Venues closed
+     websockets 26 times in fourteen hours, in clusters at roughly ten past
+     the hour, and every loop reconnected. But two quotes placed and
+     cancelled inside the seconds of a MEXC order-feed reconnect at 07:20
+     never appeared on the watcher's side of `oms:events`: the venue's
+     cache replay after resubscription does not include orders already
+     closed. The order manager's book was right, because it works over
+     REST. A fill in that window would have been invisible to the matcher
+     and gone unhedged. The watcher must reconcile over REST after every
+     reconnect, fetching orders and trades since the drop and publishing
+     what the socket missed. Phase 5 item.
+   - **Shutdown kills the recorder and the watcher before the order manager
+     finishes.** The orchestrator signals every process at once. The order
+     manager then spends about 300 ms cancelling what rests, and publishes
+     the `cancelled` event at 07:42:53.030; the recorder had stopped at
+     07:42:52.728 and the last event on disk is from 07:42:44. The final
+     cancellation is on the bus and at the venue but not in the recording,
+     and the watcher's confirmation of it was never produced. The
+     orchestrator should stop strategies first, then the order manager, and
+     only then the feed handlers and the recorder. Phase 5 item.
+   - **A stream's Redis window is short at this quote rate.** `oms:events`
+     holds 10,000 entries, which was about four hours of the overnight run;
+     any analysis over a longer span must read the recorder files, which
+     is what they are for, and the checkpoint tooling was switched to them
+     mid-run once the counts started sliding.
+   - **The cancel-then-requote churn is a quiet-market effect.** In slow
+     hours three quotes in four were cancelled and requoted into an empty
+     slot; in the busy morning session replacements outnumbered cancels.
+     Over the whole run 1173 replacements against 985 cancels on request. A
+     grace period before cancelling on a vanished condition remains the
+     mitigation.
 5. Replayer and simulated broker.
 
 Each phase leaves the system runnable with the current strategies.
@@ -686,6 +734,10 @@ it is roughly 15 GB/day and about a week.
 
 ## 13. Open questions
 
+- How the order watcher reconciles after a websocket reconnect, so a fill
+  during the gap still reaches the matcher (section 11, phase 4 findings).
+- Shutdown ordering in the orchestrator: order manager before recorder
+  and feed handlers, so the last cancellations are recorded and confirmed.
 - Whether the orchestrator should restart crashed processes in production
   once intents are durable and replayable.
 - Whether balances should also be published as deltas for strategies that
