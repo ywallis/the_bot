@@ -46,5 +46,6 @@ jobs:
         run: uv run ty check --exit-zero-on-warning apps/
 
       # fakeredis stands in for Redis, so no service containers are needed.
+      # Coverage source and the fail_under floor live in pyproject.toml.
       - name: Test
-        run: uv run pytest -q
+        run: uv run pytest -q --cov --cov-report=term
