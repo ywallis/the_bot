@@ -682,6 +682,21 @@ version, and `XADD` intents. No shared code is required. The Python
      then the order manager with a twenty second grace, then feed handlers
      and broker, then the recorder, each phase fully down before the next
      is signalled (section 12).
+   A ten minute run on 2026-09-08 checked both fixes live. The phased
+   shutdown stopped the strategies, then the order manager, which cancelled
+   its resting quote in under a second while the broker executed it and the
+   order watcher confirmed it, then the feeds and broker, then the recorder;
+   the recording ends with the `shutting down` cancellation and the
+   watcher's confirmation of it, the two events the overnight run lost. It
+   also exposed a latent bug the old shutdown had hidden: after SIGTERM the
+   broker waited five seconds and then awaited its subscriber and results
+   tasks, which never end, so it hung until killed. It now cancels the
+   subscriber, drains the workers and the results worker through their
+   sentinels, so a request already accepted is still sent and its result
+   still published, closes its clients and exits. No websocket dropped in
+   the ten minutes, so the reconciliation has still only run against the
+   fake client; it announces itself in the log as `Reconciled <venue>`.
+
    - **A stream's Redis window is short at this quote rate.** `oms:events`
      holds 10,000 entries, which was about four hours of the overnight run;
      any analysis over a longer span must read the recorder files, which

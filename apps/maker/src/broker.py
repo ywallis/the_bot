@@ -242,6 +242,48 @@ async def redis_subscriber(
         await pubsub.unsubscribe(BROKER_CHANNEL)
 
 
+# Seconds the broker keeps serving after SIGTERM, so requests the order
+# manager sent on its own way down still reach the venues. The orchestrator
+# stops the order manager first and gives this phase ten seconds.
+SHUTDOWN_GRACE_S = 5.0
+
+
+async def wind_down(
+    subscriber_task: asyncio.Task,
+    results_task: asyncio.Task,
+    worker_tasks: list[asyncio.Task],
+    worker_queues: dict[str, asyncio.Queue],
+    results_queue: asyncio.Queue,
+) -> None:
+    """
+    Stop every task the broker runs, in the order that drains them.
+
+    The subscriber listens on a pubsub forever, so it is cancelled. The
+    workers and the results worker stop on their sentinels, which are queued
+    behind whatever they still hold, so a request already accepted is still
+    sent and its result still published before they exit.
+
+    Parameters
+    ----------
+    subscriber_task : asyncio.Task
+        The pubsub subscriber.
+    results_task : asyncio.Task
+        The results worker.
+    worker_tasks : list[asyncio.Task]
+        One per venue.
+    worker_queues : dict[str, asyncio.Queue]
+        The venue queues, keyed by venue id.
+    results_queue : asyncio.Queue
+        The results queue.
+    """
+    subscriber_task.cancel()
+    for queue in worker_queues.values():
+        await queue.put(None)
+    await asyncio.gather(*worker_tasks, return_exceptions=True)
+    await results_queue.put((None, None, None))
+    await asyncio.gather(subscriber_task, results_task, return_exceptions=True)
+
+
 async def main():
     """Initialize the broker and constantly listen.
 
@@ -264,22 +306,27 @@ async def main():
         redis_subscriber(redis, pubsub, worker_queues)
     )
 
-    for exchange in authenticated_clients.keys():
+    worker_tasks = [
         asyncio.create_task(
             worker(
                 worker_queues[exchange], results_queue, authenticated_clients[exchange]
             )
         )
+        for exchange in authenticated_clients.keys()
+    ]
 
     # Processing SIGTERM
     await shutdown_event.wait()
 
-    logger.info("Shutting down after waiting for 5 seconds")
-    await asyncio.sleep(5)
-
-    await asyncio.gather(subscriber_task, results_task, return_exceptions=False)
-
-    await redis.close()
+    logger.info(f"Shutting down after waiting for {SHUTDOWN_GRACE_S} seconds")
+    await asyncio.sleep(SHUTDOWN_GRACE_S)
+    await wind_down(
+        subscriber_task, results_task, worker_tasks, worker_queues, results_queue
+    )
+    for client in authenticated_clients.values():
+        await client.close()
+    await redis.aclose()
+    logger.info("Broker stopped")
 
 
 if __name__ == "__main__":
