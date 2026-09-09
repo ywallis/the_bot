@@ -693,15 +693,32 @@ fills, one of them at 1.53 times the live size, invented two that never
 happened, missed two that did, and turned a live result of -0.024 quote
 units into +0.051.
 
-Capping every fill at the printed size was the first fix, and it is kept,
-because filling an order whole off a print a tenth its size is indefensible
-and one such fill was worth 339 base units. It is not, however, the binding
-constraint: it moved traded volume from 1.17 to 0.90 of the live figure and
-left the error where it was, +0.082. The sweeps are far larger than the
-quotes — one at 15:52:21.131 printed eighteen trades, the largest 4563
-base units against an order of 334 — so a per-print cap rarely binds, and
-the same sweep carries the live account's own fill in it, liquidity the live
-twin had already taken.
+Capping every fill at the printed size was the first fix, and it is kept.
+The sweeps are far larger than the quotes — one at 15:52:21.131 printed
+eighteen trades, the largest 4563 base units against an order of 334 — so
+the cap rarely binds, and that same sweep carries the live account's own
+fill in it, liquidity the live twin had already taken.
+
+The set was measured again once the wind-down was fixed, because the first
+attempt was confounded: whether the hedge of a late fill landed varied with
+wall clock timing and moved the result by about 0.05, the size of everything
+being compared. Against a wind-down that completes, over the same window,
+scored on the venues' own trade history:
+
+| rule | fills | maker volume | result | error |
+| --- | --- | --- | --- | --- |
+| a through print fills the order whole | 10 | 1163.12 | +0.061 | +0.085 |
+| capped at the print | 20 | 1446.00 | +0.039 | +0.063 |
+| capped, half a print | 22 | 1114.67 | +0.009 | +0.033 |
+| capped, a quarter of a print | 27 | 959.59 | +0.026 | +0.050 |
+
+against live's -0.024 on 1286.25 base units. Capping helps, and by more than
+the noise that had hidden it: 0.085 to 0.063 of imagined edge. Half a print
+is nearest of all, but a quarter is worse than a half, and the per-minute
+fills say why the aggregate improves. A share shrinks the invented fill at
+17:36 from 226 to 86 to 57, and at the same time degrades the one that was
+exact, 19:16 going from 358.85 against live's 358.85 to 311 and then 155. It
+buys an error in one place with an error in another.
 
 What the error is made of is visible in which fills are wrong. The
 simulation invents resting fills at favourable prices and misses the two
@@ -712,19 +729,17 @@ crossed on the maker venue at all and fills a resting quote whenever a sweep
 goes past it. That is adverse selection missing from the model, not a sizing
 error, which is why a sizing fix moved volume without moving the result.
 
-`backtest.participation` is that share, and the same window was replayed at
-1, 0.5 and 0.25 of every print. Taking half brought the result nearest to
-live so far, +0.007 quote units against -0.024, an error of +0.030 where the
-whole print gave +0.082. A quarter was worse than a half, +0.045, and a
-non-monotonic knob on five live fills in one afternoon is a knob fitted to
-noise, so the default stays 1: an upper bound that says what it is beats a
-number that happens to land well on one window. What the share cannot do is
-visible in the per-sweep totals. The fill at 15:52:21 is 334.116 base units
-at every share tried, because the sweep is large enough that a quarter of
-each print still fills the order whole, and the live account got 218.78 of
-it. The share only bites on prints smaller than the order, which is why it
-cut the invented fills and left both the over-fill and the two misses
-exactly where they were.
+`backtest.participation` is that share, and the default stays at 1: a knob
+that is not monotonic across one afternoon's five live fills is fitted to
+noise, and an upper bound that says what it is beats a number that happens
+to land well on one window. What a share cannot do is visible in the
+per-minute fills, which are identical across every configuration where it
+matters. The fill at 15:52:21 is 334.12 base units at every share tried,
+because that sweep is large enough that a quarter of each print still fills
+the order whole, while the live account got 218.78 of it. The live fill at
+19:39 is missed by all four configurations, and so is the second live trade
+of 14:58, the one that crossed the book as a taker. A share only bites on
+prints smaller than the order: it moves no over-fill and recovers no miss.
 
 The one window available out of sample says something narrower and worth
 having. Over 2026-09-08 04:00-06:08 the live strategy placed 467 quotes,

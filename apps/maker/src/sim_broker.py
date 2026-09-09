@@ -34,9 +34,9 @@ What it simulates of the venue, and how honestly:
   price when it arrived, never more than the size shown since. A recorded
   trade at or through its price consumes that queue first and fills it with
   what the print had left, never more: the print is the only evidence of how
-  much actually traded there, and filling the order whole on a print of a
-  tenth its size was worth 0.075 of imagined edge over the eight hours of
-  2026-09-08 12:04-20:00, against a live result of -0.024 (section 9). A
+  much actually traded there, and filling the order whole instead was worth
+  0.022 of imagined edge over the eight hours of 2026-09-08 12:04-20:00,
+  +0.061 against +0.039 where live made -0.024 (section 9). A
   book whose far side crosses its price still fills it whole at its own
   price; that path has no print to bound it and is the next thing to
   calibrate.

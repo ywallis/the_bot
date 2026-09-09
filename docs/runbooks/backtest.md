@@ -139,15 +139,17 @@ venue with its `source`. Three rules for reading it:
 - Every fill is an upper bound. The recording did not react to the
   simulated order: a trade that fills it in the simulation filled someone
   else in reality.
-- How large that bound is, from the one calibration there has been, on the
-  eight hours of 2026-09-08 12:04-20:00 against the venues' own trade
-  history: the simulation matched three of five live fills, invented two,
-  missed two, and reported +0.051 quote units where live made -0.024. At
-  `--participation 0.5` the error fell from +0.075 to +0.030 but a quarter
-  was worse than a half, so treat any share below 1 as a sensitivity, not a
-  calibration. The one out-of-sample window, 2026-09-08 04:00-06:08, filled
-  nothing live and nothing simulated at either share: no false positives,
-  and no way to tell the shares apart. Section 9 of the design has the
+- How large that bound is, from the calibration on the eight hours of
+  2026-09-08 12:04-20:00 against the venues' own trade history, where live
+  made -0.024 on 1286.25 base units: +0.039 as it stands, +0.061 without
+  the print cap, +0.009 at `--participation 0.5` and +0.026 at 0.25. A
+  share below 1 buys an error in one place with an error in another, so
+  treat it as a sensitivity rather than a calibration. Every configuration
+  shows a profit where live took a loss, and every one misses the two live
+  fills that hurt, including the quote that crossed the book as a taker.
+  The one out-of-sample window, 2026-09-08 04:00-06:08, filled nothing live
+  and nothing simulated at any share: no false positives, and no way to
+  tell the shares apart. Section 9 of the design has the
   detail, including a quote-cadence divergence worth knowing about before
   reading any fill count.
 - Check what a range actually holds. Hourly buckets exist for periods in
