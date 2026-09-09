@@ -17,7 +17,11 @@ from fakeredis import aioredis as fakeredis
 from apps.maker.src import replayer as rp
 from apps.maker.src import sim_broker as sb
 from apps.maker.src.latency import LatencyModel
-from apps.maker.src.matcher import consume_order_events, matching_venues
+from apps.maker.src.matcher import (
+    PROGRESS_NAME,
+    consume_order_events,
+    matching_venues,
+)
 from apps.maker.src.message_processor import TERMINAL_STATES
 from apps.maker.src.recorder import format_line
 from apps.shared.src import events
@@ -184,7 +188,7 @@ def recording(root: Path) -> None:
             trade_id="t1",
             side=Side.BUY,
             price=0.40,
-            amount=3.0,
+            amount=10.0,
         )
     ]
     write(root, f"md:book:{A}:{SYMBOL}", "2026-09-06T14", books_a)
@@ -216,7 +220,16 @@ async def test_a_quote_is_filled_hedged_and_the_run_winds_down(tmp_path: Path):
         balances=rp.BALANCES_PRIME,
     )
     broker = sb.SimulatedBroker(
-        redis, cfg, PREFIX, latency, follow=["probe"], block_ms=10
+        redis,
+        cfg,
+        PREFIX,
+        latency,
+        follow=["probe"],
+        block_ms=10,
+        # The fixture's strategy is a production one, whatever TESTING says
+        # in the environment this runs in.
+        production=True,
+        drain=[PROGRESS_NAME],
     )
     runtime = Runtime(
         redis,

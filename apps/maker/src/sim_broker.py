@@ -111,7 +111,7 @@ from apps.shared.src.streams import (
     replay_done_key,
     replay_progress_key,
 )
-from apps.shared.src.utils import production
+from apps.shared.src.utils import production as default_production
 
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
@@ -795,6 +795,7 @@ class SimulatedBroker:
         participation: float | None = None,
         balances: dict[str, dict[str, float]] | None = None,
         drain: Iterable[str] = (),
+        production: bool | None = None,
     ) -> None:
         """
         Initialize the broker.
@@ -824,6 +825,14 @@ class SimulatedBroker:
             Opening balances per venue and asset, merged over
             ``backtest.balances``. A venue named here opens with these and
             ignores the recording's snapshot.
+        production : bool | None
+            Which half of the configuration's strategies to read feeds for;
+            the flag this process was started with when omitted. It is a
+            parameter rather than a read of the environment because the
+            streams a broker subscribes to must follow the configuration it
+            was handed: taking it from ``TESTING`` instead left a broker
+            subscribed to no book at all, rejecting every order for want of
+            one, whenever the two disagreed.
         drain : Iterable[str]
             Consumers that must be past the end of the recording before the
             run closes, the matcher above all: a fill in the last seconds of
@@ -846,6 +855,7 @@ class SimulatedBroker:
         self.latency = latency
         self.follow = list(follow)
         self.drain = list(drain)
+        self.production = default_production if production is None else production
         self.name = name
         self.block_ms = block_ms
         share = (
@@ -896,9 +906,11 @@ class SimulatedBroker:
             stream of every venue, and ``oms:intents``.
         """
         streams: list[str] = []
-        for venue, symbol in sorted(self.config.feed_pairs(BOOK_FEED, production)):
+        for venue, symbol in sorted(self.config.feed_pairs(BOOK_FEED, self.production)):
             streams.append(book_stream(venue, symbol))
-        for venue, symbol in sorted(self.config.feed_pairs(TRADE_FEED, production)):
+        for venue, symbol in sorted(
+            self.config.feed_pairs(TRADE_FEED, self.production)
+        ):
             streams.append(trade_stream(venue, symbol))
         for venue in self.config.venues:
             streams.append(balance_stream(venue.id))
