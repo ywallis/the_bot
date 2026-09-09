@@ -171,8 +171,9 @@ def recording(root: Path) -> None:
     books_a = [book(A, T0 + i * 100 * MS, i + 1, 0.35) for i in range(50)]
     books_b = [book(B, T0 + i * 100 * MS + 30 * MS, i + 1, 0.34) for i in range(50)]
     # The strategy quotes 0.36 off the first book; the order rests from about
-    # T0+0.3s. A print at 0.40 two seconds in takes it. Nothing afterwards
-    # fills the requote, so the wind-down cancels it.
+    # T0+0.3s. A print at 0.40 two seconds in takes it, and carries the whole
+    # quote, since a fill is capped by what printed. Nothing afterwards fills
+    # the requote, so the wind-down cancels it.
     trades_a = [
         TradeEvent(
             ts_recv=T0 + 2 * S + 50 * MS,

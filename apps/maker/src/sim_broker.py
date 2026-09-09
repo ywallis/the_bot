@@ -32,10 +32,14 @@ What it simulates of the venue, and how honestly:
   the report counts it.
 - **A resting order** queues behind the size the recorded book showed at its
   price when it arrived, never more than the size shown since. A recorded
-  trade at its price consumes that queue first and fills it with what is
-  left; a trade through its price fills it whole, since price-time priority
-  means its level was taken; a book whose far side crosses its price fills
-  it whole at its own price.
+  trade at or through its price consumes that queue first and fills it with
+  what the print had left, never more: the print is the only evidence of how
+  much actually traded there, and filling the order whole on a print of a
+  tenth its size was worth 0.075 of imagined edge over the eight hours of
+  2026-09-08 12:04-20:00, against a live result of -0.024 (section 9). A
+  book whose far side crosses its price still fills it whole at its own
+  price; that path has no print to bound it and is the next thing to
+  calibrate.
 - **The recording does not react.** Simulated fills consume no liquidity the
   recorded market had, and the other participants never see the simulated
   order. Every number here is an upper bound on what an order of that size
@@ -1523,21 +1527,24 @@ class SimulatedBroker:
                 else price < intent.price
             )
             if through:
-                await self.fill(
-                    order, intent.price, order.remaining, Liquidity.MAKER, trade.ts_recv
-                )
+                # Its level was taken, so nothing rests ahead of it any more,
+                # but it can still only have had what the print printed.
+                order.queue_ahead = ZERO
+                left = amount
             elif price == intent.price:
                 consumed = min(order.queue_ahead, amount)
                 order.queue_ahead -= consumed
                 left = amount - consumed
-                if left > ZERO:
-                    await self.fill(
-                        order,
-                        intent.price,
-                        min(order.remaining, left),
-                        Liquidity.MAKER,
-                        trade.ts_recv,
-                    )
+            else:
+                continue
+            if left > ZERO:
+                await self.fill(
+                    order,
+                    intent.price,
+                    min(order.remaining, left),
+                    Liquidity.MAKER,
+                    trade.ts_recv,
+                )
 
     def resting_orders(self, venue: str, symbol: str) -> list[SimOrder]:
         """

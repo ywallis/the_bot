@@ -326,8 +326,8 @@ async def test_a_resting_sell_is_accepted_opened_and_held():
 
 
 @pytest.mark.asyncio
-async def test_a_trade_through_the_price_fills_the_resting_order_whole():
-    """A print above a resting sell means its level was taken; it fills at its own price."""
+async def test_a_trade_through_the_price_fills_no_more_than_it_printed():
+    """A print above a resting sell reaches it, but fills only what the print held."""
     h = Harness()
     await h.start()
     await h.publish(book(A, T0, [[0.34, 100]], [[0.35, 50]]))
@@ -338,22 +338,22 @@ async def test_a_trade_through_the_price_fills_the_resting_order_whole():
     await h.publish(trade(A, T0 + 2 * S, price=0.37, amount=1.0))
     await h.advance(T0 + 3 * S)
     states = await h.states()
-    assert [s for _, s, _ in states] == ["accepted", "open", "filled"]
+    assert [s for _, s, _ in states] == ["accepted", "open", "partially_filled"]
     assert states[-1][2] == T0 + 2 * S + RTT_A // 2  # reported half a round trip later
-    filled = (await h.events())[-1]
-    assert filled.filled == 10 and filled.remaining == 0
-    assert filled.avg_price == Decimal("0.36")
-    assert filled.last_fill is not None
-    assert filled.last_fill.liquidity is Liquidity.MAKER
-    assert filled.last_fill.fee == 0  # maker fee on A is zero
-    assert filled.last_fill.fee_currency == "QUOTE"
-    assert (A, "i1") not in h.broker.orders and "s_es" not in h.broker.resting
+    event = (await h.events())[-1]
+    assert event.filled == 1 and event.remaining == 9  # the print, not the order
+    assert event.avg_price == Decimal("0.36")  # still at its own price
+    assert event.last_fill is not None
+    assert event.last_fill.amount == 1
+    assert event.last_fill.liquidity is Liquidity.MAKER
+    assert event.last_fill.fee == 0  # maker fee on A is zero
+    assert event.last_fill.fee_currency == "QUOTE"
+    assert (A, "i1") in h.broker.orders and "s_es" in h.broker.resting  # still resting
     last = (await h.balances(A))[-1]
-    assert last.balances["BASE"].total == pytest.approx(990.0)
-    assert last.balances["BASE"].used == 0.0
-    assert last.balances["QUOTE"].total == pytest.approx(500.0 + 3.6)
+    assert last.balances["BASE"].total == pytest.approx(999.0)
+    assert last.balances["QUOTE"].total == pytest.approx(500.0 + 0.36)
     assert h.broker.report.fills == 1
-    assert h.broker.report.volume[A] == 10
+    assert h.broker.report.volume[A] == 1
 
 
 @pytest.mark.asyncio
@@ -625,7 +625,8 @@ async def test_a_cancel_that_arrives_after_the_fill_changes_nothing():
     # The cancel is created at T0+1s and reaches the venue at +150.6ms;
     # a trade fills the order at T0+1s+100ms, before that.
     await h.publish(cancel(T0 + S, "i1"))
-    await h.publish(trade(A, T0 + S + 100 * MS, price=0.40, amount=1.0))
+    # The print carries the whole order: a fill is capped by what printed.
+    await h.publish(trade(A, T0 + S + 100 * MS, price=0.40, amount=10.0))
     await h.advance(T0 + 3 * S)
     states = [s for _, s, _ in await h.states()]
     assert states == ["accepted", "open", "filled"]

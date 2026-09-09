@@ -620,9 +620,11 @@ Backtesting is replay plus simulation, reusing the live components:
   joins the queue behind the size the recorded book showed at its price,
   never more than the size shown since; a recorded trade at its price
   consumes that queue first and fills it with what is left, a trade
-  through its price fills it whole, since price-time priority means its
-  level was taken, and a book whose far side crosses its price fills it
-  whole at its own price. Fees come from `backtest.fees` per venue and are
+  through its price clears the queue, since price-time priority means its
+  level was taken, and in both cases the fill is capped by what the print
+  printed, because a print is the only evidence of how much traded there.
+  A book whose far side crosses its price still fills it whole at its own
+  price; that path has no print to bound it. Fees come from `backtest.fees` per venue and are
   charged in the asset received; a venue without an entry trades free and
   the broker says so at startup. Balances are adopted from the first
   recorded snapshot per venue and then owned by the simulation, holds
@@ -640,9 +642,11 @@ Backtesting is replay plus simulation, reusing the live components:
   start, unless a round trip is assumed for it with `--assume-rtt-ms
   VENUE=MS`; the assumption is labelled as such in the report, and a
   cross-venue conclusion that rests on it is worth less than one resting
-  on data. Today that is the hedge venue's situation: over two thousand
-  placements measured on the maker venue, none on the other, because
-  nothing has filled live yet.
+  on data. The hedge venue is the thin case: four thousand placements
+  measured on the maker venue against eight on the other, because a hedge
+  only goes out on a fill. Eight samples carry a median and a maximum that
+  are the same number; a conclusion drawn across the two venues should say
+  so.
 - The strategy runs unchanged, pointed at the `bt:` prefix, with the clock
   driven by replayed timestamps
   (`uv run -m apps.maker.src.launcher <index> --replay <run_id>`), and so
@@ -655,10 +659,37 @@ than it holds: the recording does not react. A simulated fill consumes no
 liquidity the recorded market had, the other participants never saw the
 simulated order, and a recorded trade that fills it would in reality have
 filled someone else too. Every fill count is an upper bound for an order of
-that size. The queue model has never been calibrated against a live fill,
-because there has not been one; the first live fills are what will say
-whether "the size shown at the level, consumed by trades at the price" is
-about right or generous. `docs/runbooks/backtest.md` is how to run one.
+that size.
+
+The first calibration, on 2026-09-09, says how large that bound is. The
+eight hours of 2026-09-08 12:04-20:00 were replayed against the venues' own
+trade history for the same window: thirteen live trades, five resting fills
+on the maker venue and eight taker hedges. The fees check out to the basis
+point. The fills do not. The simulation matched three of the five live
+fills, one of them at 1.53 times the live size, invented two that never
+happened, missed two that did, and turned a live result of -0.024 quote
+units into +0.051.
+
+Capping every fill at the printed size was the first fix, and it is kept,
+because filling an order whole off a print a tenth its size is indefensible
+and one such fill was worth 339 base units. It is not, however, the binding
+constraint: it moved traded volume from 1.17 to 0.90 of the live figure and
+left the error where it was, +0.082. The sweeps are far larger than the
+quotes — one at 15:52:21.131 printed eighteen trades, the largest 4563
+base units against an order of 334 — so a per-print cap rarely binds, and
+the same sweep carries the live account's own fill in it, liquidity the live
+twin had already taken.
+
+What the error is made of is visible in which fills are wrong. The
+simulation invents resting fills at favourable prices and misses the two
+that hurt: the quote that filled as a taker because the live strategy lifted
+the book, and one more sell. The live afternoon lost money by crossing the
+spread once and paying ten basis points on every hedge; the simulation never
+crossed on the maker venue at all and fills a resting quote whenever a sweep
+goes past it. That is adverse selection missing from the model, not a sizing
+error, which is why a sizing fix moved volume without moving the result. The
+next lever is what share of a sweep an order of ours would really have got.
+`docs/runbooks/backtest.md` is how to run one.
 
 ## 10. Language interoperability
 
