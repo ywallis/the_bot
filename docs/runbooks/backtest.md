@@ -38,6 +38,21 @@ exclusive. The replayer reads one hourly bucket either side of the range and
 publishes, first, the last book and balance before the start, so a strategy
 started mid-day has a balance to fund its quotes.
 
+Start the range just after a full balance snapshot, or the strategy quotes
+one side all run. A venue that publishes its balance as a delta records only
+the currencies that changed, and priming replays the last record before the
+start whatever it holds: pick a round hour and the strategy is liable to be
+handed base with no quote currency, judge every buy insolvent, and sell for
+eight hours. The full snapshots are the `seq` 1 records, one per reconnect:
+
+```bash
+grep -h '"seq":1,' <root>/acct/balance/*/*.jsonl | head
+```
+
+The first run of 2026-09-08 12:00 did exactly this and quoted 1153 sells
+against 0 buys; from 12:04:45.200, a fifth of a second after that hour's
+snapshot, it quoted both sides.
+
 ## 2. Start the consumers first
 
 Each consumer writes its progress under the prefix; the replayer waits for
