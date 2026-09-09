@@ -40,12 +40,30 @@ logger = logging.getLogger(__name__)
 # Tags carrying the two halves of our order id convention, so a consumer can
 # route on the strategy without re-parsing the client order id.
 STRATEGY_TAG = "strategy_id"
+ORDER_TAG = "order_id"
 
 # How far before the last websocket delivery a reconciliation fetches from.
 # Venue timestamps and ours disagree by a little, and an update can be in
 # flight when the socket drops; overlap is harmless, a gap is not.
 RECONCILE_MARGIN_MS = 5_000
-ORDER_TAG = "order_id"
+
+# How often the venue is asked over REST regardless of what the socket is
+# doing. Live, a terminal fill update went unreported for 23 minutes with no
+# error raised and the subscription still up, so waiting for a drop is not
+# enough. The schedule is unconditional rather than "only while the socket
+# is quiet", because a socket can keep delivering other orders' updates
+# while silently dropping one, and then no measure of silence ever fires.
+# This is what bounds how long a fill can sit unseen, and an unseen fill is
+# an unhedged one. Costs one fetch per interval per venue and symbol, which
+# publishes nothing when nothing was missed.
+RECONCILE_INTERVAL_S = 30.0
+
+# How far back a scheduled reconciliation looks. The error path knows when
+# the socket died and fetches from there; a scheduled one has no such
+# anchor, since a silently dropped update leaves no trace of its own age.
+# This is therefore the oldest a missed update can be and still be
+# recovered, and it wants to be comfortably larger than the interval.
+RECONCILE_LOOKBACK_MS = 600_000
 
 # Orders remembered per loop, for deduplication and fill deltas. Large enough
 # to cover any order still open, small enough to stay bounded in a process
@@ -400,11 +418,19 @@ async def watch_orders(
     """
     Watch our orders on one venue and symbol and publish every update.
 
-    After every feed error that the loop survives, the venue is asked over
-    REST for what changed while the socket was down (``reconcile``). Live,
-    venues dropped the socket about twice an hour, and an order placed and
-    finished inside one of those gaps is otherwise never reported. A fill
-    among them would go unhedged.
+    The venue is asked over REST for what the socket has not reported
+    (``reconcile``) on two triggers. After every feed error the loop
+    survives: venues dropped the socket about twice an hour, and an order
+    placed and finished inside one of those gaps is otherwise never
+    reported. And every ``RECONCILE_INTERVAL_S`` unconditionally, because a
+    subscription can stop delivering an order's updates without ever
+    raising, which no error path can see.
+
+    The pending watch is deliberately left running across a scheduled
+    reconciliation rather than cancelled and restarted. CCXT resolves a
+    watch from a cache of what it has received; cancelling the await can
+    drop an update that is already buffered, which is precisely the
+    failure this reconciliation exists to catch.
 
     Parameters
     ----------
@@ -424,27 +450,64 @@ async def watch_orders(
     # from now on. Anything the venue replays anyway is dropped by `seen`.
     since = int(time.time() * 1000)
     last_delivery_ms = since
-    while True:
-        try:
-            orders: list[dict[str, Any]] = await client.watch_orders(
-                ticker, since=since
-            )
-            ts_recv = now_ns()
-            last_delivery_ms = ts_recv // 1_000_000
-            await publish_updates(
-                client, orders, ts_recv, redis, publisher, seen, filled_so_far
-            )
-        except BaseException as e:  # noqa: B036, narrowed in handle_feed_error
-            await handle_feed_error(e, client, "watch_orders", ticker)
-            await reconcile(
-                client,
-                ticker,
-                last_delivery_ms - RECONCILE_MARGIN_MS,
-                redis,
-                publisher,
-                seen,
-                filled_so_far,
-            )
+    due_at = time.monotonic() + RECONCILE_INTERVAL_S
+    watching: asyncio.Task[list[dict[str, Any]]] | None = None
+    try:
+        while True:
+            try:
+                if watching is None:
+                    watching = asyncio.ensure_future(
+                        client.watch_orders(ticker, since=since)
+                    )
+                # Checked before racing the socket, so a venue delivering
+                # faster than the interval cannot starve the schedule.
+                if time.monotonic() >= due_at:
+                    await reconcile(
+                        client,
+                        ticker,
+                        int(time.time() * 1000) - RECONCILE_LOOKBACK_MS,
+                        redis,
+                        publisher,
+                        seen,
+                        filled_so_far,
+                    )
+                    due_at = time.monotonic() + RECONCILE_INTERVAL_S
+                    continue
+                timer = asyncio.ensure_future(
+                    asyncio.sleep(max(0.0, due_at - time.monotonic()))
+                )
+                try:
+                    done, _pending = await asyncio.wait(
+                        {watching, timer}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                finally:
+                    timer.cancel()
+                if watching not in done:
+                    continue
+                orders: list[dict[str, Any]] = watching.result()
+                watching = None
+                ts_recv = now_ns()
+                last_delivery_ms = ts_recv // 1_000_000
+                await publish_updates(
+                    client, orders, ts_recv, redis, publisher, seen, filled_so_far
+                )
+            except BaseException as e:  # noqa: B036, narrowed in handle_feed_error
+                if watching is not None and not watching.done():
+                    watching.cancel()
+                watching = None
+                await handle_feed_error(e, client, "watch_orders", ticker)
+                await reconcile(
+                    client,
+                    ticker,
+                    last_delivery_ms - RECONCILE_MARGIN_MS,
+                    redis,
+                    publisher,
+                    seen,
+                    filled_so_far,
+                )
+    finally:
+        if watching is not None:
+            watching.cancel()
 
 
 def build_tasks(

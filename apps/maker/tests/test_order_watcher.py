@@ -1,5 +1,6 @@
 """Tests for the order feed handler."""
 
+import asyncio
 import time
 from decimal import Decimal
 from typing import Any
@@ -8,9 +9,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fakeredis import aioredis as fakeredis
 
-from apps.maker.src import watcher
+from apps.maker.src import order_watcher, watcher
 from apps.maker.src.order_watcher import (
     ORDER_TAG,
+    RECONCILE_LOOKBACK_MS,
     RECONCILE_MARGIN_MS,
     STRATEGY_TAG,
     BoundedDict,
@@ -497,3 +499,189 @@ async def test_fetch_orders_since_falls_back_to_closed_and_cancelled():
         "fetch_closed_orders",
         "fetch_canceled_orders",
     ]
+
+
+# Scheduled reconciliation ----------------------------------------------------
+
+# Short enough that a test reaches the schedule quickly, long enough that the
+# loop still races the socket first rather than only ever reconciling.
+TEST_INTERVAL_S = 0.01
+
+# How long a blocking fake socket waits before delivering anyway. A schedule
+# that stops firing leaves these tests waiting on a socket that never
+# resolves, so the fake unblocks itself and the assertions fail rather than
+# the suite hanging.
+GATE_TIMEOUT_S = 2.0
+
+
+class QuietClient(FakeClient):
+    """
+    A client whose watch never resolves until REST has been asked.
+
+    Models the live failure the schedule exists for: the subscription is up
+    and raises nothing, but delivers no update. The watch resolves only once
+    ``release_after`` REST calls have been made, which both lets a test see
+    what the schedule published while the socket was silent and makes
+    termination depend on call counts rather than on timing.
+    """
+
+    def __init__(
+        self,
+        venue: str,
+        results: list,
+        rest_results: list | None = None,
+        has: dict[str, bool] | None = None,
+        release_after: int = 1,
+    ):
+        """Store the script and how many REST calls unblock the watch."""
+        super().__init__(venue, results, rest_results, has)
+        self._gate = asyncio.Event()
+        self._release_after = release_after
+        self.watch_cancelled = False
+
+    async def watch_orders(self, symbol: str, since: int | None = None):
+        """Block until the gate opens, then return the next scripted batch."""
+        self.since = since
+        if not self._gate.is_set():
+            try:
+                await asyncio.wait_for(self._gate.wait(), timeout=GATE_TIMEOUT_S)
+            except TimeoutError:
+                pass
+            except asyncio.CancelledError:
+                self.watch_cancelled = True
+                raise
+        return await self._next()
+
+    async def _rest(self, name: str, since: Any):
+        result = await super()._rest(name, since)
+        if len(self.rest_calls) >= self._release_after:
+            self._gate.set()
+        return result
+
+
+class BusyClient(FakeClient):
+    """
+    A client that keeps delivering, slowly enough for the schedule to come due.
+
+    A socket can deliver one order's updates while silently dropping
+    another's, so no measure of silence would ever fire. This models that:
+    the socket is never quiet.
+    """
+
+    async def watch_orders(self, symbol: str, since: int | None = None):
+        """Return the next scripted batch after a short delay."""
+        self.since = since
+        await asyncio.sleep(0.002)
+        return await self._next()
+
+
+@pytest.mark.asyncio
+async def test_a_quiet_socket_publishes_the_fill_it_never_delivered(monkeypatch):
+    """A fill the socket never reports is found by the scheduled reconciliation."""
+    monkeypatch.setattr(order_watcher, "RECONCILE_INTERVAL_S", TEST_INTERVAL_S)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    never_delivered = ccxt_order(
+        clientOrderId="t-250906120001000000_lmb_es",
+        id="venue-100",
+        status="closed",
+        filled=40,
+        remaining=0,
+        average=0.35,
+    )
+    client = QuietClient("mexc", [[ccxt_order()]], rest_results=[[never_delivered]])
+
+    with pytest.raises(StopWatching):
+        await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
+
+    events = await events_on(redis)
+    assert [(e.intent_id[-6:], e.state) for e in events] == [
+        ("lmb_es", OrderState.FILLED),
+        ("lmb_eb", OrderState.OPEN),
+    ]
+    assert events[0].filled == Decimal(40)
+    assert [name for name, _ in client.rest_calls] == ["fetch_orders"]
+
+
+@pytest.mark.asyncio
+async def test_a_quiet_socket_is_not_cancelled_to_reconcile(monkeypatch):
+    """The pending watch survives a reconciliation, so no buffered update is lost."""
+    monkeypatch.setattr(order_watcher, "RECONCILE_INTERVAL_S", TEST_INTERVAL_S)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    client = QuietClient(
+        "mexc",
+        [[ccxt_order(status="closed", filled=40, remaining=0, average=0.35)]],
+        rest_results=[[], []],
+        release_after=3,
+    )
+
+    with pytest.raises(StopWatching):
+        await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
+
+    assert client.watch_cancelled is False
+    assert len(client.rest_calls) == 3
+    # The batch the socket had buffered is still delivered and published.
+    assert [e.state for e in await events_on(redis)] == [OrderState.FILLED]
+
+
+@pytest.mark.asyncio
+async def test_repeated_reconciliation_publishes_a_missed_fill_once(monkeypatch):
+    """The same unreported order returned by every fetch is published once."""
+    monkeypatch.setattr(order_watcher, "RECONCILE_INTERVAL_S", TEST_INTERVAL_S)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    missed = ccxt_order(status="closed", filled=40, remaining=0, average=0.35)
+    client = QuietClient(
+        "mexc", [[]], rest_results=[[missed], [missed], [missed]], release_after=3
+    )
+
+    with pytest.raises(StopWatching):
+        await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
+
+    assert [e.state for e in await events_on(redis)] == [OrderState.FILLED]
+
+
+@pytest.mark.asyncio
+async def test_a_busy_socket_still_reconciles_on_schedule(monkeypatch):
+    """A socket dropping one order's updates while delivering others is covered."""
+    monkeypatch.setattr(order_watcher, "RECONCILE_INTERVAL_S", TEST_INTERVAL_S)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    client = BusyClient("mexc", [[ccxt_order()]] * 40)
+
+    with pytest.raises(StopWatching):
+        await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
+
+    # The socket was never quiet for an interval, yet REST was still asked.
+    # How many times depends on wall clock, so only the endpoint is asserted.
+    assert client.rest_calls
+    assert {name for name, _ in client.rest_calls} == {"fetch_orders"}
+
+
+@pytest.mark.asyncio
+async def test_a_scheduled_reconciliation_looks_back_past_the_last_delivery(
+    monkeypatch,
+):
+    """The scheduled window is a lookback, not the error path's delivery margin."""
+    monkeypatch.setattr(order_watcher, "RECONCILE_INTERVAL_S", TEST_INTERVAL_S)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    client = QuietClient("mexc", [[ccxt_order()]], rest_results=[[]])
+    before = int(time.time() * 1000)
+
+    with pytest.raises(StopWatching):
+        await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
+
+    ((_name, since),) = client.rest_calls
+    assert since <= before - RECONCILE_LOOKBACK_MS + 5000
+    assert since >= before - RECONCILE_LOOKBACK_MS - 2000
+
+
+@pytest.mark.asyncio
+async def test_the_schedule_does_not_fire_before_it_is_due(monkeypatch):
+    """A socket delivering inside one interval leaves the venue unasked."""
+    monkeypatch.setattr(order_watcher, "RECONCILE_INTERVAL_S", 30)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    client = FakeClient("mexc", [[ccxt_order()], [ccxt_order(status="closed")]])
+
+    with pytest.raises(StopWatching):
+        await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
+
+    assert client.rest_calls == []
+
