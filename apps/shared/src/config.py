@@ -163,6 +163,15 @@ class BacktestConfig(msgspec.Struct, frozen=True):
     idle_s : float
         Wall seconds without a new intent, once the replay is done and every
         followed strategy has finished, before the broker winds down.
+    balances : dict[str, dict[str, float]]
+        Opening balances to start a run with, per venue and asset, instead of
+        the ones the recording carries. A venue named here ignores the
+        recorded snapshot entirely, which is what makes a range startable
+        anywhere: a recorded snapshot mid-run may be a delta carrying one
+        currency, and its holds belong to the live run's orders. A venue not
+        named still opens from the recording. Naming balances makes a run a
+        hypothetical rather than a reconstruction, so a comparison against
+        what the live account did wants the recorded figures.
     participation : float
         Share of a recorded trade a resting order of ours may take, once the
         queue ahead of it is gone. One means all of it, which is what the
@@ -176,6 +185,7 @@ class BacktestConfig(msgspec.Struct, frozen=True):
     history_s: float = 60.0
     idle_s: float = 3.0
     participation: float = 1.0
+    balances: dict[str, dict[str, float]] = {}
 
 
 class VenueConfig(msgspec.Struct, frozen=True):
@@ -557,6 +567,18 @@ def _validate(config: AppConfig) -> None:
             "backtest.participation is a share of a print, in (0, 1]: "
             f"{config.backtest.participation}"
         )
+    unknown_balance_venues = set(config.backtest.balances) - venue_ids
+    if unknown_balance_venues:
+        raise ConfigError(
+            "backtest.balances names undeclared venues "
+            f"{sorted(unknown_balance_venues)}"
+        )
+    for venue, assets in config.backtest.balances.items():
+        for asset, amount in assets.items():
+            if amount < 0:
+                raise ConfigError(
+                    f"backtest.balances holds {amount} of {asset} on {venue}"
+                )
     for production in (True, False):
         seen: set[str] = set()
         for strategy in config.active_strategies(production):

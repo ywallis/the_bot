@@ -38,8 +38,18 @@ exclusive. The replayer reads one hourly bucket either side of the range and
 publishes, first, the last book and balance before the start, so a strategy
 started mid-day has a balance to fund its quotes.
 
-Start the range just after a full balance snapshot, or the strategy quotes
-one side all run. A venue that publishes its balance as a delta records only
+Either give the opening balances or start the range just after a full
+balance snapshot. `--balance VENUE:ASSET=AMOUNT`, repeatable, or
+`[backtest.balances]` in the config, opens a named venue with what you say
+and ignores the recording's snapshot, which makes a range startable
+anywhere and makes two runs over different windows comparable. Pair it with
+`--balances none` on the replayer so nothing recorded reaches the strategy
+first. It does make the run a hypothetical rather than a reconstruction: a
+comparison against what the live account actually did wants the recorded
+figures, holds excluded, which is what a run without the flag now does.
+
+If you do open from the recording, start just after a full balance
+snapshot, or the strategy quotes one side all run. A venue that publishes its balance as a delta records only
 the currencies that changed, and priming replays the last record before the
 start whatever it holds: pick a round hour and the strategy is liable to be
 handed base with no quote currency, judge every buy insolvent, and sell for

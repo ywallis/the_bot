@@ -304,6 +304,23 @@ def test_backtest_settings_default_and_override():
         }
     )
     assert config.backtest.participation == 0.25
+    config = parse_app_config(
+        {
+            "venues": VENUES,
+            "strategies": [new_strategy()],
+            "backtest": {"balances": {"gate": {"BASE": 250.0}}},
+        }
+    )
+    assert config.backtest.balances == {"gate": {"BASE": 250.0}}
+    for bad in ({"nowhere": {"BASE": 1.0}}, {"gate": {"BASE": -1.0}}):
+        with pytest.raises(ConfigError):
+            parse_app_config(
+                {
+                    "venues": VENUES,
+                    "strategies": [new_strategy()],
+                    "backtest": {"balances": bad},
+                }
+            )
     for share in (0.0, -0.1, 1.5):  # a share of a print, not a multiple of it
         with pytest.raises(ConfigError):
             parse_app_config(

@@ -629,7 +629,16 @@ Backtesting is replay plus simulation, reusing the live components:
   the broker says so at startup. Balances are adopted from the first
   recorded snapshot per venue and then owned by the simulation, the
   recorded holds dropped: a hold in the recording belongs to the live run's
-  resting order, which this run neither has nor will ever cancel. The report counts intents, placements, rejections,
+  resting order, which this run neither has nor will ever cancel. A venue
+  named in `backtest.balances`, or on the command line, opens with what it
+  says instead and never reads the recording's snapshot at all; the broker
+  publishes that opening as a `BalanceEvent` at the first event of the run,
+  so the strategy learns of it the way it learns of every other balance.
+  That is what makes a range startable anywhere, since a recorded snapshot
+  mid-run can be a delta carrying one currency, and it is what makes runs
+  over different windows comparable, since they can be given the same
+  capital. It also makes the run a hypothetical: a comparison against the
+  live account's own fills wants the recorded figures. The report counts intents, placements, rejections,
   cancellations, fills, volume and fees, and carries the opening and
   closing totals and the latency model's summary.
 - **The latency model** (`apps/maker/src/latency.py`) is the part that

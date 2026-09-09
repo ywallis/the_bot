@@ -196,6 +196,7 @@ class Harness:
         follow: list[str] | None = None,
         decode: bool = False,
         participation: float | None = None,
+        balances: dict[str, dict[str, float]] | None = None,
     ) -> None:
         """Build the broker over a fake Redis."""
         self.redis = fakeredis.FakeRedis(decode_responses=decode)
@@ -208,6 +209,7 @@ class Harness:
             follow=follow or [],
             block_ms=1,
             participation=participation,
+            balances=balances,
         )
 
     async def start(self) -> None:
@@ -387,6 +389,28 @@ async def test_the_opening_balance_drops_the_recorded_holds():
     assert free == 1000 and used == 0  # not 634 free and 366 held
     # The report's opening is the total either way, so runs stay comparable.
     assert h.broker.balances.opening[A]["BASE"] == 1000
+
+
+@pytest.mark.asyncio
+async def test_given_balances_open_the_run_and_the_recording_is_ignored():
+    """A range is startable anywhere when the opening balances are given."""
+    h = Harness(balances={A: {"BASE": 250.0, "QUOTE": 40.0}})
+    await h.broker.reader.start()
+    # The recording's snapshot is richer and holds something; it loses.
+    await h.publish(balance(A, T0 - S, base=9999.0), balance(B, T0 - S))
+    await h.publish(book(A, T0, [[0.34, 100]], [[0.35, 50]]))
+    await h.broker.step()
+    free, used = h.broker.balances.venues[A]["BASE"]
+    assert free == 250 and used == 0
+    assert h.broker.balances.opening[A] == {"BASE": 250, "QUOTE": 40}
+    # The strategy learns of it: an opening snapshot goes onto the stream,
+    # stamped with the first event the broker processed rather than with an
+    # invented time, here the recorded snapshot it is about to discard.
+    opening = (await h.balances(A))[-1]
+    assert opening.balances["BASE"].free == 250.0
+    assert opening.ts_recv == T0 - S
+    # A venue that was not named still opens from the recording.
+    assert h.broker.balances.opening[B]["BASE"] == 1000
 
 
 @pytest.mark.asyncio

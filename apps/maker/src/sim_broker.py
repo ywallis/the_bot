@@ -469,6 +469,24 @@ class Balances:
         self.adopted: set[str] = set()
         self.opening: dict[str, dict[str, Decimal]] = {}
 
+    def seed(self, venue: str, assets: dict[str, Decimal]) -> None:
+        """
+        Open a venue with given balances instead of the recording's.
+
+        The venue counts as adopted from here on, so a recorded snapshot
+        that arrives later is ignored like any other.
+
+        Parameters
+        ----------
+        venue : str
+            Venue id.
+        assets : dict[str, Decimal]
+            Amount per asset, all of it free.
+        """
+        self.adopted.add(venue)
+        self.venues[venue] = {asset: [amount, ZERO] for asset, amount in assets.items()}
+        self.opening[venue] = dict(assets)
+
     def adopt(self, event: BalanceEvent) -> bool:
         """
         Take a venue's opening balance from a recorded snapshot, once.
@@ -761,6 +779,7 @@ class SimulatedBroker:
         batch: int = 500,
         block_ms: int = 100,
         participation: float | None = None,
+        balances: dict[str, dict[str, float]] | None = None,
     ) -> None:
         """
         Initialize the broker.
@@ -786,6 +805,10 @@ class SimulatedBroker:
         participation : float | None
             Share of a print a resting order may take; the configured
             ``backtest.participation`` when omitted.
+        balances : dict[str, dict[str, float]] | None
+            Opening balances per venue and asset, merged over
+            ``backtest.balances``. A venue named here opens with these and
+            ignores the recording's snapshot.
 
         Raises
         ------
@@ -805,6 +828,15 @@ class SimulatedBroker:
             config.backtest.participation if participation is None else participation
         )
         self.participation = Decimal(str(share))
+        self.opening_balances = {
+            venue: {asset: Decimal(str(amount)) for asset, amount in assets.items()}
+            for venue, assets in config.backtest.balances.items()
+        }
+        for venue, assets in (balances or {}).items():
+            self.opening_balances.setdefault(venue, {}).update(
+                {asset: Decimal(str(amount)) for asset, amount in assets.items()}
+            )
+        self._opening_published = not self.opening_balances
         self.publisher = StreamPublisher(maxlen=UNTRIMMED, prefix=prefix)
         self.markets: dict[tuple[str, str], Market] = {}
         self.balances = Balances()
@@ -997,6 +1029,34 @@ class SimulatedBroker:
         """
         seq = self.publisher.next_seq(balance_stream(venue))
         await self.publish(self.balances.snapshot(venue, ts, seq))
+
+    async def open_balances(self, ts: int) -> None:
+        """
+        Seed the configured venues and publish their opening snapshots.
+
+        Done at the first event rather than at startup because a replayed
+        strategy runs on a replay clock: a snapshot stamped before the
+        recording begins would hand it a time no recorded event has. The
+        strategy therefore has no balance for the first read of the run and
+        quotes from the second, which costs a fraction of a second of a
+        window and is the price of not inventing a timestamp.
+
+        Parameters
+        ----------
+        ts : int
+            Time of the first event, which the snapshots are stamped with.
+        """
+        self._opening_published = True
+        for venue, assets in sorted(self.opening_balances.items()):
+            self.balances.seed(venue, assets)
+            amounts = ", ".join(
+                f"{amount} {asset}" for asset, amount in sorted(assets.items())
+            )
+            logger.info(
+                f"Opening balance for {venue} from configuration: {amounts}; "
+                "the recording's is ignored"
+            )
+            await self.publish_balance(venue, ts)
 
     def forget(self, key: OrderKey) -> None:
         """
@@ -1602,6 +1662,8 @@ class SimulatedBroker:
             The event.
         """
         await self.run_until(event.ts_recv)
+        if not self._opening_published:
+            await self.open_balances(event.ts_recv)
         match event:
             case BookEvent():
                 await self.on_book(event)
@@ -1766,6 +1828,39 @@ class SimulatedBroker:
 # Command line ----------------------------------------------------------------------
 
 
+def parse_balance(text: str) -> tuple[str, str, float]:
+    """
+    Parse a ``VENUE:ASSET=AMOUNT`` opening balance.
+
+    Parameters
+    ----------
+    text : str
+        For example ``venue_a:BASE=1000``.
+
+    Returns
+    -------
+    tuple[str, str, float]
+        Venue id, asset and amount.
+
+    Raises
+    ------
+    argparse.ArgumentTypeError
+        If the text is not of that shape, or the amount is not a
+        non-negative number.
+    """
+    where, sep, amount = text.partition("=")
+    venue, colon, asset = where.partition(":")
+    if not sep or not colon or not venue or not asset:
+        raise argparse.ArgumentTypeError(f"expected VENUE:ASSET=AMOUNT, got {text!r}")
+    try:
+        value = float(amount)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{amount!r} is not a number") from None
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"{value} is a negative balance")
+    return venue, asset, value
+
+
 def parse_assumption(text: str) -> tuple[str, float]:
     """
     Parse a ``VENUE=MS`` assumption.
@@ -1835,6 +1930,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--seed", type=int, default=0, help="seed of the latency draws")
     parser.add_argument(
+        "--balance",
+        metavar="VENUE:ASSET=AMOUNT",
+        action="append",
+        type=parse_balance,
+        default=[],
+        help="opening balance, overriding backtest.balances and the recording; repeatable",
+    )
+    parser.add_argument(
         "--participation",
         type=float,
         default=None,
@@ -1885,6 +1988,28 @@ def build_latency(
     return model
 
 
+def collect_balances(
+    entries: list[tuple[str, str, float]],
+) -> dict[str, dict[str, float]]:
+    """
+    Group ``--balance`` entries by venue.
+
+    Parameters
+    ----------
+    entries : list[tuple[str, str, float]]
+        Venue, asset and amount, as parsed from the command line.
+
+    Returns
+    -------
+    dict[str, dict[str, float]]
+        Amount per asset per venue.
+    """
+    balances: dict[str, dict[str, float]] = {}
+    for venue, asset, amount in entries:
+        balances.setdefault(venue, {})[asset] = amount
+    return balances
+
+
 async def main(config: AppConfig, args: argparse.Namespace) -> SimReport:
     """
     Run the simulated broker against the configured Redis.
@@ -1916,6 +2041,7 @@ async def main(config: AppConfig, args: argparse.Namespace) -> SimReport:
         follow=args.follow,
         name=args.name,
         participation=args.participation,
+        balances=collect_balances(args.balance),
     )
     try:
         report = await broker.run()
