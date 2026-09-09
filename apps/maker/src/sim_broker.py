@@ -478,6 +478,16 @@ class Balances:
         event : BalanceEvent
             The recorded snapshot.
 
+        The recorded ``used`` is dropped and the whole total taken as free.
+        A hold in the recording is the live run's own resting order, which
+        this run does not have and will never fill or cancel, so adopting it
+        holds the balance for a ghost for the length of the run and holds it
+        again for the simulation's own order on top. That cost the strategy
+        two thirds of its quotes on the first window it was measured on: the
+        opening snapshot held 366.44 of 1081.28 base units, the solvency
+        rule wants twice a quote's size free, and quotes of 360 fell a base
+        unit short of the remaining 714.84.
+
         Returns
         -------
         bool
@@ -489,7 +499,7 @@ class Balances:
             return False
         self.adopted.add(event.venue)
         self.venues[event.venue] = {
-            asset: [_decimal(balance.free), _decimal(balance.used)]
+            asset: [_decimal(balance.total), ZERO]
             for asset, balance in event.balances.items()
         }
         self.opening[event.venue] = {

@@ -368,6 +368,28 @@ async def test_a_trade_through_the_price_fills_no_more_than_it_printed():
 
 
 @pytest.mark.asyncio
+async def test_the_opening_balance_drops_the_recorded_holds():
+    """A hold in the recording is the live run's order, not this run's."""
+    h = Harness()
+    await h.broker.reader.start()
+    held = BalanceEvent(
+        ts_recv=T0 - S,
+        venue=A,
+        seq=1,
+        ts_exch=None,
+        balances={
+            "BASE": AssetBalance(free=634.0, used=366.0, total=1000.0),
+            "QUOTE": AssetBalance(free=500.0, used=0.0, total=500.0),
+        },
+    )
+    await h.publish(held)
+    free, used = h.broker.balances.venues[A]["BASE"]
+    assert free == 1000 and used == 0  # not 634 free and 366 held
+    # The report's opening is the total either way, so runs stay comparable.
+    assert h.broker.balances.opening[A]["BASE"] == 1000
+
+
+@pytest.mark.asyncio
 async def test_participation_takes_only_a_share_of_the_print():
     """A share below one means the print filled others too, as it did in reality."""
     h = Harness(participation=0.25)

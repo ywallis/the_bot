@@ -627,8 +627,9 @@ Backtesting is replay plus simulation, reusing the live components:
   price; that path has no print to bound it. Fees come from `backtest.fees` per venue and are
   charged in the asset received; a venue without an entry trades free and
   the broker says so at startup. Balances are adopted from the first
-  recorded snapshot per venue and then owned by the simulation, holds
-  included. The report counts intents, placements, rejections,
+  recorded snapshot per venue and then owned by the simulation, the
+  recorded holds dropped: a hold in the recording belongs to the live run's
+  resting order, which this run neither has nor will ever cancel. The report counts intents, placements, rejections,
   cancellations, fills, volume and fees, and carries the opening and
   closing totals and the latency model's summary.
 - **The latency model** (`apps/maker/src/latency.py`) is the part that
