@@ -73,7 +73,8 @@ among those matching the production flag, as for the orchestrator.
 ```bash
 uv run -m apps.maker.src.launcher <index> --replay <run_id>
 uv run -m apps.maker.src.sim_broker <run_id> --follow <strategy identifier> \
-    --root <recording root> --report <run_id>.json [--assume-rtt-ms VENUE=MS]
+    --drain matching --root <recording root> --report <run_id>.json \
+    [--assume-rtt-ms VENUE=MS]
 uv run -m apps.maker.src.matcher --replay <run_id>
 ```
 
@@ -81,6 +82,14 @@ uv run -m apps.maker.src.matcher --replay <run_id>
 is what keeps the broker from processing a market event before the strategy
 has reacted to it; without it the broker processes whatever has arrived,
 which is only right for a paced replay.
+
+`--drain matching` holds the run open until the matcher has reached the end
+of the recording. Without it a fill in the last seconds of a window is
+hedged into a broker that has already closed, and the run ends holding a
+position: one 8 hour window ended 282.88 base units long that way, on three
+runs out of five, the difference between them being wall clock timing
+alone. Unlike `--follow` it does not gate market events, so the matcher
+waiting on fills cannot deadlock the broker producing them.
 
 ## 3. Start the replayer
 
@@ -115,8 +124,15 @@ after the replayer exited, look at its log for which key it is waiting on.
 
 The JSON has the counts (intents, placements, rejections, cancellations,
 fills, market orders that outran the recorded depth), volume and fees per
-venue, the opening and closing totals per asset and venue, and the latency
-model per venue with its `source`. Two rules for reading it:
+venue, the opening and closing totals per asset and venue, `net` (closing
+minus opening per asset, summed over venues) and the latency model per
+venue with its `source`. Three rules for reading it:
+
+- **Read `net` first.** A hedged strategy ends a fee's worth from flat.
+  Anything larger is a position the run acquired and never closed, and a
+  profit and loss figure computed from the closing balances of such a run
+  is that position marked at a price the reader chose, not a result. The
+  broker warns when it is more than a percent of what the run traded.
 
 - A number for a venue whose latency is `assumed` is a number about the
   assumption. Say so wherever it is quoted.

@@ -581,6 +581,19 @@ Backtesting is replay plus simulation, reusing the live components:
   too and holds every market event until they are past it, and processes
   buffered events in `ts_recv` order, market before intent at a tie.
 
+  A consumer that produces intents rather than reacting to market data
+  needs the other half of this: the matcher reports its progress on the
+  same rule, and a broker given `--drain matching` will not close a run
+  until it is past the end of the recording. Without that the wind-down is
+  a race a fill in the last seconds of a window loses, since its hedge is
+  published into a broker that has already closed; one 8 hour window ended
+  282.88 base units long on three runs out of five, wall clock timing being
+  the only difference between them. Draining does not gate market events,
+  which is what keeps the matcher waiting on fills from deadlocking the
+  broker that produces them, and the report now carries `net` per asset so
+  a run that ends holding something says so rather than reporting it as a
+  result.
+
   Three more keys end a run in order. The replayer sets
   `bt:{run_id}:replay:done` when the recording is exhausted. The broker
   sets `bt:{run_id}:replay:broker` when it joins and

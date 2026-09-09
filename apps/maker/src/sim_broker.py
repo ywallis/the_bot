@@ -132,6 +132,9 @@ FOLLOW_POLL_S = 0.005
 ZERO = Decimal(0)
 ONE = Decimal(1)
 
+# Reads the wind-down gives a late hedge to arrive in, at ``block_ms`` each.
+SETTLE_ROUNDS = 50
+
 
 def _decimal(value: float | Decimal | str) -> Decimal:
     """
@@ -680,6 +683,15 @@ class SimReport:
         Opening totals per venue and asset.
     closing : dict[str, dict[str, str]]
         Closing totals per venue and asset.
+    net : dict[str, str]
+        Closing minus opening per asset, summed over venues: what the run
+        ended holding that it did not start with. A hedged strategy ends
+        near zero on every asset, and anything else is a position the run
+        acquired and never closed, usually a fill in the last seconds whose
+        hedge did not land. It matters because a profit and loss figure
+        computed from the closing balances of a run that ends with a
+        position is not a profit and loss figure, it is that position
+        marked at whatever price the reader chose.
     """
 
     intents: int = 0
@@ -694,6 +706,7 @@ class SimReport:
     latency: dict[str, Any] = field(default_factory=dict)
     opening: dict[str, dict[str, str]] = field(default_factory=dict)
     closing: dict[str, dict[str, str]] = field(default_factory=dict)
+    net: dict[str, str] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         """
@@ -717,6 +730,7 @@ class SimReport:
             "latency": self.latency,
             "opening": self.opening,
             "closing": self.closing,
+            "net": self.net,
         }
 
 
@@ -780,6 +794,7 @@ class SimulatedBroker:
         block_ms: int = 100,
         participation: float | None = None,
         balances: dict[str, dict[str, float]] | None = None,
+        drain: Iterable[str] = (),
     ) -> None:
         """
         Initialize the broker.
@@ -809,6 +824,14 @@ class SimulatedBroker:
             Opening balances per venue and asset, merged over
             ``backtest.balances``. A venue named here opens with these and
             ignores the recording's snapshot.
+        drain : Iterable[str]
+            Consumers that must be past the end of the recording before the
+            run closes, the matcher above all: a fill in the last seconds of
+            a window produces a hedge that arrives after the strategies have
+            finished, and closing the run before it lands ends the run with
+            a position nobody asked for. Unlike ``follow`` these do not gate
+            market events, so a matcher waiting on fills cannot deadlock the
+            broker producing them.
 
         Raises
         ------
@@ -822,6 +845,7 @@ class SimulatedBroker:
         self.prefix = prefix
         self.latency = latency
         self.follow = list(follow)
+        self.drain = list(drain)
         self.name = name
         self.block_ms = block_ms
         share = (
@@ -1748,8 +1772,9 @@ class SimulatedBroker:
         done = await self.redis.get(replay_done_key(self.prefix))
         if done is None or self.buffer:
             return False
-        if self.follow:
-            progress = await read_progress(self.redis, self.prefix, self.follow)
+        waiting = self.follow + self.drain
+        if waiting:
+            progress = await read_progress(self.redis, self.prefix, waiting)
             if any(value is None or value < int(done) for value in progress.values()):
                 return False
         if not await self.reader.at_tail():
@@ -1791,7 +1816,19 @@ class SimulatedBroker:
         return self.report
 
     async def shutdown(self) -> None:
-        """Run out the timeline, cancel what rests, and complete the report."""
+        """
+        Run out the timeline, cancel what rests, settle, and report.
+
+        The cancel sweep is itself a fill to hedge: a partially filled order
+        cancelled here reaches the matcher only once the event is published,
+        and the hedge it publishes back arrives after the sweep. Closing the
+        run at that point loses it, which is how an 8 hour window came to
+        end 282.88 base units long. So the sweep is followed by rounds of
+        reading and running the timeline out until two of them bring
+        nothing, bounded by ``SETTLE_ROUNDS`` so a consumer that never
+        answers cannot hold a run open forever. A residue that survives that
+        shows up in the report's ``net``.
+        """
         await self.flush()
         open_orders = [order for order in self.orders.values() if not order.done]
         for order in open_orders:
@@ -1804,6 +1841,18 @@ class SimulatedBroker:
                 self.busy.add(key)
                 await self.cancel(order, "shutting down", self.clock, None)
         await self.flush()
+        quiet = 0
+        for _ in range(SETTLE_ROUNDS):
+            processed = await self.step()
+            await self.flush()
+            quiet = 0 if processed else quiet + 1
+            if quiet >= 2:
+                break
+        else:
+            logger.warning(
+                f"Still settling after {SETTLE_ROUNDS} rounds; closing anyway, "
+                "and the report's net says what is left open"
+            )
         self.report.latency = self.latency.summary()
         self.report.opening = {
             venue: {asset: str(total) for asset, total in sorted(totals.items())}
@@ -1815,6 +1864,26 @@ class SimulatedBroker:
                 (venue, self.balances.totals(venue)) for venue in self.balances.venues
             )
         }
+        net: dict[str, Decimal] = {}
+        for totals in self.report.opening.values():
+            for asset, total in totals.items():
+                net[asset] = net.get(asset, ZERO) - Decimal(total)
+        for totals in self.report.closing.values():
+            for asset, total in totals.items():
+                net[asset] = net.get(asset, ZERO) + Decimal(total)
+        self.report.net = {asset: str(total) for asset, total in sorted(net.items())}
+        # A hedged run ends a fee's worth away from flat, which is not news.
+        # A percent of what it traded is, and it is what an unhedged fill
+        # looks like.
+        material = max(self.report.volume.values(), default=ZERO) / 100
+        for asset, total in sorted(net.items()):
+            if material > ZERO and abs(total) > material:
+                logger.warning(
+                    f"The run ended {total} of {asset} away from where it opened, "
+                    f"more than a percent of what it traded; a profit and loss "
+                    "figure taken from the closing balances of a run holding a "
+                    "position is that position, not a result"
+                )
         await self.redis.set(replay_closed_key(self.prefix), self.clock)
         logger.info(f"Simulation over: {json.dumps(self.report.as_dict(), indent=2)}")
 
@@ -1938,6 +2007,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="opening balance, overriding backtest.balances and the recording; repeatable",
     )
     parser.add_argument(
+        "--drain",
+        metavar="NAME",
+        action="append",
+        default=[],
+        help="consumer that must reach the end of the recording before the run "
+        "closes, the matcher above all; repeatable",
+    )
+    parser.add_argument(
         "--participation",
         type=float,
         default=None,
@@ -2042,6 +2119,7 @@ async def main(config: AppConfig, args: argparse.Namespace) -> SimReport:
         name=args.name,
         participation=args.participation,
         balances=collect_balances(args.balance),
+        drain=args.drain,
     )
     try:
         report = await broker.run()

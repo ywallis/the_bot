@@ -197,6 +197,7 @@ class Harness:
         decode: bool = False,
         participation: float | None = None,
         balances: dict[str, dict[str, float]] | None = None,
+        drain: list[str] | None = None,
     ) -> None:
         """Build the broker over a fake Redis."""
         self.redis = fakeredis.FakeRedis(decode_responses=decode)
@@ -210,6 +211,7 @@ class Harness:
             block_ms=1,
             participation=participation,
             balances=balances,
+            drain=drain or [],
         )
 
     async def start(self) -> None:
@@ -411,6 +413,59 @@ async def test_given_balances_open_the_run_and_the_recording_is_ignored():
     assert opening.ts_recv == T0 - S
     # A venue that was not named still opens from the recording.
     assert h.broker.balances.opening[B]["BASE"] == 1000
+
+
+@pytest.mark.asyncio
+async def test_a_drained_consumer_holds_the_run_open():
+    """A hedge published in the last seconds must still reach the venue."""
+    h = Harness(drain=["matching"])
+    await h.start()
+    await h.redis.set(replay_done_key(PREFIX), T0 + S)
+    await h.redis.set(replay_progress_key(PREFIX, "matching"), T0)  # behind
+    assert not await h.broker.finished()
+    await h.redis.set(replay_progress_key(PREFIX, "matching"), T0 + S)  # caught up
+    h.broker._last_intent_wall = 0.0  # nothing has arrived for a long while
+    assert await h.broker.finished()
+
+
+@pytest.mark.asyncio
+async def test_the_report_says_what_the_run_ended_holding():
+    """A position left open is not a result, so the report carries it."""
+    h = Harness()
+    await h.start()  # opens at 1000 base and 500 quote on each venue
+    h.broker.report.volume[A] = Decimal(1000)
+    # A buy that was never hedged: base arrived, quote left.
+    h.broker.balances.venues[A]["BASE"][0] += Decimal(283)
+    h.broker.balances.venues[A]["QUOTE"][0] -= Decimal(14)
+    await h.broker.shutdown()
+    assert h.broker.report.net == {"BASE": "283.0", "QUOTE": "-14.0"}
+
+
+@pytest.mark.asyncio
+async def test_the_wind_down_executes_a_hedge_of_its_own_cancel():
+    """The sweep produces fills to hedge, and the hedge must still land."""
+    h = Harness(drain=["matching"])
+    await h.start()
+    await h.publish(book(A, T0, [[0.34, 100]], [[0.35, 50]]))
+    await h.publish(book(B, T0, [[0.33, 100]], [[0.34, 50]]))
+    await h.broker.step()
+    placed_before = h.broker.report.placed
+    # What the matcher publishes when the sweep cancels a partial fill: it
+    # arrives while the broker is winding down, not before.
+    await h.publish(
+        intent(
+            T0 + S,
+            "hedge-1",
+            side=Side.BUY,
+            amount="5",
+            price="0.35",
+            venue=B,
+            strategy="matching",
+        )
+    )
+    await h.broker.shutdown()
+    assert h.broker.report.placed == placed_before + 1  # the hedge reached the venue
+    assert h.broker.report.net.get("BASE", "0") != "0"  # and moved the position
 
 
 @pytest.mark.asyncio

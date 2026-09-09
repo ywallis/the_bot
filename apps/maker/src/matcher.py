@@ -37,7 +37,12 @@ from apps.shared.src.events import (
     prefixed,
 )
 from apps.shared.src.runtime import Clock, StreamReader
-from apps.shared.src.streams import StreamPublisher, replay_closed_key
+from apps.shared.src.streams import (
+    StreamPublisher,
+    read_frontier,
+    replay_closed_key,
+    replay_progress_key,
+)
 from apps.shared.src.utils import production
 
 logging_config.setup_logging()
@@ -60,6 +65,9 @@ HEDGEABLE_STATES: frozenset[OrderState] = frozenset(
 
 # Orders remembered so a repeated terminal event does not hedge twice.
 HEDGE_MEMORY = 1000
+
+# Name a replayed matcher reports its progress under.
+PROGRESS_NAME = "matching"
 
 
 def hedge_quantity(
@@ -280,6 +288,7 @@ async def consume_order_events(
     *,
     prefix: str = "",
     clock: Clock | None = None,
+    progress_name: str = PROGRESS_NAME,
 ) -> None:
     """
     Read ``oms:events`` and hedge every fill that calls for one.
@@ -294,6 +303,14 @@ async def consume_order_events(
     the simulated broker has marked the run closed and everything has been
     read: the wind-down cancels partially filled orders, and those are fills
     to hedge too.
+
+    A replayed matcher reports how far it has got under
+    ``replay:progress:<name>``, on the same rule as every other replayed
+    consumer: its clock, or the frontier when a read found nothing, since a
+    matcher at the tail of the event stream has hedged everything published.
+    A broker told to ``--drain`` it will not close a run until it is past
+    the end of the recording, which is what keeps a fill in the last seconds
+    of a window from ending the run unhedged.
 
     Parameters
     ----------
@@ -311,6 +328,8 @@ async def consume_order_events(
         Backtest prefix, empty live.
     clock : Clock | None
         The clock hedges are stamped by; a live one if omitted.
+    progress_name : str
+        Name this process reports progress under, when replaying.
     """
     hedged = LimitedSet(HEDGE_MEMORY)
     replay = clock is not None and not clock.live
@@ -318,6 +337,7 @@ async def consume_order_events(
     reader = StreamReader(redis, [stream], batch=batch, from_start=replay)
     await reader.start()
     while True:
+        frontier = await read_frontier(redis, prefix) if replay else 0
         blocks = await reader.read(block_ms)
         delivered = 0
         for name, entries in blocks:
@@ -328,6 +348,10 @@ async def consume_order_events(
                     await handle_order_event(
                         redis, publisher, event, should_match, hedged, clock
                     )
+        if replay:
+            assert clock is not None
+            reached = clock.now() if delivered else max(clock.now(), frontier)
+            await redis.set(replay_progress_key(prefix, progress_name), reached)
         if replay and delivered == 0 and await redis.get(replay_closed_key(prefix)):
             if await reader.at_tail():
                 logger.info(
