@@ -685,3 +685,28 @@ async def test_the_schedule_does_not_fire_before_it_is_due(monkeypatch):
 
     assert client.rest_calls == []
 
+
+@pytest.mark.asyncio
+async def test_the_loop_stops_when_its_task_is_cancelled():
+    """Shutdown must not have to escalate to a kill to stop a feed."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    # A socket that never delivers, so only cancellation can end this.
+    client = QuietClient("mexc", [[ccxt_order()]], rest_results=[[]], release_after=99)
+
+    task = asyncio.create_task(
+        watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
+    )
+    await asyncio.sleep(0.05)
+    task.cancel()
+
+    # Waited with a timeout rather than awaited: a loop that swallows its
+    # cancellation would never return, and this has to fail rather than
+    # hang the suite. That was the bug.
+    done, _pending = await asyncio.wait({task}, timeout=1.0)
+    assert task in done, "the loop swallowed its cancellation and kept running"
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    # One more turn lets the cancellation the loop sent reach the pending
+    # watch, which is how we know that task was not left behind.
+    await asyncio.sleep(0.01)
+    assert client.watch_cancelled is True

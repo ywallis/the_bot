@@ -39,6 +39,8 @@ logger = logging.getLogger(__name__)
 # checksum failure) or when a sibling loop closed the shared client. The
 # client must not be closed here: the book and trade loops of one venue share
 # it, and closing it from one loop cancels the other, which would loop forever.
+# ``CancelledError`` is here for the CCXT-raised case only; one that arrives
+# because this task was cancelled is re-raised (``cancelled_from_outside``).
 RESUBSCRIBE_ERRORS: tuple[type[BaseException], ...] = (
     UnsubscribeError,
     ChecksumError,
@@ -174,6 +176,28 @@ async def publish_trades(
     return len(fresh)
 
 
+def cancelled_from_outside() -> bool:
+    """
+    Return whether the running task has been asked to stop.
+
+    ``CancelledError`` reaches a feed loop for two unrelated reasons. CCXT
+    raises it itself when it drops a subscription or when a sibling loop
+    closed the shared client, and the loop should resubscribe after that,
+    which is why it is a ``RESUBSCRIBE_ERRORS`` member. It also arrives
+    because our own task was cancelled, and treating that as recoverable
+    makes the loop unstoppable: the feed resubscribes forever and shutdown
+    has to escalate to a kill. ``Task.cancel`` counts its requests, so the
+    two are told apart by asking whether one is outstanding.
+
+    Returns
+    -------
+    bool
+        True if a cancellation of the running task is outstanding.
+    """
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
+
+
 async def handle_feed_error(
     error: BaseException, client: CustomExchange, feed: str, ticker: str
 ) -> None:
@@ -194,9 +218,13 @@ async def handle_feed_error(
     Raises
     ------
     BaseException
-        The same error, if it is not recoverable.
+        The same error, if it is not recoverable, or if it is a
+        ``CancelledError`` raised because this task was cancelled.
     """
     name = type(error).__name__
+    if isinstance(error, CancelledError) and cancelled_from_outside():
+        logger.info(f"{feed} for {client.id} {ticker} cancelled, stopping")
+        raise error
     if isinstance(error, RESUBSCRIBE_ERRORS):
         logger.warning(
             f"{name} in {feed} for {client.id} {ticker}, resubscribing: {error}"

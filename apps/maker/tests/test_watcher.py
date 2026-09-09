@@ -1,5 +1,6 @@
 """Tests for the market data feed handlers."""
 
+import asyncio
 import json
 
 import pytest
@@ -185,3 +186,66 @@ def test_build_tasks_follows_subscriptions():
     for t in tasks:
         t.close()
     assert names == ["watch_ob", "watch_ob", "watch_trades"]
+
+
+# Cancellation ---------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_handle_feed_error_resubscribes_on_a_ccxt_cancellation(monkeypatch):
+    """CCXT cancels a subscription itself; the loop is meant to carry on."""
+    monkeypatch.setattr(watcher, "RETRY_DELAY_S", 0)
+    client = FakeClient("mexc", [])
+
+    await watcher.handle_feed_error(
+        asyncio.CancelledError(), client, "watch_ob", "ALPH/USDT"
+    )
+
+    assert client.closed == 0
+
+
+@pytest.mark.asyncio
+async def test_handle_feed_error_stops_when_the_task_is_cancelled(monkeypatch):
+    """A cancelled task must not be kept alive by resubscribing forever."""
+    monkeypatch.setattr(watcher, "RETRY_DELAY_S", 0)
+    client = FakeClient("mexc", [])
+    started = asyncio.Event()
+
+    async def loop_forever():
+        started.set()
+        while True:
+            try:
+                await asyncio.sleep(3600)
+            except BaseException as e:  # noqa: B036, mirrors a feed loop
+                await watcher.handle_feed_error(e, client, "watch_ob", "ALPH/USDT")
+
+    task = asyncio.create_task(loop_forever())
+    await started.wait()
+    task.cancel()
+
+    # Waited with a timeout rather than awaited: before this was fixed the
+    # loop resubscribed forever, and a bare await would hang the suite
+    # instead of failing it.
+    done, _pending = await asyncio.wait({task}, timeout=1.0)
+    if task not in done:
+        task.cancel()
+        pytest.fail("the loop swallowed its cancellation and kept running")
+    assert task.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_feed_loop_is_not_told_it_was_cancelled_by_ccxt():
+    """``cancelled_from_outside`` distinguishes the two by the request count."""
+    assert watcher.cancelled_from_outside() is False
+
+    async def check_while_cancelled():
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            return watcher.cancelled_from_outside()
+
+    task = asyncio.create_task(check_while_cancelled())
+    await asyncio.sleep(0)
+    task.cancel()
+
+    assert await task is True
