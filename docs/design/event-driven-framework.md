@@ -703,6 +703,34 @@ it. The share only bites on prints smaller than the order, which is why it
 cut the invented fills and left both the over-fill and the two misses
 exactly where they were.
 
+The one window available out of sample says something narrower and worth
+having. Over 2026-09-08 04:00-06:08 the live strategy placed 467 quotes,
+all on one side because the balance bug had hidden its quote currency, and
+filled nothing at all; two independent sources agree, the venue's trade
+history and the recorded order events. Replayed at both 1 and 0.5 of a
+print, the simulation also filled nothing: 179 placements, no fill, no
+false positive. So the model does not invent fills out of an untouched
+market, and the invented fills of the afternoon window came from quoting
+where the live strategy was not, exactly as the quote comparison said. The
+window cannot discriminate between the two shares, though — zero fills
+either way — so the participation number remains fitted to one afternoon,
+and 0.5 is a sensitivity rather than a calibration.
+
+That window did surface one thing to chase. From an identical book stream,
+recorded with every sequence number present on both venues, the live
+strategy replaced its quote 467 times and the replayed one 180, at prices
+within ten basis points of the live median and slightly more aggressive.
+Quote cadence is what creates the chance to be filled, so a simulation that
+requotes 2.6 times less often than the process it stands in for is not
+testing the same strategy, whatever its fill model does. The cause is not
+the recording and not the balance priming, both of which were ruled out;
+it is unexplained.
+
+The other window that looked usable is not. The two hourly buckets of
+2026-09-09 07:00-09:00 hold 53 seconds of book between them, from a run
+that lasted under a minute, and no intents. Bucket filenames are not
+coverage; check what a range holds before quoting a result over it.
+
 So the standing position: fees are measured and confirmed, latency is
 measured on one venue and thin on the other, and the fill model is an upper
 bound whose error over one calibrated window is about the size of the edge

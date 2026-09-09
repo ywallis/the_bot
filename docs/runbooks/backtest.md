@@ -119,7 +119,13 @@ model per venue with its `source`. Two rules for reading it:
   missed two, and reported +0.051 quote units where live made -0.024. At
   `--participation 0.5` the error fell from +0.075 to +0.030 but a quarter
   was worse than a half, so treat any share below 1 as a sensitivity, not a
-  calibration. Section 9 of the design has the detail.
+  calibration. The one out-of-sample window, 2026-09-08 04:00-06:08, filled
+  nothing live and nothing simulated at either share: no false positives,
+  and no way to tell the shares apart. Section 9 of the design has the
+  detail, including a quote-cadence divergence worth knowing about before
+  reading any fill count.
+- Check what a range actually holds. Hourly buckets exist for periods in
+  which the bot ran for under a minute.
 
 The recorder can record a backtest too: point it at the prefix's streams and
 the run is on disk in the same format as live.
