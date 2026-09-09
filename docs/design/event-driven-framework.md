@@ -687,8 +687,31 @@ the book, and one more sell. The live afternoon lost money by crossing the
 spread once and paying ten basis points on every hedge; the simulation never
 crossed on the maker venue at all and fills a resting quote whenever a sweep
 goes past it. That is adverse selection missing from the model, not a sizing
-error, which is why a sizing fix moved volume without moving the result. The
-next lever is what share of a sweep an order of ours would really have got.
+error, which is why a sizing fix moved volume without moving the result.
+
+`backtest.participation` is that share, and the same window was replayed at
+1, 0.5 and 0.25 of every print. Taking half brought the result nearest to
+live so far, +0.007 quote units against -0.024, an error of +0.030 where the
+whole print gave +0.082. A quarter was worse than a half, +0.045, and a
+non-monotonic knob on five live fills in one afternoon is a knob fitted to
+noise, so the default stays 1: an upper bound that says what it is beats a
+number that happens to land well on one window. What the share cannot do is
+visible in the per-sweep totals. The fill at 15:52:21 is 334.116 base units
+at every share tried, because the sweep is large enough that a quarter of
+each print still fills the order whole, and the live account got 218.78 of
+it. The share only bites on prints smaller than the order, which is why it
+cut the invented fills and left both the over-fill and the two misses
+exactly where they were.
+
+So the standing position: fees are measured and confirmed, latency is
+measured on one venue and thin on the other, and the fill model is an upper
+bound whose error over one calibrated window is about the size of the edge
+being measured. A backtest here can rule out a strategy that loses badly. It
+cannot yet tell a small win from a small loss, and the reason is not the
+queue arithmetic but that the simulated strategy quotes what the live one
+did not: at 17:36 live was quoting the other side only, and at 18:15 it was
+not quoting at all, while the simulation rested a sell through both. Closing
+that gap is about the divergence of state, not the matching of orders.
 `docs/runbooks/backtest.md` is how to run one.
 
 ## 10. Language interoperability

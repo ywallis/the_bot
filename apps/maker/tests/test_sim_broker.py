@@ -191,12 +191,23 @@ def cancel(
 class Harness:
     """A broker on a fake Redis, with helpers to publish and read back."""
 
-    def __init__(self, follow: list[str] | None = None, decode: bool = False) -> None:
+    def __init__(
+        self,
+        follow: list[str] | None = None,
+        decode: bool = False,
+        participation: float | None = None,
+    ) -> None:
         """Build the broker over a fake Redis."""
         self.redis = fakeredis.FakeRedis(decode_responses=decode)
         self.publisher = StreamPublisher(maxlen=1000, prefix=PREFIX)
         self.broker = sb.SimulatedBroker(
-            self.redis, config(), PREFIX, latency(), follow=follow or [], block_ms=1
+            self.redis,
+            config(),
+            PREFIX,
+            latency(),
+            follow=follow or [],
+            block_ms=1,
+            participation=participation,
         )
 
     async def start(self) -> None:
@@ -354,6 +365,23 @@ async def test_a_trade_through_the_price_fills_no_more_than_it_printed():
     assert last.balances["QUOTE"].total == pytest.approx(500.0 + 0.36)
     assert h.broker.report.fills == 1
     assert h.broker.report.volume[A] == 1
+
+
+@pytest.mark.asyncio
+async def test_participation_takes_only_a_share_of_the_print():
+    """A share below one means the print filled others too, as it did in reality."""
+    h = Harness(participation=0.25)
+    await h.start()
+    await h.publish(book(A, T0, [[0.34, 100]], [[0.35, 50]]))
+    await h.publish(intent(T0, "i1", amount="10", price="0.36"))
+    await h.publish(book(A, T0 + S, [[0.34, 100]], [[0.35, 50]], seq=2))
+    await h.publish(trade(A, T0 + 2 * S, price=0.37, amount=8.0))
+    await h.advance(T0 + 3 * S)
+    event = (await h.events())[-1]
+    assert event.last_fill is not None
+    assert event.last_fill.amount == 2  # a quarter of the eight that printed
+    assert event.state is OrderState.PARTIALLY_FILLED
+    assert h.broker.report.volume[A] == 2
 
 
 @pytest.mark.asyncio

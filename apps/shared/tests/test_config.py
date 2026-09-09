@@ -277,6 +277,7 @@ def test_backtest_settings_default_and_override():
     config = parse_app_config({"venues": VENUES, "strategies": [new_strategy()]})
     assert config.backtest.fees == {}
     assert config.backtest.history_s == 60.0
+    assert config.backtest.participation == 1.0  # the whole print, the upper bound
     config = parse_app_config(
         {
             "venues": VENUES,
@@ -295,3 +296,20 @@ def test_backtest_settings_default_and_override():
                 "backtest": {"fees": {"nowhere": {"taker": 0.001}}},
             }
         )
+    config = parse_app_config(
+        {
+            "venues": VENUES,
+            "strategies": [new_strategy()],
+            "backtest": {"participation": 0.25},
+        }
+    )
+    assert config.backtest.participation == 0.25
+    for share in (0.0, -0.1, 1.5):  # a share of a print, not a multiple of it
+        with pytest.raises(ConfigError):
+            parse_app_config(
+                {
+                    "venues": VENUES,
+                    "strategies": [new_strategy()],
+                    "backtest": {"participation": share},
+                }
+            )

@@ -130,6 +130,7 @@ INTENT_SECOND = 1
 FOLLOW_POLL_S = 0.005
 
 ZERO = Decimal(0)
+ONE = Decimal(1)
 
 
 def _decimal(value: float | Decimal | str) -> Decimal:
@@ -749,6 +750,7 @@ class SimulatedBroker:
         name: str = PROCESS_NAME,
         batch: int = 500,
         block_ms: int = 100,
+        participation: float | None = None,
     ) -> None:
         """
         Initialize the broker.
@@ -771,6 +773,9 @@ class SimulatedBroker:
             Entries per stream per read.
         block_ms : int
             How long a read waits when nothing is available.
+        participation : float | None
+            Share of a print a resting order may take; the configured
+            ``backtest.participation`` when omitted.
 
         Raises
         ------
@@ -786,6 +791,10 @@ class SimulatedBroker:
         self.follow = list(follow)
         self.name = name
         self.block_ms = block_ms
+        share = (
+            config.backtest.participation if participation is None else participation
+        )
+        self.participation = Decimal(str(share))
         self.publisher = StreamPublisher(maxlen=UNTRIMMED, prefix=prefix)
         self.markets: dict[tuple[str, str], Market] = {}
         self.balances = Balances()
@@ -1537,11 +1546,12 @@ class SimulatedBroker:
                 left = amount - consumed
             else:
                 continue
-            if left > ZERO:
+            share = left * self.participation
+            if share > ZERO:
                 await self.fill(
                     order,
                     intent.price,
-                    min(order.remaining, left),
+                    min(order.remaining, share),
                     Liquidity.MAKER,
                     trade.ts_recv,
                 )
@@ -1686,6 +1696,11 @@ class SimulatedBroker:
         await self.reader.start()
         await self.redis.set(replay_broker_key(self.prefix), self.name)
         logger.info(f"Simulating {sorted(self.latency.venues)} under {self.prefix}")
+        if self.participation != ONE:
+            logger.warning(
+                f"A resting order takes {self.participation} of a print it reaches; "
+                "every fill here is a share assumed, not measured"
+            )
         for venue in self.config.venues:
             fees = self.fees(venue.id)
             if venue.id not in self.config.backtest.fees:
@@ -1810,6 +1825,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--seed", type=int, default=0, help="seed of the latency draws")
     parser.add_argument(
+        "--participation",
+        type=float,
+        default=None,
+        help="share of a print a resting order takes, overriding backtest.participation",
+    )
+    parser.add_argument(
         "--report", type=Path, default=None, help="write the report as JSON here"
     )
     parser.add_argument(
@@ -1878,7 +1899,13 @@ async def main(config: AppConfig, args: argparse.Namespace) -> SimReport:
     )
     redis = Redis(decode_responses=False, connection_pool=pool)
     broker = SimulatedBroker(
-        redis, config, prefix, latency, follow=args.follow, name=args.name
+        redis,
+        config,
+        prefix,
+        latency,
+        follow=args.follow,
+        name=args.name,
+        participation=args.participation,
     )
     try:
         report = await broker.run()

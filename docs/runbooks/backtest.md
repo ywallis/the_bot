@@ -16,6 +16,12 @@ that trades. Design: `docs/design/event-driven-framework.md`, section 9.
   belongs next to live streams.
 - `[backtest.fees]` in `config.toml` for every venue, as fractions. A venue
   without an entry trades free, and the broker says so at startup.
+- A view on `backtest.participation`, the share of a recorded trade a
+  resting order of ours may take once the queue ahead of it is gone. The
+  default, 1, takes the whole print: the recording cannot contradict it,
+  since it never saw our order, but reality would have put us in a queue.
+  `--participation` overrides it per run. Section 5 says what the one
+  calibration so far found.
 - A round trip for any venue that has no measured placement. Check with
   `uv run -m apps.maker.src.sim_broker <run_id>` alone: it refuses to start
   and names the venue. Then decide the number deliberately and pass
@@ -91,8 +97,14 @@ model per venue with its `source`. Two rules for reading it:
   assumption. Say so wherever it is quoted.
 - Every fill is an upper bound. The recording did not react to the
   simulated order: a trade that fills it in the simulation filled someone
-  else in reality, and the queue model has not yet been calibrated against a
-  live fill because there has not been one.
+  else in reality.
+- How large that bound is, from the one calibration there has been, on the
+  eight hours of 2026-09-08 12:04-20:00 against the venues' own trade
+  history: the simulation matched three of five live fills, invented two,
+  missed two, and reported +0.051 quote units where live made -0.024. At
+  `--participation 0.5` the error fell from +0.075 to +0.030 but a quarter
+  was worse than a half, so treat any share below 1 as a sensitivity, not a
+  calibration. Section 9 of the design has the detail.
 
 The recorder can record a backtest too: point it at the prefix's streams and
 the run is on disk in the same format as live.

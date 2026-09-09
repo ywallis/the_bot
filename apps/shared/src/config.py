@@ -163,11 +163,19 @@ class BacktestConfig(msgspec.Struct, frozen=True):
     idle_s : float
         Wall seconds without a new intent, once the replay is done and every
         followed strategy has finished, before the broker winds down.
+    participation : float
+        Share of a recorded trade a resting order of ours may take, once the
+        queue ahead of it is gone. One means all of it, which is what the
+        recording cannot contradict but reality would: the trade filled
+        somebody, and had our order been there it would have taken a place in
+        the queue rather than the whole print. Calibrate it against live
+        fills before believing a run that leans on it.
     """
 
     fees: dict[str, FeeConfig] = {}
     history_s: float = 60.0
     idle_s: float = 3.0
+    participation: float = 1.0
 
 
 class VenueConfig(msgspec.Struct, frozen=True):
@@ -543,6 +551,11 @@ def _validate(config: AppConfig) -> None:
     if unknown_fee_venues:
         raise ConfigError(
             f"backtest.fees names undeclared venues {sorted(unknown_fee_venues)}"
+        )
+    if not 0.0 < config.backtest.participation <= 1.0:
+        raise ConfigError(
+            "backtest.participation is a share of a print, in (0, 1]: "
+            f"{config.backtest.participation}"
         )
     for production in (True, False):
         seen: set[str] = set()
