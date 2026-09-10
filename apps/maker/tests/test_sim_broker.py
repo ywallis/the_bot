@@ -746,6 +746,25 @@ async def test_a_cancel_intent_cancels_by_target_or_whatever_rests():
 
 
 @pytest.mark.asyncio
+async def test_a_cancel_naming_another_keys_order_releases_its_own_key():
+    """The lock a cancellation took is its own, whoever's order it cancelled."""
+    h = Harness()
+    await h.start()
+    await h.publish(book(A, T0, [[0.34, 100]], [[0.35, 50]]))
+    await h.publish(intent(T0, "i1", price="0.36"))
+    await h.advance(T0 + S)
+    # A hedge key cancelling the quoting key's order: the live order manager
+    # holds and releases the lock of the intent, not of the order.
+    await h.publish(cancel(T0 + 2 * S, "i1", strategy="s_hedge"))
+    await h.advance(T0 + 4 * S)
+    assert "s_hedge" not in h.broker.busy
+    # And the key still reaches the venue afterwards.
+    await h.publish(intent(T0 + 5 * S, "h1", price="0.36", strategy="s_hedge"))
+    await h.advance(T0 + 7 * S)
+    assert [s for i, s, _ in await h.states() if i == "h1"] == ["accepted", "open"]
+
+
+@pytest.mark.asyncio
 async def test_a_full_batch_holds_back_what_the_other_streams_received_after_it():
     """A stream that filled its batch may have earlier books unread; nothing overtakes them."""
     h = Harness(batch=2)

@@ -1206,7 +1206,15 @@ class SimulatedBroker:
                 logger.warning(f"Cancellation for {key} has no open order to cancel")
                 await self.release(key, now)
                 return
-            await self.cancel(order, "cancelled on request", now, None)
+            # The lock this holds is the intent's, which a cancellation
+            # naming another strategy's order is not: releasing the order's
+            # key instead would leave this one busy for the rest of the run,
+            # queueing and then rejecting every later quote on it. The live
+            # order manager releases the lock it took, whoever's order it
+            # cancelled.
+            await self.cancel(
+                order, "cancelled on request", now, self._release_action(key)
+            )
 
         if key in self.busy:
             self.waiting_cancels.setdefault(key, deque()).append(run)
