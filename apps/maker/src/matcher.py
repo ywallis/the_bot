@@ -344,6 +344,12 @@ async def consume_order_events(
             for entry_id, event in entries:
                 reader.advance(name, entry_id)
                 delivered += 1
+                if event is not None and clock is not None:
+                    # Progress is what has been read, not what has been
+                    # hedged: an event that needs no hedge still moves this
+                    # consumer forward, and a broker draining the matcher
+                    # waits on that number.
+                    clock.advance(event.ts_recv)
                 if isinstance(event, OrderEvent):
                     await handle_order_event(
                         redis, publisher, event, should_match, hedged, clock

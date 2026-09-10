@@ -10,6 +10,7 @@ from fakeredis import aioredis as fakeredis
 from apps.maker.src.matcher import (
     HEDGE_MEMORY,
     NATIVE_ASSET_FEE,
+    PROGRESS_NAME,
     consume_order_events,
     handle_order_event,
     hedge_intent,
@@ -40,7 +41,11 @@ from apps.shared.src.events import (
     now_ns,
 )
 from apps.shared.src.runtime import Clock
-from apps.shared.src.streams import StreamPublisher, replay_closed_key
+from apps.shared.src.streams import (
+    StreamPublisher,
+    replay_closed_key,
+    replay_progress_key,
+)
 
 SHOULD_MATCH = {"lmb": "bitget"}
 
@@ -390,3 +395,25 @@ async def test_consume_under_replay_reads_from_the_start_and_stops_when_closed()
         "after",
     ]
     assert await redis.xlen(INTENTS_STREAM) == 0
+
+
+@pytest.mark.asyncio
+async def test_progress_is_what_was_read_not_what_was_hedged():
+    """An event needing no hedge still moves this consumer forward."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100, prefix="bt:r1")
+    # An open order: nothing to hedge, and the frontier is not there to
+    # stand in for the clock either.
+    event = fill_event(state=OrderState.OPEN, filled=Decimal(0))
+    await publisher.publish(redis, event)
+    consumer = asyncio.create_task(
+        consume_order_events(
+            redis, publisher, SHOULD_MATCH, 10, 10, prefix="bt:r1", clock=Clock.replay()
+        )
+    )
+    await asyncio.sleep(0.05)
+    assert await intents_on(redis, "bt:r1") == []
+    progress = await redis.get(replay_progress_key("bt:r1", PROGRESS_NAME))
+    assert int(progress) == event.ts_recv
+    await redis.set(replay_closed_key("bt:r1"), 1)
+    await asyncio.wait_for(consumer, timeout=1)
