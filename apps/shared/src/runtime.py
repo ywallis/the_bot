@@ -1116,8 +1116,19 @@ class Runtime:
         return int(interval * NS_PER_S)
 
     def _arm_timer(self) -> None:
+        """
+        Set the next timer an interval ahead, once the clock has a time.
+
+        A replay clock reads 0 until the first event is delivered, so arming
+        at start would put the first tick nanoseconds after the epoch and
+        fire it on the very first event read. Under replay the timer is
+        therefore armed on the first event instead, which is what live does
+        too: a full interval after the strategy begins.
+        """
         interval = self._interval_ns()
-        if interval is not None:
+        if interval is None:
+            return
+        if self.clock.live or self.clock.last_event_ns is not None:
             self._next_timer_ns = self.clock.now() + interval
 
     def _block_ms(self) -> int:
@@ -1138,7 +1149,11 @@ class Runtime:
 
     async def _fire_timer_if_due(self) -> None:
         interval = self._interval_ns()
-        if interval is None or self._next_timer_ns is None:
+        if interval is None:
+            return
+        if self._next_timer_ns is None:
+            # Under replay, the first event the clock saw arms it.
+            self._arm_timer()
             return
         now = self.clock.now()
         if now >= self._next_timer_ns:

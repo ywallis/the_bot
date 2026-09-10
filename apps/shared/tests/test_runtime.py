@@ -671,6 +671,29 @@ async def test_replay_timers_fire_by_recorded_time(redis: Any):
 
 
 @pytest.mark.asyncio
+async def test_a_replay_timer_does_not_fire_on_the_first_event(redis: Any):
+    """A replay clock reads 0 until an event arrives; the timer waits for one."""
+    handler = TimedRecorder()
+    runtime = Runtime(
+        redis,
+        config(),
+        strategy_config(),
+        handler,
+        clock=Clock.replay(),
+        prefix="bt:1",
+    )
+    await runtime.start()
+
+    await publish(redis, book(ts_recv=T0), prefix="bt:1")
+    await runtime.step()
+    assert handler.timers == 0  # armed at start, T0 would be an epoch overdue
+
+    await publish(redis, book(ts_recv=T0 + NS, seq=2), prefix="bt:1")
+    await runtime.step()
+    assert handler.timers == 1
+
+
+@pytest.mark.asyncio
 async def test_live_timers_fire_by_wall_time(redis: Any):
     """Live, an idle runtime still fires its timer once the interval elapses."""
 
