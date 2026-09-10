@@ -125,14 +125,22 @@ after the replayer exited, look at its log for which key it is waiting on.
 The JSON has the counts (intents, placements, rejections, cancellations,
 fills, market orders that outran the recorded depth), volume and fees per
 venue, the opening and closing totals per asset and venue, `net` (closing
-minus opening per asset, summed over venues) and the latency model per
-venue with its `source`. Three rules for reading it:
+minus opening per asset, summed over venues), `unfunded` (traded venues
+that never had a balance) and the latency model per venue with its
+`source`. Four rules for reading it:
 
 - **Read `net` first.** A hedged strategy ends a fee's worth from flat.
   Anything larger is a position the run acquired and never closed, and a
   profit and loss figure computed from the closing balances of such a run
   is that position marked at a price the reader chose, not a result. The
   broker warns when it is more than a percent of what the run traded.
+
+- **`unfunded` must be empty.** A venue in it had no balance from the
+  configuration, from `--balance` or from the recording, and a strategy
+  with no balance for a venue funds no quote on it: whatever the run did,
+  it did on the other venue only. It is what `--balances none` without a
+  matching `--balance` looks like. The broker warns for each one at
+  wind-down.
 
 - A number for a venue whose latency is `assumed` is a number about the
   assumption. Say so wherever it is quoted.

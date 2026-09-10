@@ -444,6 +444,18 @@ async def test_the_report_says_what_the_run_ended_holding():
 
 
 @pytest.mark.asyncio
+async def test_a_venue_that_never_had_a_balance_is_named_in_the_report(caplog: Any):
+    """No opening balance and none replayed means no quote, and the run says so."""
+    h = Harness()
+    await h.broker.reader.start()
+    await h.publish(balance(A, T0 - S))  # only one of the two traded venues
+    await h.publish(book(A, T0, [[0.34, 100]], [[0.35, 50]]))
+    await h.broker.shutdown()
+    assert h.broker.report.unfunded == [B]
+    assert f"{B} never had a balance" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_the_wind_down_executes_a_hedge_of_its_own_cancel():
     """The sweep produces fills to hedge, and the hedge must still land."""
     h = Harness(drain=["matching"])

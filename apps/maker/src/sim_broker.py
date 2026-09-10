@@ -683,6 +683,11 @@ class SimReport:
         Opening totals per venue and asset.
     closing : dict[str, dict[str, str]]
         Closing totals per venue and asset.
+    unfunded : list[str]
+        Traded venues that never had a balance, from the configuration,
+        ``--balance`` or the recording. A strategy with no balance for a
+        venue funds no quote on it, so this is a run that traded one side
+        of a pair without ever saying so.
     net : dict[str, str]
         Closing minus opening per asset, summed over venues: what the run
         ended holding that it did not start with. A hedged strategy ends
@@ -706,6 +711,7 @@ class SimReport:
     latency: dict[str, Any] = field(default_factory=dict)
     opening: dict[str, dict[str, str]] = field(default_factory=dict)
     closing: dict[str, dict[str, str]] = field(default_factory=dict)
+    unfunded: list[str] = field(default_factory=list)
     net: dict[str, str] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
@@ -730,6 +736,7 @@ class SimReport:
             "latency": self.latency,
             "opening": self.opening,
             "closing": self.closing,
+            "unfunded": self.unfunded,
             "net": self.net,
         }
 
@@ -916,6 +923,23 @@ class SimulatedBroker:
             streams.append(balance_stream(venue.id))
         streams.append(INTENTS_STREAM)
         return streams
+
+    def traded_venues(self) -> list[str]:
+        """
+        Enumerate the venues the run can quote on: those with a book feed.
+
+        Returns
+        -------
+        list[str]
+            Sorted venue ids. A venue the configuration gives no book is one
+            no strategy in this run prices against, funded or not.
+        """
+        return sorted(
+            {
+                venue
+                for venue, _symbol in self.config.feed_pairs(BOOK_FEED, self.production)
+            }
+        )
 
     def fees(self, venue: str) -> FeeConfig:
         """
@@ -1834,6 +1858,14 @@ class SimulatedBroker:
                 logger.info(
                     f"Fees for {venue.id}: maker {fees.maker}, taker {fees.taker}"
                 )
+        for venue in self.traded_venues():
+            if venue not in self.opening_balances:
+                logger.info(
+                    f"{venue} has no opening balance here and takes the recording's "
+                    "snapshot; with --balances none on the replayer it gets none at "
+                    "all, and a strategy with no balance for a venue quotes nothing "
+                    "on it. The report's unfunded says whether that happened"
+                )
         while True:
             processed = await self.step()
             if processed == 0 and await self.finished():
@@ -1900,6 +1932,19 @@ class SimulatedBroker:
             for asset, total in totals.items():
                 net[asset] = net.get(asset, ZERO) + Decimal(total)
         self.report.net = {asset: str(total) for asset, total in sorted(net.items())}
+        self.report.unfunded = [
+            venue
+            for venue in self.traded_venues()
+            if venue not in self.balances.adopted
+        ]
+        for venue in self.report.unfunded:
+            logger.warning(
+                f"{venue} never had a balance in this run: none was configured, "
+                "none was given with --balance and none was replayed. A strategy "
+                "with no balance for a venue funds no quote on it, so nothing here "
+                "was ever quoted there. Open it with --balance VENUE:ASSET=AMOUNT, "
+                "or replay the recorded balances"
+            )
         # A hedged run ends a fee's worth away from flat, which is not news.
         # A percent of what it traded is, and it is what an unhedged fill
         # looks like.
