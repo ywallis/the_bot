@@ -198,6 +198,7 @@ class Harness:
         participation: float | None = None,
         balances: dict[str, dict[str, float]] | None = None,
         drain: list[str] | None = None,
+        batch: int = 500,
     ) -> None:
         """Build the broker over a fake Redis."""
         self.redis = fakeredis.FakeRedis(decode_responses=decode)
@@ -208,6 +209,7 @@ class Harness:
             PREFIX,
             latency(),
             follow=follow or [],
+            batch=batch,
             block_ms=1,
             participation=participation,
             balances=balances,
@@ -741,6 +743,22 @@ async def test_a_cancel_intent_cancels_by_target_or_whatever_rests():
     await h.publish(cancel(T0 + 8 * S, ""))
     await h.advance(T0 + 9 * S)
     assert "s_es" not in h.broker.busy
+
+
+@pytest.mark.asyncio
+async def test_a_full_batch_holds_back_what_the_other_streams_received_after_it():
+    """A stream that filled its batch may have earlier books unread; nothing overtakes them."""
+    h = Harness(batch=2)
+    await h.broker.reader.start()
+    processed = await h.publish(
+        book(A, T0 + 1, [[0.34, 100]], [[0.35, 50]], seq=1),
+        book(A, T0 + 2, [[0.34, 100]], [[0.35, 50]], seq=2),
+        book(B, T0 + 10, [[0.33, 100]], [[0.34, 50]], seq=1),
+    )
+    assert processed == 2  # the two books of the full batch
+    assert h.broker.market(B, SYMBOL).latest is None  # the other venue waits
+    assert await h.broker.step() == 1
+    assert h.broker.market(B, SYMBOL).latest is not None
 
 
 @pytest.mark.asyncio

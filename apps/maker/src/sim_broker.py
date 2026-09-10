@@ -1737,6 +1737,17 @@ class SimulatedBroker:
         """
         Read what arrived, then process everything up to the gate in time order.
 
+        The read is consumed through ``StreamReader.consume``, on the same
+        rule the runtime follows: a stream that filled its batch may have
+        earlier entries still unread, so entries the other streams received
+        after its last one wait for the next read. Without that hold-back a
+        broker that has fallen behind buffers a trade whose books it has not
+        read yet, and the gate does not stop it: a busy book stream is
+        truncated at ``batch`` while a quiet trade stream is read to a later
+        time, ``Market.record`` appends books out of order, and a resting
+        order is filled against a queue position taken from a book the
+        broker never saw.
+
         Returns
         -------
         int
@@ -1744,11 +1755,8 @@ class SimulatedBroker:
         """
         frontier = await read_frontier(self.redis, self.prefix)
         blocks = await self.reader.read(self.block_ms)
-        for stream, entries in blocks:
-            for entry_id, event in entries:
-                self.reader.advance(stream, entry_id)
-                if event is None:
-                    continue
+        for run in self.reader.consume(blocks):
+            for event in run:
                 kind = (
                     INTENT_SECOND
                     if isinstance(event, OrderIntent | CancelIntent)

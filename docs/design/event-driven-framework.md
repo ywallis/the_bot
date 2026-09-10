@@ -1004,7 +1004,10 @@ version, and `XADD` intents. No shared code is required. The Python
    process stops on its own. Two things the build changed in the runtime
    for live trading as well: a multi-stream `XREAD` batch is delivered in
    receive order rather than stream by stream, and a stream that filled
-   its batch holds back what the others received after it. Nothing has yet
+   its batch holds back what the others received after it. That hold-back
+   is `StreamReader.consume`, which the simulated broker uses too: it reads
+   the same bus, and a trade buffered before the books that preceded it
+   fills a resting order against a queue it never saw. Nothing has yet
    been run against a real recording, which lives on the trading host: the
    first real backtest, the two questions the overnight run left (a wider
    price tolerance, an overlapped replace), and the calibration of the
