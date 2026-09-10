@@ -166,6 +166,37 @@ that never had a balance) and the latency model per venue with its
 The recorder can record a backtest too: point it at the prefix's streams and
 the run is on disk in the same format as live.
 
+Two tools read a finished run. Both are read-only.
+
+```bash
+uv run -m apps.maker.src.tools.check_report <run_id>.json
+```
+
+`check_report` puts the report through the invariants of a usable run:
+`unfunded` empty, the run ended flat within a percent of what it traded,
+something was actually placed and filled, no fill outran the recorded depth,
+every venue's latency measured rather than assumed, the counts adding up, and
+rejections not in the shape a strategy key that never released its lock
+makes. FAIL means the run cannot be quoted as it stands, WARN means it can
+with the caveat named, and the exit status is 1 on any FAIL, so a script can
+gate on it.
+
+```bash
+uv run -m apps.maker.src.tools.intent_diff <run_id> \
+    --start 2026-09-07T16:00Z --end 2026-09-07T17:00Z --strategy <identifier>
+```
+
+`intent_diff` compares what the replayed strategy did against what the live
+one did over the same window: the live intents come from the recorder's
+files, the replayed ones from the run's prefix, so run it before cleaning the
+prefix up. It reports quotes per key and side with the median gap between
+them, the quotes it could pair within `--tolerance-ms` and how their prices
+differ in basis points, and a timeline marking every bucket where one run
+quoted and the other did not. That last column and the first unpaired quote
+are where to start: the cadence gap in section 9 of the design is a
+divergence of state, and everything after the first divergence is
+consequence. `--json` prints the same thing as data.
+
 ## 6. Cleaning up
 
 ```bash
