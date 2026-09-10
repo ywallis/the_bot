@@ -33,6 +33,7 @@ from apps.shared.src.events import (
     OrderState,
     Side,
     TradeEvent,
+    book_stream,
     from_stream_fields,
     now_ns,
     prefixed,
@@ -545,6 +546,40 @@ async def test_a_full_batch_holds_back_what_the_other_streams_received_after_it(
     assert await runtime.step() == 2
     assert [e.ts_recv for e in handler.events] == [T0 + 1, T0 + 2, T0 + 3, T0 + 10]
     assert await runtime.step() == 0
+
+
+@pytest.mark.asyncio
+async def test_a_full_batch_ending_in_an_undecodable_entry_still_holds_back(
+    redis: Any,
+):
+    """The hold-back is the last entry that decoded, not the last entry."""
+    await publish(
+        redis,
+        book(seq=1, ts_recv=T0 + 1),
+        book(seq=2, ts_recv=T0 + 2),
+        prefix="bt:1",
+    )
+    sample = book()
+    await redis.xadd(
+        prefixed("bt:1", book_stream(sample.venue, sample.symbol)),
+        {"type": "book", "data": "{"},
+    )
+    await publish(redis, trade(ts_recv=T0 + 10), prefix="bt:1")
+    handler = Recorder()
+    runtime = Runtime(
+        redis,
+        config(),
+        strategy_config(),
+        handler,
+        clock=Clock.replay(),
+        prefix="bt:1",
+        batch=3,
+    )
+    await runtime.start()
+    assert await runtime.step() == 2  # the two books; the trade stream waits
+    assert [e.ts_recv for e in handler.events] == [T0 + 1, T0 + 2]
+    assert await runtime.step() == 1
+    assert [e.ts_recv for e in handler.events] == [T0 + 1, T0 + 2, T0 + 10]
 
 
 @pytest.mark.asyncio

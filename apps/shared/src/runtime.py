@@ -524,6 +524,93 @@ class StreamReader:
         """
         self.cursors[stream] = entry_id
 
+    def consume(
+        self, blocks: list[tuple[str, list[tuple[str, AnyEvent | None]]]]
+    ) -> list[list[AnyEvent]]:
+        """
+        Advance the cursors over what may be processed now, per stream.
+
+        ``XREAD`` answers with one block of entries per stream, so a read
+        spanning several streams has lost the order events were received
+        in. Processing it as returned would hand a consumer a second of one
+        venue's books and then the other venue's, which live is a slow
+        consumer's problem and under an unpaced replay is every read. So a
+        caller merges the runs on ``ts_recv`` (never reordering within one),
+        and when a stream filled its batch, anything on the other streams
+        received after that stream's last entry is held back for the next
+        read, since that stream may have earlier entries still unread.
+        Held-back entries are simply re-read: the cursor of their stream
+        stays where consumption stopped.
+
+        Parameters
+        ----------
+        blocks : list[tuple[str, list[tuple[str, AnyEvent | None]]]]
+            What ``read`` returned.
+
+        Returns
+        -------
+        list[list[AnyEvent]]
+            The events to process, one list per block, each in read order.
+            Undecodable entries are stepped over, their cursors advanced.
+        """
+        watermark = self._watermark(blocks)
+        runs: list[list[AnyEvent]] = []
+        for stream, entries in blocks:
+            run: list[AnyEvent] = []
+            for entry_id, event in entries:
+                if (
+                    event is not None
+                    and watermark is not None
+                    and event.ts_recv > watermark
+                ):
+                    break
+                self.advance(stream, entry_id)
+                if event is not None:
+                    run.append(event)
+            runs.append(run)
+        return runs
+
+    def _watermark(
+        self, blocks: list[tuple[str, list[tuple[str, AnyEvent | None]]]]
+    ) -> int | None:
+        """
+        Return the time beyond which a read's entries must wait, if any.
+
+        The last entry of a full batch may not decode, and its block still
+        bounds the read: the time taken is that of its last *decodable*
+        entry, since anything after that one delivers nothing anyway. Taking
+        the last entry outright would drop the block from the bound and, if
+        it were the only full batch, disable the hold-back altogether.
+
+        Parameters
+        ----------
+        blocks : list[tuple[str, list[tuple[str, AnyEvent | None]]]]
+            What ``read`` returned.
+
+        Returns
+        -------
+        int | None
+            The watermark, or None when no block filled its batch.
+        """
+        watermark: int | None = None
+        for stream, entries in blocks:
+            if len(entries) < self.batch:
+                continue
+            last = next(
+                (event for _entry_id, event in reversed(entries) if event is not None),
+                None,
+            )
+            if last is None:
+                logger.error(
+                    f"A full batch on {stream} decoded nothing, so it cannot bound "
+                    "this read: its unread entries may overtake what is processed now"
+                )
+                continue
+            watermark = (
+                last.ts_recv if watermark is None else min(watermark, last.ts_recv)
+            )
+        return watermark
+
     async def at_tail(self) -> bool:
         """
         Return whether every cursor sits at its stream's current tail.
@@ -624,7 +711,6 @@ class Runtime:
         self.clock = clock if clock is not None else Clock()
         self.prefix = prefix
         self.block_ms = block_ms
-        self.batch = batch
         self.publisher = StreamPublisher(maxlen=config.oms.stream_maxlen, prefix=prefix)
         self.streams = subscribed_streams(strategy, prefix)
         self.reader = StreamReader(
@@ -924,17 +1010,11 @@ class Runtime:
         """
         Perform one blocking read and dispatch what it returned, in time order.
 
-        ``XREAD`` answers with one block of entries per stream, so a read
-        spanning several streams has lost the order events were received
-        in. Delivering it as returned would hand a strategy a second of one
-        venue's books and then the other venue's, which live is a slow
-        consumer's problem and under an unpaced replay is every read. So a
-        batch is merged on ``ts_recv`` across streams (never reordered
-        within one), and when a stream filled its batch, anything on the
-        other streams received after that stream's last entry is held back
-        for the next read, since that stream may have earlier entries still
-        unread. Held-back entries are simply re-read: the cursor of their
-        stream stays where delivery stopped.
+        The reader hands back one run per stream, holding back what may be
+        overtaken by an unread entry (see ``StreamReader.consume``); the runs
+        are merged on ``ts_recv`` so the strategy sees one time-ordered
+        sequence rather than a second of one venue's books and then the
+        other venue's.
 
         Under replay the runtime's progress is written to
         ``replay_progress_key`` so the replayer and the simulated broker can
@@ -953,30 +1033,9 @@ class Runtime:
             0 if self.clock.live else await read_frontier(self.redis, self.prefix)
         )
         blocks = await self.reader.read(self._block_ms())
-        watermark = min(
-            (
-                entries[-1][1].ts_recv
-                for _stream, entries in blocks
-                if len(entries) >= self.batch and entries[-1][1] is not None
-            ),
-            default=None,
-        )
-        runs: list[list[tuple[str, AnyEvent]]] = []
-        for stream, entries in blocks:
-            run: list[tuple[str, AnyEvent]] = []
-            for entry_id, event in entries:
-                if (
-                    event is not None
-                    and watermark is not None
-                    and event.ts_recv > watermark
-                ):
-                    break
-                self.reader.advance(stream, entry_id)
-                if event is not None:
-                    run.append((entry_id, event))
-            runs.append(run)
+        runs = self.reader.consume(blocks)
         delivered = 0
-        for _entry_id, event in heapq.merge(*runs, key=lambda item: item[1].ts_recv):
+        for event in heapq.merge(*runs, key=lambda event: event.ts_recv):
             await self.dispatch(event)
             delivered += 1
         await self._fire_timer_if_due()
