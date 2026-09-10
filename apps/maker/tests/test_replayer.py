@@ -503,8 +503,8 @@ async def test_paced_batches_flush_before_every_wait(
 
     monkeypatch.setattr(replayer, "sleep", sleep)
     batches = [[r.ts_recv for r in b] async for b in replayer.batches()]
-    # The primed snapshot anchors the pacer, then each later record is its
-    # own batch: they are minutes apart and the pacer sleeps between them.
+    # Each record is its own batch: they are minutes apart and the pacer
+    # sleeps between them.
     assert batches == [
         [T14 - 30 * MINUTE],
         [T14 + 5 * MINUTE],
@@ -514,7 +514,33 @@ async def test_paced_batches_flush_before_every_wait(
         [T14 + 40 * MINUTE],
     ]
     assert len(sleeps) == 5
-    assert sleeps[0] == pytest.approx(35 * 60)
+    # The pacer is anchored on the start of the range, not on the snapshot
+    # primed from half an hour before it: the primed record is due at once
+    # and the first record in range five minutes later.
+    assert sleeps[0] == pytest.approx(5 * 60)
+
+
+@pytest.mark.asyncio
+async def test_a_paced_replay_does_not_wait_out_the_age_of_a_primed_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A snapshot recorded days before the range is published at once, not as t=0."""
+    old = T14 - 2 * 24 * HOUR
+    write(tmp_path, BOOK_A, "2026-09-04T14", [line(book(old, 1))])
+    write(tmp_path, BOOK_A, "2026-09-06T14", [line(book(T14 + 5 * MINUTE, 2))])
+    replayer = rp.Replayer(
+        tmp_path, [BOOK_A], "bt:r1", start_ns=T14, end_ns=T14 + HOUR, speed=1.0
+    )
+    sleeps: list[float] = []
+
+    async def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(replayer, "sleep", sleep)
+    batches = [[r.ts_recv for r in b] async for b in replayer.batches()]
+    assert batches == [[old], [T14 + 5 * MINUTE]]
+    # Two days of wall time if the primed snapshot were the anchor.
+    assert sleeps == [pytest.approx(5 * 60)]
 
 
 @pytest.mark.asyncio

@@ -676,15 +676,21 @@ class Pacer:
         Recorded seconds per wall second. 0 means no pacing at all.
     """
 
-    def __init__(self, speed: float) -> None:
+    def __init__(self, speed: float, anchor_ns: int | None = None) -> None:
         """
-        Initialize the pacer, anchored on the first timestamp it is asked about.
+        Initialize the pacer, anchored on a given time or the first one it sees.
 
         Parameters
         ----------
         speed : float
             Recorded seconds per wall second, 1 for real time. 0 disables
             pacing.
+        anchor_ns : int | None
+            The recorded time that maps onto the first wall moment the pacer
+            is asked about; the first timestamp it is given when omitted.
+            The replayer anchors on the start of its range, so that a
+            snapshot primed from before it is due at once rather than
+            standing in as t=0 and holding the range back by its own age.
 
         Raises
         ------
@@ -694,8 +700,9 @@ class Pacer:
         if speed < 0:
             raise ValueError(f"Replay speed must be zero or positive, got {speed}")
         self.speed = speed
-        self._first_ts: int | None = None
+        self._first_ts: int | None = anchor_ns
         self._start_wall: float = 0.0
+        self._started = False
 
     def delay(self, ts_recv: int, now: float | None = None) -> float:
         """
@@ -712,16 +719,18 @@ class Pacer:
         -------
         float
             Seconds to wait, 0 if the timestamp is already due, is earlier
-            than one seen before, or pacing is off.
+            than the anchor, or pacing is off.
         """
         if self.speed == 0:
             return 0.0
         wall = time.monotonic() if now is None else now
-        if self._first_ts is None:
-            self._first_ts = ts_recv
+        if not self._started:
+            self._started = True
             self._start_wall = wall
-            return 0.0
-        due = self._start_wall + (ts_recv - self._first_ts) / NS_PER_S / self.speed
+        first = self._first_ts
+        if first is None:
+            self._first_ts = first = ts_recv
+        due = self._start_wall + (ts_recv - first) / NS_PER_S / self.speed
         return max(0.0, due - wall)
 
 
@@ -843,7 +852,7 @@ class Replayer:
         self.prefix = prefix
         self.start_ns = start_ns
         self.end_ns = end_ns
-        self.pacer = Pacer(speed)
+        self.pacer = Pacer(speed, anchor_ns=start_ns)
         self.batch = batch
         self.balances = balances
         self.follow = list(follow)
@@ -891,7 +900,11 @@ class Replayer:
 
         Unpaced, a batch is simply ``batch`` records. Paced, a batch is
         flushed before every wait, so nothing due is held back while the
-        replayer sleeps for something later.
+        replayer sleeps for something later. The primed snapshots come from
+        before the range and are due at once, the pacer being anchored on
+        the range's start rather than on the first record it sees: a
+        snapshot last recorded two days before ``--start`` would otherwise
+        be t=0 and put the first record in range two days of wall time away.
 
         Yields
         ------
