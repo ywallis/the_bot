@@ -60,7 +60,7 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
-testpaths = ["apps/maker/tests", "apps/shared/tests", "apps/strategies/tests"]
+testpaths = ["apps/maker/tests", "apps/shared/tests", "apps/accountant/tests", "apps/strategies/tests"]
 asyncio_default_fixture_loop_scope = "function"
 
 # setup-uv reads this and installs the matching uv, so CI and a local run use
@@ -115,7 +115,7 @@ show_missing = true
 skip_covered = true
 exclude_also = ["if __name__ == .__main__.:"]
 # A ratchet, not a target: it is the level the suite actually reaches today.
-# apps/accountant/src has no tests at all and is what holds this down; the
-# other three trees sit around 79%. Raise this as coverage improves, and do
-# not lower it to make a red build green.
-fail_under = 64
+# apps/accountant/src has its fee-preparation tests only and is what holds
+# this down; the other three trees sit around 79%. Raise this as coverage
+# improves, and do not lower it to make a red build green.
+fail_under = 68

@@ -27,6 +27,7 @@ from apps.maker.src.structs import LimitedSet
 from apps.maker.src.utils import info_from_oid
 from apps.maker.src.watcher import handle_feed_error
 from apps.shared.src.ccxt_events import order_event_from_ccxt
+from apps.shared.src.ccxt_orders import fetch_orders_since
 from apps.shared.src.config import AppConfig, load_app_config
 from apps.shared.src.events import OrderEvent, now_ns
 from apps.shared.src.exchange_clients import authenticated_clients
@@ -286,46 +287,6 @@ async def publish_updates(
             f"filled {event.filled}/{event.filled + event.remaining}"
         )
     return published
-
-
-async def fetch_orders_since(
-    client: Any, ticker: str, since: int
-) -> list[dict[str, Any]]:
-    """
-    Fetch every order of ours that changed since a time, over REST.
-
-    Venues differ in what they expose. One call to ``fetch_orders`` where
-    the venue has it; otherwise the open orders plus whatever closed or
-    cancelled ones the venue can list, which between them cover every state
-    an order can be in.
-
-    Parameters
-    ----------
-    client : Any
-        The exchange client. Typed loosely because the optional endpoints
-        are looked up on the client's ``has`` map.
-    ticker : str
-        The trading pair symbol.
-    since : int
-        Milliseconds since the epoch.
-
-    Returns
-    -------
-    list[dict[str, Any]]
-        CCXT unified orders.
-    """
-    has = getattr(client, "has", {}) or {}
-    if has.get("fetchOrders"):
-        return list(await client.fetch_orders(ticker, since=since))
-    orders: list[dict[str, Any]] = list(await client.fetch_open_orders(ticker))
-    if has.get("fetchCanceledAndClosedOrders"):
-        orders += await client.fetch_canceled_and_closed_orders(ticker, since=since)
-    else:
-        if has.get("fetchClosedOrders"):
-            orders += await client.fetch_closed_orders(ticker, since=since)
-        if has.get("fetchCanceledOrders"):
-            orders += await client.fetch_canceled_orders(ticker, since=since)
-    return orders
 
 
 async def reconcile(

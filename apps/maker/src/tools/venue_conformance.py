@@ -31,6 +31,9 @@ import ccxt.pro as ccxt  # pyright: ignore[reportMissingTypeStubs]
 from dotenv import load_dotenv
 
 from apps.maker.src.watcher import RECONNECT_ERRORS, RESUBSCRIBE_ERRORS, trade_key
+from apps.shared.src.config import load_app_config
+from apps.shared.src.events import Side
+from apps.shared.src.fees import base_quote, fee_currency_for
 
 load_dotenv()
 
@@ -473,6 +476,129 @@ async def check_auth(venue: str, report: Report) -> None:
         await client.close()
 
 
+async def check_fees(venue: str, symbol: str, report: Report) -> None:
+    """
+    Report the venue's fee schedule and check what fills were charged.
+
+    The rates decide how hedges are sized and quotes are priced, and the
+    currency a fee is charged in decides whether the base balance erodes
+    with every fill or the USDT leg pays. Both are venue behaviour unit
+    tests cannot see, and both move: rates with the account's volume tier,
+    currency with the account's fee mode.
+
+    Parameters
+    ----------
+    venue : str
+        CCXT short id.
+    symbol : str
+        Symbol checked.
+    report : Report
+        Where to record results.
+    """
+    market = (_markets or {}).get(symbol)
+    if market is None:
+        report.add("fees market defaults", False, f"no market {symbol}")
+        return
+    report.add(
+        "fees market defaults",
+        None,
+        f"maker {market.get('maker')}, taker {market.get('taker')}",
+    )
+
+    client = make_client(venue, auth=True)
+    try:
+        has = getattr(client, "has", {}) or {}
+        if not has.get("fetchTradingFees"):
+            report.add(
+                "fees endpoint",
+                None,
+                "fetchTradingFees not supported",
+                "declare static maker_fee/taker_fee overrides on the venue in config",
+            )
+        else:
+            try:
+                fees = await asyncio.wait_for(client.fetch_trading_fees(), 30)
+                if isinstance(fees.get("trading"), dict):
+                    fees = fees["trading"]
+                account = fees.get(symbol, {})
+                tiered = account.get("maker") != market.get("maker")
+                report.add(
+                    "fees account rates",
+                    None,
+                    f"maker {account.get('maker')}, taker {account.get('taker')}"
+                    + (
+                        " (account tier differs from the market default)"
+                        if tiered
+                        else ""
+                    ),
+                )
+            except Exception as e:  # noqa: BLE001
+                report.add(
+                    "fees endpoint",
+                    False,
+                    f"{type(e).__name__}: {str(e)[:80]}",
+                    "declare static maker_fee/taker_fee overrides on the venue in config",
+                )
+
+        try:
+            trades = await asyncio.wait_for(
+                client.fetch_my_trades(symbol, limit=20), 30
+            )
+        except Exception as e:  # noqa: BLE001
+            report.add(
+                "fees observed", None, f"no recent trades to read: {type(e).__name__}"
+            )
+            return
+        by_side: dict[str, set[str]] = {"buy": set(), "sell": set()}
+        for trade in trades:
+            fee = trade.get("fee") or {}
+            side = trade.get("side")
+            if fee.get("currency") and side in by_side:
+                by_side[side].add(str(fee["currency"]))
+        report.add(
+            "fees observed",
+            None,
+            f"buy charged {sorted(by_side['buy']) or 'nothing'}, "
+            f"sell charged {sorted(by_side['sell']) or 'nothing'} "
+            f"over the last {len(trades)} trades",
+        )
+    finally:
+        await client.close()
+
+    try:
+        config = load_app_config()
+    except Exception:  # noqa: BLE001
+        return
+    venue_config = next((v for v in config.venues if v.id == venue), None)
+    if venue_config is None:
+        report.add(
+            "fees policy", None, "venue not declared in config, nothing to compare"
+        )
+        return
+    base, quote = base_quote(symbol)
+    mismatches = []
+    for side_name in ("buy", "sell"):
+        expected = fee_currency_for(
+            venue_config.fee_currency, Side(side_name), base, quote
+        )
+        for seen in sorted(by_side[side_name]):
+            if seen != expected:
+                mismatches.append(f"{side_name} charged {seen}, config says {expected}")
+    if mismatches:
+        report.add(
+            "fees policy",
+            False,
+            "; ".join(mismatches),
+            "update fee_currency on the venue in config; the matcher sizes hedges with it",
+        )
+    else:
+        report.add(
+            "fees policy",
+            True,
+            f"configured {venue_config.fee_currency} matches what the venue charged",
+        )
+
+
 async def run(venue: str, symbol: str, seconds: int, auth: bool) -> bool:
     """
     Run every check and print the report.
@@ -510,6 +636,7 @@ async def run(venue: str, symbol: str, seconds: int, auth: bool) -> bool:
     ]
     if auth:
         tasks.append(check_auth(venue, report))
+        tasks.append(check_fees(venue, symbol, report))
     await asyncio.gather(*tasks)
     return report.print(venue, symbol)
 

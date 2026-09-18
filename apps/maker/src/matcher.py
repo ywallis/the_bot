@@ -6,6 +6,16 @@ position. Its input is ``oms:events`` and its output is an ``OrderIntent`` on
 ``oms:intents``, so it is an ordinary consumer of the bus rather than a
 component wired into the exchange websocket.
 
+Sizing uses the fee schedule published on ``acct:fees``: venues charge fees
+in the quote asset, in the base asset, or in whichever side was received,
+and the rate depends on the account's volume tier, so the schedule is
+fetched periodically rather than fixed in code. A fee charged in base
+erodes the asset whose balance the system keeps stable and is compensated
+in the hedge; a fee charged in quote comes out of the USDT leg and is left
+to the accountant. What a venue actually charged on a fill is checked
+against the schedule and a mismatch is logged: the schedule is an input,
+not a promise.
+
 Until phase 3 this module also owned the ``watch_orders`` loop and was the
 only thing in the system that could see a fill. That half now lives in
 ``order_watcher.py``, which leaves this file as pure hedging logic and makes
@@ -15,7 +25,8 @@ it the natural candidate to move into the strategies repo. See
 
 import asyncio
 import logging
-from decimal import Decimal
+import time
+from decimal import ROUND_DOWN, ROUND_UP, Decimal
 from typing import Any, cast
 
 from redis.asyncio import ConnectionPool, Redis
@@ -26,13 +37,23 @@ from apps.maker.src.structs import LimitedSet
 from apps.shared.src.config import AppConfig, load_app_config
 from apps.shared.src.events import (
     ORDER_EVENTS_STREAM,
+    FeeScheduleEvent,
+    Liquidity,
     OrderEvent,
     OrderIntent,
     OrderKind,
     OrderState,
     Side,
+    decode,
     from_stream_fields,
     now_ns,
+)
+from apps.shared.src.fees import (
+    base_quote,
+    fee_currency_for,
+    fee_in_base,
+    fees_snapshot_key,
+    schedule_for,
 )
 from apps.shared.src.streams import StreamPublisher, entry_id_str, stream_tail
 from apps.shared.src.utils import production
@@ -40,14 +61,27 @@ from apps.shared.src.utils import production
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
-# TODO:
-# - Make fee fetching dynamic
-NATIVE_ASSET_FEE: dict[str, float] = {"bitget": 0.001, "gate": 0.001}
+# How long startup waits for every venue's fee schedule to be published by
+# the fee watcher, and how often it checks. A hedge sized without the
+# schedule leaves a fee-sized residual position, so the matcher prefers to
+# wait; past the deadline it hedges unadjusted and logs the gap on every
+# fill from a venue without a schedule.
+SCHEDULE_WAIT_S = 60.0
+SCHEDULE_POLL_S = 2.0
 
-# Smallest notional a venue will accept, and the notional to bump a hedge to
-# when the fill was smaller than that.
-MIN_NOTIONAL = 3.0
-TARGET_NOTIONAL = 3.1
+# A hedge below the venue's minimum notional is bumped above it by this
+# factor: the price can slip below the minimum between sizing and execution,
+# and an unhedged position is worse than a slightly oversized hedge.
+DUST_MARGIN = Decimal("1.03")
+
+# Decimal places an order amount may carry when the venue does not report
+# its precision. The value the matcher quantized to before schedules existed.
+FALLBACK_PRECISION = 4
+
+# How far the fee a venue actually reported on a fill may deviate from the
+# schedule's rate, in either direction, before the mismatch is logged. A
+# mismatch means the configured policy or the account's fee tier moved.
+MAGNITUDE_TOLERANCE = Decimal("1.5")
 
 # An order is worth hedging once it can no longer fill any further. A
 # cancelled or expired order that filled in part still leaves a position.
@@ -59,50 +93,125 @@ HEDGEABLE_STATES: frozenset[OrderState] = frozenset(
 HEDGE_MEMORY = 1000
 
 
-def hedge_quantity(
-    origin_venue: str, matching_venue: str, side: Side, filled: float, price: float
-) -> float:
+def _leg(
+    schedule: FeeScheduleEvent | None, symbol: str, side: Side, taker: bool
+) -> tuple[Decimal, bool, bool]:
     """
-    Size the hedge for a fill.
-
-    Venues that charge their fee in the asset rather than the quote leave us
-    with less base than we sold, or require more base than we bought, so the
-    quantity is adjusted on whichever leg pays in kind. A fill below the
-    venue's minimum notional is rounded up to a size the venue will accept:
-    an unhedged position is worse than a slightly oversized hedge.
+    Return the fee terms of one leg of the hedge.
 
     Parameters
     ----------
-    origin_venue : str
-        Venue the fill happened on.
-    matching_venue : str
-        Venue the hedge will be placed on.
+    schedule : FeeScheduleEvent | None
+        The schedule of the venue the leg trades on.
+    symbol : str
+        CCXT symbol.
+    side : Side
+        Side of the leg.
+    taker : bool
+        True for the hedge leg, which crosses the spread; False for the
+        fill leg, which earned the maker rate.
+
+    Returns
+    -------
+    tuple[Decimal, bool, bool]
+        The rate as a fraction of traded value (zero when unknown), whether
+        the fee is charged in the base asset (False when unknown), and
+        whether the schedule covers the symbol at all.
+    """
+    if schedule is None:
+        return Decimal(0), False, False
+    base, quote = base_quote(symbol)
+    in_base = fee_in_base(schedule.fee_currency, side, base, quote)
+    entry = schedule_for(schedule, symbol)
+    if entry is None:
+        return Decimal(0), in_base, False
+    rate = entry.taker if taker else entry.maker
+    return (rate if rate is not None else Decimal(0)), in_base, True
+
+
+def hedge_quantity(
+    origin: FeeScheduleEvent | None,
+    matching: FeeScheduleEvent | None,
+    symbol: str,
+    side: Side,
+    filled: Decimal,
+    price: Decimal,
+) -> Decimal:
+    """
+    Size the hedge for a fill so the base balance ends where it started.
+
+    The fill's base flow is computed from the origin venue's policy and
+    maker rate: a buy charged in base delivers ``filled * (1 - rate)``, a
+    sell charged in base takes ``filled * (1 + rate)`` out of the balance,
+    and a fee in quote leaves the base flow untouched. The hedge then moves
+    exactly that much the other way on the matching venue, sized up where
+    the hedge's own fee is charged in base: a buy delivers
+    ``amount * (1 - rate)`` and a sell costs ``amount * (1 + rate)``. A fee
+    charged in quote is left to the USDT leg.
+
+    The result is quantized to the venue's amount precision so the order is
+    not rejected for its 13th decimal place: down, since the hedge should
+    not exceed the position it flattens. A hedge whose notional then falls
+    under the matching venue's minimum is rounded up instead, which is the
+    only way it gets accepted at all - one truncated tick is enough to put
+    a bumped order back under the minimum it was bumped to clear.
+
+    A fill too small to quantize to anything sizes to zero. The caller
+    decides what to do with that; there is no size that both hedges it and
+    the venue accepts.
+
+    Parameters
+    ----------
+    origin : FeeScheduleEvent | None
+        The fee schedule of the venue the fill happened on. None, or a
+        schedule without the symbol, hedges the fill unadjusted.
+    matching : FeeScheduleEvent | None
+        The fee schedule of the venue the hedge will be placed on.
+    symbol : str
+        CCXT symbol.
     side : Side
         Side of the filled order.
-    filled : float
+    filled : Decimal
         Quantity filled.
-    price : float
+    price : Decimal
         Price the fill executed at.
 
     Returns
     -------
-    float
+    Decimal
         Quantity to trade on the matching venue.
     """
-    quantity = filled
-    if side is Side.BUY and origin_venue in NATIVE_ASSET_FEE:
-        quantity = quantity * (1 - NATIVE_ASSET_FEE[origin_venue])
+    origin_rate, origin_in_base, _ = _leg(origin, symbol, side, taker=False)
+    hedge_side = Side.SELL if side is Side.BUY else Side.BUY
+    matching_rate, matching_in_base, matched = _leg(
+        matching, symbol, hedge_side, taker=True
+    )
 
-    if price * quantity <= MIN_NOTIONAL:
-        quantity = TARGET_NOTIONAL / price
+    if side is Side.BUY:
+        held = filled * (1 - origin_rate) if origin_in_base else filled
+        quantity = held / (1 + matching_rate) if matching_in_base else held
+    else:
+        sold = filled * (1 + origin_rate) if origin_in_base else filled
+        quantity = sold / (1 - matching_rate) if matching_in_base else sold
 
-    if side is Side.SELL and matching_venue in NATIVE_ASSET_FEE:
-        quantity = quantity / (1 - NATIVE_ASSET_FEE[matching_venue])
-
+    min_cost = None
+    precision = None
+    if matched and matching is not None:
+        entry = schedule_for(matching, symbol)
+        if entry is not None:
+            min_cost = entry.min_cost
+            precision = entry.amount_precision
+    places = precision if precision is not None else FALLBACK_PRECISION
+    tick = Decimal(1).scaleb(-places)
+    quantity = quantity.quantize(tick, rounding=ROUND_DOWN)
+    if min_cost is not None and quantity * price < Decimal(str(min_cost)):
+        quantity = (Decimal(str(min_cost)) * DUST_MARGIN / price).quantize(
+            tick, rounding=ROUND_UP
+        )
     return quantity
 
 
-def hedge_price(event: OrderEvent) -> float | None:
+def hedge_price(event: OrderEvent) -> Decimal | None:
     """
     Return the price a fill executed at.
 
@@ -113,21 +222,73 @@ def hedge_price(event: OrderEvent) -> float | None:
 
     Returns
     -------
-    float | None
+    Decimal | None
         The average fill price, falling back to the price of the last fill
         the event carried, or None if the event reports neither. An event
         with a fill but no price is a venue reporting something we cannot
         size a hedge from, and is skipped rather than guessed at.
     """
     if event.avg_price is not None:
-        return float(event.avg_price)
+        return event.avg_price
     if event.last_fill is not None:
-        return float(event.last_fill.price)
+        return event.last_fill.price
+    return None
+
+
+def fee_mismatch(event: OrderEvent, schedule: FeeScheduleEvent | None) -> str | None:
+    """
+    Describe how a venue's reported fill fee contradicts the schedule.
+
+    The schedule is what hedges are sized with, so what the venue actually
+    charged is checked against it: a fee in an unexpected currency means
+    the account's fee mode moved, a rate far from the schedule's means the
+    account's volume tier did.
+
+    Parameters
+    ----------
+    event : OrderEvent
+        The order event reporting the fill.
+    schedule : FeeScheduleEvent | None
+        The fee schedule of the venue the fill happened on.
+
+    Returns
+    -------
+    str | None
+        A human readable description of the mismatch, None when the
+        reported fee agrees with the schedule or carries too little
+        information to check.
+    """
+    if schedule is None or event.last_fill is None:
+        return None
+    if event.side is None or event.filled <= 0:
+        return None
+    fill = event.last_fill
+    if fill.fee is None or fill.fee_currency is None:
+        return None
+    entry = schedule_for(schedule, event.symbol)
+    if entry is None:
+        return None
+    base, quote = base_quote(event.symbol)
+    expected = fee_currency_for(schedule.fee_currency, event.side, base, quote)
+    if fill.fee_currency != expected:
+        return f"fee charged in {fill.fee_currency}, schedule says {expected}"
+    rate = entry.taker if fill.liquidity is Liquidity.TAKER else entry.maker
+    if rate is None or rate == 0:
+        return None
+    if fill.fee_currency == base:
+        observed = fill.fee / event.filled
+    else:
+        price = event.avg_price or fill.price
+        if price <= 0:
+            return None
+        observed = fill.fee / (event.filled * price)
+    if observed > rate * MAGNITUDE_TOLERANCE or observed < rate / MAGNITUDE_TOLERANCE:
+        return f"fee rate {observed} deviates from the schedule's {rate}"
     return None
 
 
 def hedge_intent(
-    event: OrderEvent, matching_venue: str, quantity: float, price: float
+    event: OrderEvent, matching_venue: str, quantity: Decimal, price: Decimal
 ) -> OrderIntent:
     """
     Build the market order that flattens a fill.
@@ -138,9 +299,9 @@ def hedge_intent(
         The order event that reported the fill.
     matching_venue : str
         Venue to place the hedge on.
-    quantity : float
-        Quantity to trade.
-    price : float
+    quantity : Decimal
+        Quantity to trade, already sized and quantized.
+    price : Decimal
         Price the fill executed at, passed through for venues that size a
         market order by cost.
 
@@ -159,8 +320,8 @@ def hedge_intent(
         symbol=event.symbol,
         side=side,
         order_type=OrderKind.MARKET,
-        amount=Decimal(quantity).quantize(Decimal("0.0000")),
-        price=Decimal(price),
+        amount=quantity,
+        price=price,
         tags={"hedge_of": event.intent_id, "origin_venue": event.venue},
     )
 
@@ -208,12 +369,98 @@ def should_hedge(
     return matching_venue
 
 
+def hedging_venues(config: AppConfig, production_mode: bool) -> set[str]:
+    """
+    Return the venues whose fee schedules a hedge needs.
+
+    Sizing a hedge prices two legs: the venue the fill happened on and the
+    venue it is flattened on. Only strategies that hedge, and only those
+    active in this mode, produce either. The full venue list would be wrong
+    to wait on: the fee watcher covers the venues strategies subscribe to,
+    so a venue declared for market data alone never publishes a schedule
+    and waiting on it burns the whole deadline on every start.
+
+    Parameters
+    ----------
+    config : AppConfig
+        The application configuration.
+    production_mode : bool
+        Which set of strategies is running, see ``active_strategies``.
+
+    Returns
+    -------
+    set[str]
+        Venue ids, empty if nothing hedges.
+    """
+    venues: set[str] = set()
+    for strategy in config.active_strategies(production_mode):
+        if not strategy.params.get("should_match"):
+            continue
+        venues.add(strategy.params["taker_exchange"])
+        venues |= {sub.venue for sub in strategy.subscriptions}
+    return venues
+
+
+async def load_schedules(redis: Redis, venues: set[str]) -> dict[str, FeeScheduleEvent]:
+    """
+    Read the fee schedule of every given venue from its snapshot key.
+
+    The fee watcher publishes schedules as it starts, so startup waits for
+    them: a hedge sized without a schedule leaves a fee-sized residual
+    position. Past the deadline, whatever is still missing is logged and
+    the matcher starts anyway, hedging those venues' fills unadjusted.
+
+    Nothing is read from the bus while this waits, so the caller resolves
+    its stream cursor first: fills published during the wait belong to the
+    matcher, not to the gap before it started.
+
+    Parameters
+    ----------
+    redis : Redis
+        The Redis client.
+    venues : set[str]
+        Venue ids to wait for, see ``hedging_venues``.
+
+    Returns
+    -------
+    dict[str, FeeScheduleEvent]
+        The schedules that were available, keyed by venue id.
+    """
+    schedules: dict[str, FeeScheduleEvent] = {}
+    deadline = time.monotonic() + SCHEDULE_WAIT_S
+    while True:
+        for venue in sorted(venues):
+            if venue in schedules:
+                continue
+            raw = await redis.get(fees_snapshot_key(venue))
+            if raw is None:
+                continue
+            try:
+                event = decode(raw)
+            except Exception as error:  # noqa: BLE001, keep waiting for a good one
+                logger.error(f"Undecodable fee schedule for {venue}: {error}")
+                continue
+            if isinstance(event, FeeScheduleEvent):
+                schedules[venue] = event
+        missing = sorted(venues - schedules.keys())
+        if not missing:
+            return schedules
+        if time.monotonic() >= deadline:
+            logger.error(
+                f"No fee schedule for {missing} after {SCHEDULE_WAIT_S}s; "
+                "hedges on them go unadjusted"
+            )
+            return schedules
+        await asyncio.sleep(SCHEDULE_POLL_S)
+
+
 async def handle_order_event(
     redis: Redis,
     publisher: StreamPublisher,
     event: OrderEvent,
     should_match: dict[str, str],
     hedged: LimitedSet,
+    schedules: dict[str, FeeScheduleEvent],
 ) -> OrderIntent | None:
     """
     Hedge one order event, if it needs hedging.
@@ -230,6 +477,8 @@ async def handle_order_event(
         Taker venue per strategy identifier.
     hedged : LimitedSet
         Orders already hedged.
+    schedules : dict[str, FeeScheduleEvent]
+        Fee schedules by venue id, see ``load_schedules``.
 
     Returns
     -------
@@ -245,9 +494,30 @@ async def handle_order_event(
         logger.error(f"Cannot price a hedge for {event.intent_id}, skipping")
         return None
 
+    mismatch = fee_mismatch(event, schedules.get(event.venue))
+    if mismatch is not None:
+        logger.warning(f"{event.venue} contradicts its fee schedule: {mismatch}")
+
+    if event.venue not in schedules or matching_venue not in schedules:
+        logger.error(
+            f"Hedging {event.intent_id} without a fee schedule for "
+            f"{event.venue if event.venue not in schedules else matching_venue}"
+        )
     quantity = hedge_quantity(
-        event.venue, matching_venue, event.side or Side.BUY, float(event.filled), price
+        schedules.get(event.venue),
+        schedules.get(matching_venue),
+        event.symbol,
+        event.side or Side.BUY,
+        event.filled,
+        price,
     )
+    if quantity <= 0:
+        logger.error(
+            f"Hedge for {event.intent_id} sizes to {quantity} from a fill of "
+            f"{event.filled} at {price}; leaving it unhedged"
+        )
+        return None
+
     intent = hedge_intent(event, matching_venue, quantity, price)
     await publisher.publish(redis, intent)
     logger.info(f"Matching order was sent: {intent}")
@@ -260,15 +530,19 @@ async def consume_order_events(
     should_match: dict[str, str],
     block_ms: int,
     batch: int,
+    schedules: dict[str, FeeScheduleEvent],
+    cursor: str,
 ) -> None:
     """
     Read ``oms:events`` and hedge every fill that calls for one.
 
-    Reading starts at the tail of the stream as it stands when this begins:
-    a fill from before then has either been hedged already or is old enough
-    that hedging it now would open a new position rather than close one.
-    The tail is resolved once rather than passed as ``$`` on every read,
-    which would silently drop a fill published between two reads.
+    Reading starts at ``cursor``, the tail of the stream as the caller
+    found it: a fill from before then has either been hedged already or is
+    old enough that hedging it now would open a new position rather than
+    close one. The tail is resolved once rather than passed as ``$`` on
+    every read, which would silently drop a fill published between two
+    reads, and it is resolved by the caller before any startup wait, so a
+    fill during that wait is still hedged.
 
     Parameters
     ----------
@@ -282,9 +556,12 @@ async def consume_order_events(
         How long a blocking read waits when no event is available.
     batch : int
         Maximum events fetched per read.
+    schedules : dict[str, FeeScheduleEvent]
+        Fee schedules by venue id, see ``load_schedules``.
+    cursor : str
+        Stream id to read from, see ``stream_tail``.
     """
     hedged = LimitedSet(HEDGE_MEMORY)
-    cursor = await stream_tail(redis, ORDER_EVENTS_STREAM)
     while True:
         response = await redis.xread(
             {ORDER_EVENTS_STREAM: cursor}, count=batch, block=block_ms
@@ -301,7 +578,9 @@ async def consume_order_events(
                     continue
                 if not isinstance(event, OrderEvent):
                     continue
-                await handle_order_event(redis, publisher, event, should_match, hedged)
+                await handle_order_event(
+                    redis, publisher, event, should_match, hedged, schedules
+                )
 
 
 def matching_venues(config: AppConfig) -> dict[str, str]:
@@ -341,10 +620,24 @@ async def main(config: AppConfig) -> None:
     )
     redis = Redis(decode_responses=True, connection_pool=pool)
     publisher = StreamPublisher(maxlen=config.oms.stream_maxlen)
-    logger.info(f"Matching fills for {sorted(should_match)} (production={production})")
+    # Before the wait below, not after it: the orchestrator starts this
+    # process ahead of the fee watcher, and a fill published while the
+    # schedules are still missing is one this matcher owns.
+    cursor = await stream_tail(redis, ORDER_EVENTS_STREAM)
+    schedules = await load_schedules(redis, hedging_venues(config, production))
+    logger.info(
+        f"Matching fills for {sorted(should_match)} with schedules for "
+        f"{sorted(schedules)} (production={production})"
+    )
     try:
         await consume_order_events(
-            redis, publisher, should_match, config.oms.block_ms, config.oms.batch
+            redis,
+            publisher,
+            should_match,
+            config.oms.block_ms,
+            config.oms.batch,
+            schedules,
+            cursor,
         )
     finally:
         await redis.aclose()

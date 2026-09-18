@@ -16,13 +16,13 @@ from apps.maker.src.order_watcher import (
     BoundedDict,
     build_tasks,
     event_from_order,
-    fetch_orders_since,
     oid_components,
     strategy_key,
     update_key,
     watch_orders,
 )
 from apps.maker.tests.conftest import FakeClient, StopWatching
+from apps.shared.src.ccxt_orders import fetch_orders_since
 from apps.shared.src.config import (
     AppConfig,
     MarketDataConfig,

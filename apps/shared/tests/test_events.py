@@ -13,6 +13,8 @@ from apps.shared.src.events import (
     BookEvent,
     CancelIntent,
     EventType,
+    FeeScheduleEvent,
+    FeeSource,
     Fill,
     LatencyRecord,
     Liquidity,
@@ -21,6 +23,7 @@ from apps.shared.src.events import (
     OrderKind,
     OrderState,
     Side,
+    SymbolFees,
     TimeInForce,
     TradeEvent,
 )
@@ -33,7 +36,7 @@ def sample_events():
     return [
         BookEvent(
             ts_recv=TS,
-            venue="gate",
+            venue="venue_a",
             symbol="BTC/USDT",
             seq=1,
             ts_exch=1_757_160_000_000,
@@ -42,7 +45,7 @@ def sample_events():
         ),
         TradeEvent(
             ts_recv=TS,
-            venue="mexc",
+            venue="venue_b",
             symbol="SOL/USDT",
             seq=7,
             ts_exch=None,
@@ -53,16 +56,32 @@ def sample_events():
         ),
         BalanceEvent(
             ts_recv=TS,
-            venue="gate",
+            venue="venue_a",
             seq=2,
             ts_exch=None,
             balances={"USDT": AssetBalance(free=10.0, used=5.0, total=15.0)},
+        ),
+        FeeScheduleEvent(
+            ts_recv=TS,
+            venue="venue_a",
+            fee_currency="received",
+            symbols=[
+                SymbolFees(
+                    symbol="BTC/USDT",
+                    maker=Decimal("0.002"),
+                    taker=Decimal("0.005"),
+                    min_cost=1.0,
+                    amount_precision=6,
+                )
+            ],
+            source=FeeSource.TRADING_FEES,
+            ts_fetched=1_757_160_000_000,
         ),
         OrderIntent(
             ts_recv=TS,
             intent_id="t-1_lat_a",
             strategy="lat",
-            venue="mexc",
+            venue="venue_b",
             symbol="SOL/USDT",
             side=Side.SELL,
             order_type=OrderKind.LIMIT,
@@ -76,7 +95,7 @@ def sample_events():
             ts_recv=TS,
             intent_id="c-1",
             strategy="lat",
-            venue="mexc",
+            venue="venue_b",
             symbol="SOL/USDT",
             target_intent_id="t-1_lat_a",
         ),
@@ -84,7 +103,7 @@ def sample_events():
             ts_recv=TS,
             intent_id="t-1_lat_a",
             strategy="lat",
-            venue="mexc",
+            venue="venue_b",
             symbol="SOL/USDT",
             state=OrderState.PARTIALLY_FILLED,
             venue_order_id="987",
@@ -102,7 +121,7 @@ def sample_events():
         LatencyRecord(
             ts_recv=TS,
             intent_id="t-1_lat_a",
-            venue="mexc",
+            venue="venue_b",
             ts_created=TS,
             ts_oms_recv=TS + 50_000,
             ts_broker_send=TS + 120_000,
@@ -141,7 +160,7 @@ def test_stream_fields_roundtrip(event):
 
 def test_decimals_are_strings_on_the_wire():
     """Money fields are transported exactly, never as floats."""
-    intent = sample_events()[3]
+    intent = sample_events()[4]
     payload = json.loads(events.encode(intent))
     assert payload["amount"] == "1.23456789"
     assert payload["price"] == "150.10"
@@ -153,7 +172,7 @@ def test_decimals_are_strings_on_the_wire():
 def test_decode_from_foreign_json():
     """A payload written by hand in another language decodes."""
     raw = (
-        '{"type":"book","ts_recv":1,"v":1,"venue":"gate","symbol":"BTC/USDT",'
+        '{"type":"book","ts_recv":1,"v":1,"venue":"venue_a","symbol":"BTC/USDT",'
         '"seq":3,"ts_exch":null,"bids":[[1.0,2.0]],"asks":[]}'
     )
     event = events.decode(raw)
@@ -170,7 +189,7 @@ def test_decode_rejects_unknown_type():
 def test_decode_rejects_missing_field():
     """A missing required field is a validation error."""
     with pytest.raises(msgspec.ValidationError):
-        events.decode('{"type":"trade","ts_recv":1,"venue":"gate"}')
+        events.decode('{"type":"trade","ts_recv":1,"venue":"venue_a"}')
 
 
 def test_intent_defaults():
@@ -179,7 +198,7 @@ def test_intent_defaults():
         ts_recv=TS,
         intent_id="i",
         strategy="s",
-        venue="gate",
+        venue="venue_a",
         symbol="BTC/USDT",
         side=Side.BUY,
         order_type=OrderKind.MARKET,
@@ -193,20 +212,31 @@ def test_intent_defaults():
 
 def test_stream_names():
     """Stream naming follows the documented scheme."""
-    assert events.book_stream("gate", "BTC/USDT") == "md:book:gate:BTC/USDT"
-    assert events.trade_stream("mexc", "SOL/USDT") == "md:trade:mexc:SOL/USDT"
-    assert events.balance_stream("gate") == "acct:balance:gate"
-    assert events.snapshot_key("gate", "BTC/USDT") == "BTC/USDT-gate"
+    assert events.book_stream("venue_a", "BTC/USDT") == "md:book:venue_a:BTC/USDT"
+    assert events.trade_stream("venue_b", "SOL/USDT") == "md:trade:venue_b:SOL/USDT"
+    assert events.balance_stream("venue_a") == "acct:balance:venue_a"
+    assert events.fees_stream("venue_a") == "acct:fees:venue_a"
+    assert events.snapshot_key("venue_a", "BTC/USDT") == "BTC/USDT-venue_a"
     assert events.prefixed("bt:run1", "oms:intents") == "bt:run1:oms:intents"
     assert events.prefixed("", "oms:intents") == "oms:intents"
 
 
 def test_stream_for_routes_every_event():
     """Every event type maps to exactly the stream it belongs on."""
-    book, trade, balance, intent, cancel, order_event, latency = sample_events()
-    assert events.stream_for(book) == "md:book:gate:BTC/USDT"
-    assert events.stream_for(trade) == "md:trade:mexc:SOL/USDT"
-    assert events.stream_for(balance) == "acct:balance:gate"
+    (
+        book,
+        trade,
+        balance,
+        fee_schedule,
+        intent,
+        cancel,
+        order_event,
+        latency,
+    ) = sample_events()
+    assert events.stream_for(book) == "md:book:venue_a:BTC/USDT"
+    assert events.stream_for(trade) == "md:trade:venue_b:SOL/USDT"
+    assert events.stream_for(balance) == "acct:balance:venue_a"
+    assert events.stream_for(fee_schedule) == "acct:fees:venue_a"
     assert events.stream_for(intent) == events.INTENTS_STREAM
     assert events.stream_for(cancel) == events.INTENTS_STREAM
     assert events.stream_for(order_event) == events.ORDER_EVENTS_STREAM

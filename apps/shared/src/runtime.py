@@ -6,9 +6,9 @@ A strategy written against this module never touches Redis. It subclasses
 at start. The runtime
 
 - derives the streams to read from the strategy's declared ``subscriptions``:
-  one book or trade stream per subscribed feed, the balance stream of every
-  subscribed venue, and ``oms:events`` filtered down to the strategy's own
-  orders;
+  one book or trade stream per subscribed feed, the balance and fee schedule
+  stream of every subscribed venue, and ``oms:events`` filtered down to the
+  strategy's own orders;
 - runs a single ``XREAD`` over all of them, resolving each tail once and then
   advancing through concrete entry ids, so nothing published between two
   reads is lost;
@@ -35,19 +35,23 @@ from apps.shared.src.events import (
     BalanceEvent,
     BookEvent,
     CancelIntent,
+    FeeScheduleEvent,
     OrderEvent,
     OrderIntent,
     OrderKind,
     Side,
+    SymbolFees,
     TimeInForce,
     TradeEvent,
     balance_stream,
     book_stream,
+    fees_stream,
     from_stream_fields,
     now_ns,
     prefixed,
     trade_stream,
 )
+from apps.shared.src.fees import schedule_for
 from apps.shared.src.streams import StreamPublisher, entry_id_str, stream_tail
 
 logger = logging.getLogger(__name__)
@@ -249,8 +253,9 @@ def snapshot_streams(strategy: StrategyConfig, prefix: str = "") -> list[str]:
     Returns
     -------
     list[str]
-        The balance stream of every subscribed venue, then one book stream
-        per subscription listing the book feed. Balances come first so that
+        The balance stream of every subscribed venue, then the fee schedule
+        stream of every subscribed venue, then one book stream per
+        subscription listing the book feed. Balances come first so that
         a strategy primed with a book already knows what it can fund.
     """
     venues: list[str] = []
@@ -260,7 +265,11 @@ def snapshot_streams(strategy: StrategyConfig, prefix: str = "") -> list[str]:
             venues.append(subscription.venue)
         if BOOK_FEED in subscription.feeds:
             books.append(book_stream(subscription.venue, subscription.symbol))
-    streams = [balance_stream(venue) for venue in venues] + books
+    streams = (
+        [balance_stream(venue) for venue in venues]
+        + [fees_stream(venue) for venue in venues]
+        + books
+    )
     return list(dict.fromkeys(prefixed(prefix, stream) for stream in streams))
 
 
@@ -279,8 +288,8 @@ def subscribed_streams(strategy: StrategyConfig, prefix: str = "") -> list[str]:
     -------
     list[str]
         One book or trade stream per subscribed feed, in subscription
-        order, then the balance stream of every subscribed venue, then
-        ``oms:events``. Prefixed and free of duplicates.
+        order, then the balance and fee schedule stream of every subscribed
+        venue, then ``oms:events``. Prefixed and free of duplicates.
     """
     streams: list[str] = []
     venues: list[str] = []
@@ -292,6 +301,7 @@ def subscribed_streams(strategy: StrategyConfig, prefix: str = "") -> list[str]:
         if subscription.venue not in venues:
             venues.append(subscription.venue)
     streams.extend(balance_stream(venue) for venue in venues)
+    streams.extend(fees_stream(venue) for venue in venues)
     streams.append(ORDER_EVENTS_STREAM)
     return list(dict.fromkeys(prefixed(prefix, stream) for stream in streams))
 
@@ -484,6 +494,7 @@ class Runtime:
         self.streams = subscribed_streams(strategy, prefix)
         self.cursors: dict[str, str] = {}
         self.submitted: dict[str, OrderIntent] = {}
+        self._fee_schedules: dict[str, FeeScheduleEvent] = {}
         self._last_stamp = 0
         self._cancel_seq = 0
         self._next_timer_ns: int | None = None
@@ -704,6 +715,46 @@ class Runtime:
         """
         return owner_of(event) == self.identifier
 
+    def fee_schedule(self, venue: str) -> FeeScheduleEvent | None:
+        """
+        Return the latest fee schedule of a venue.
+
+        Parameters
+        ----------
+        venue : str
+            CCXT short id.
+
+        Returns
+        -------
+        FeeScheduleEvent | None
+            The schedule as last published on ``acct:fees:{venue}``, None
+            before the first one arrives. Its ``fee_currency`` field is the
+            policy a strategy resolves fee currencies against.
+        """
+        return self._fee_schedules.get(venue)
+
+    def fees(self, venue: str, symbol: str) -> SymbolFees | None:
+        """
+        Return the fee schedule entry for a venue and symbol.
+
+        Parameters
+        ----------
+        venue : str
+            CCXT short id.
+        symbol : str
+            CCXT symbol.
+
+        Returns
+        -------
+        SymbolFees | None
+            Maker and taker rates, minimum notional and amount precision,
+            None before a schedule covering the symbol has arrived.
+        """
+        schedule = self._fee_schedules.get(venue)
+        if schedule is None:
+            return None
+        return schedule_for(schedule, symbol)
+
     async def start(self) -> None:
         """
         Resolve stream tails, run ``on_start``, then prime the strategy's state.
@@ -812,6 +863,8 @@ class Runtime:
                 await self.handler.on_trade(event)
             case BalanceEvent():
                 await self.handler.on_balance(event)
+            case FeeScheduleEvent():
+                self._fee_schedules[event.venue] = event
             case OrderEvent():
                 if self.is_mine(event):
                     await self.handler.on_order_event(event)

@@ -19,10 +19,10 @@ from apps.shared.src.streams import (
 )
 
 TS = 1_757_160_000_000_000_000
-VENUES = [{"id": "gate", "name": "Gate.io"}, {"id": "mexc", "name": "Mexc"}]
+VENUES = [{"id": "venue_a", "name": "Venue A"}, {"id": "venue_b", "name": "Venue B"}]
 
 
-def book(seq: int, venue: str = "gate") -> BookEvent:
+def book(seq: int, venue: str = "venue_a") -> BookEvent:
     """Return a small book event."""
     return BookEvent(
         ts_recv=TS + seq,
@@ -50,7 +50,7 @@ async def test_publish_routes_and_decodes():
     publisher = StreamPublisher(maxlen=100)
     event = book(1)
     stream = await publisher.publish(redis, event)
-    assert stream == "md:book:gate:BTC/USDT"
+    assert stream == "md:book:venue_a:BTC/USDT"
     entries = await redis.xrange(stream)
     assert len(entries) == 1
     _, fields = entries[0]
@@ -64,7 +64,7 @@ async def test_publish_with_prefix():
     redis = fakeredis.FakeRedis(decode_responses=True)
     publisher = StreamPublisher(maxlen=100, prefix="bt:run1")
     stream = await publisher.publish(redis, book(1))
-    assert stream == "bt:run1:md:book:gate:BTC/USDT"
+    assert stream == "bt:run1:md:book:venue_a:BTC/USDT"
     assert await redis.xlen(stream) == 1
 
 
@@ -76,9 +76,9 @@ async def test_xadd_on_pipeline():
     async with redis.pipeline(transaction=False) as pipe:
         publisher.xadd(pipe, book(1))
         publisher.xadd(pipe, book(2))
-        assert await redis.xlen("md:book:gate:BTC/USDT") == 0
+        assert await redis.xlen("md:book:venue_a:BTC/USDT") == 0
         await pipe.execute()
-    assert await redis.xlen("md:book:gate:BTC/USDT") == 2
+    assert await redis.xlen("md:book:venue_a:BTC/USDT") == 2
 
 
 @pytest.mark.asyncio
@@ -89,8 +89,8 @@ async def test_maxlen_bounds_the_stream():
     for seq in range(1, 51):
         await publisher.publish(redis, book(seq))
     # Approximate trimming may keep a little more than maxlen, never much.
-    assert await redis.xlen("md:book:gate:BTC/USDT") <= 50
-    assert await redis.xlen("md:book:gate:BTC/USDT") >= 5
+    assert await redis.xlen("md:book:venue_a:BTC/USDT") <= 50
+    assert await redis.xlen("md:book:venue_a:BTC/USDT") >= 5
 
 
 def test_configured_streams_covers_feeds_venues_and_oms():
@@ -105,43 +105,47 @@ def test_configured_streams_covers_feeds_venues_and_oms():
                     "production": True,
                     "subscriptions": [
                         {
-                            "venue": "gate",
+                            "venue": "venue_a",
                             "symbol": "BTC/USDT",
                             "feeds": ["book", "trade"],
                         },
-                        {"venue": "mexc", "symbol": "SOL/USDT"},
+                        {"venue": "venue_b", "symbol": "SOL/USDT"},
                     ],
                 },
                 {
                     "identifier": "tst",
                     "type": "latency_arb",
                     "production": False,
-                    "subscriptions": [{"venue": "mexc", "symbol": "ETH/USDT"}],
+                    "subscriptions": [{"venue": "venue_b", "symbol": "ETH/USDT"}],
                 },
             ],
         }
     )
     assert configured_streams(config, production=True) == [
-        "acct:balance:gate",
-        "acct:balance:mexc",
-        "md:book:gate:BTC/USDT",
-        "md:book:mexc:SOL/USDT",
-        "md:trade:gate:BTC/USDT",
+        "acct:balance:venue_a",
+        "acct:balance:venue_b",
+        "acct:fees:venue_a",
+        "acct:fees:venue_b",
+        "md:book:venue_a:BTC/USDT",
+        "md:book:venue_b:SOL/USDT",
+        "md:trade:venue_a:BTC/USDT",
         "oms:events",
         "oms:intents",
         "oms:latency",
     ]
-    assert "md:book:mexc:ETH/USDT" in configured_streams(config, production=False)
-    assert "md:book:mexc:ETH/USDT" in configured_streams(config, production=None)
+    assert "md:book:venue_b:ETH/USDT" in configured_streams(config, production=False)
+    assert "md:book:venue_b:ETH/USDT" in configured_streams(config, production=None)
 
 
 def test_stream_path_layout():
     """Stream names map to nested directories with safe symbol names."""
     root = Path("/tmp/rec")
     assert (
-        stream_path(root, "md:book:gate:ALPH/USDT") == root / "md/book/gate/ALPH-USDT"
+        stream_path(root, "md:book:venue_a:TEST/USDT")
+        == root / "md/book/venue_a/TEST-USDT"
     )
-    assert stream_path(root, "acct:balance:gate") == root / "acct/balance/gate"
+    assert stream_path(root, "acct:balance:venue_a") == root / "acct/balance/venue_a"
+    assert stream_path(root, "acct:fees:venue_a") == root / "acct/fees/venue_a"
     assert stream_path(root, "oms:events") == root / "oms/events"
 
 
@@ -156,7 +160,7 @@ def test_trade_event_routes_to_trade_stream():
     """Sanity check that routing follows the event type."""
     event = TradeEvent(
         ts_recv=TS,
-        venue="mexc",
+        venue="venue_b",
         symbol="SOL/USDT",
         seq=1,
         ts_exch=None,
@@ -165,7 +169,7 @@ def test_trade_event_routes_to_trade_stream():
         price=1.0,
         amount=1.0,
     )
-    assert events.stream_for(event) == "md:trade:mexc:SOL/USDT"
+    assert events.stream_for(event) == "md:trade:venue_b:SOL/USDT"
 
 
 def test_recording_files_matches_both_suffixes(tmp_path: Path):
@@ -225,10 +229,10 @@ async def test_stream_tail_is_the_last_id():
     redis = fakeredis.FakeRedis(decode_responses=True)
     publisher = StreamPublisher(maxlen=10)
     await publisher.publish(redis, book(1))
-    tail = await stream_tail(redis, "md:book:gate:BTC/USDT")
+    tail = await stream_tail(redis, "md:book:venue_a:BTC/USDT")
     await publisher.publish(redis, book(2))
 
-    response = await redis.xread({"md:book:gate:BTC/USDT": tail})
+    response = await redis.xread({"md:book:venue_a:BTC/USDT": tail})
     delivered = [events.from_stream_fields(f) for _id, f in response[0][1]]
     assert [e.seq for e in delivered] == [2]
 
@@ -237,4 +241,4 @@ async def test_stream_tail_is_the_last_id():
 async def test_stream_tail_of_an_empty_stream_is_the_start():
     """A stream with no entries yet has nothing to skip."""
     redis = fakeredis.FakeRedis(decode_responses=True)
-    assert await stream_tail(redis, "md:book:gate:BTC/USDT") == "0-0"
+    assert await stream_tail(redis, "md:book:venue_a:BTC/USDT") == "0-0"

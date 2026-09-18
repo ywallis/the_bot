@@ -12,6 +12,7 @@ from psycopg import sql
 
 import apps.shared.src.logging_config as logging_config
 from apps.accountant.src.structs import UnaddressedImbalance
+from apps.shared.src.fees import base_quote
 from apps.shared.src.structs import CustomExchange, ccxtItem
 
 # Initializing centralized logging
@@ -50,6 +51,60 @@ def load_pg_config() -> dict[str, str]:
     return config
 
 
+def _float_or_zero(value: object) -> float:
+    """
+    Coerce a CCXT figure to ``float``, treating missing or malformed as zero.
+
+    Parameters
+    ----------
+    value : object
+        Raw figure, possibly None or a string.
+
+    Returns
+    -------
+    float
+        The figure.
+    """
+    try:
+        return float(value)  # ty: ignore[invalid-argument-type]
+    except TypeError, ValueError:
+        return 0.0
+
+
+def _reported_fee(item: ccxtItem) -> tuple[float, str]:
+    """
+    Return the cost and currency of the fee a CCXT item carried.
+
+    CCXT reports an aggregate ``fee`` and a per-execution ``fees`` list;
+    either may be absent or zero. The last non-zero entry wins, so a
+    multi-entry list resolves to the fee that was actually charged.
+
+    Parameters
+    ----------
+    item : ccxtItem
+        The CCXT order or trade.
+
+    Returns
+    -------
+    tuple[float, str]
+        Cost and currency, with an empty currency when nothing was
+        reported.
+    """
+    cost = 0.0
+    currency = ""
+    fee = item.get("fee")
+    if isinstance(fee, dict) and fee.get("currency"):
+        cost = _float_or_zero(fee.get("cost"))
+        currency = str(fee["currency"])
+    for part in item.get("fees", []):
+        if not isinstance(part, dict):
+            continue
+        if _float_or_zero(part.get("cost")) != 0.0:
+            cost = _float_or_zero(part.get("cost"))
+            currency = str(part.get("currency"))
+    return cost, currency
+
+
 def prepare_items_for_pg(
     client: CustomExchange,
     raw_items: list[ccxtItem] | ccxtItem,
@@ -57,7 +112,13 @@ def prepare_items_for_pg(
     """
     Prepare CCXT items for export to PostgreSQL.
 
-    Flattens structures and normalizes fields.
+    Flattens structures and normalizes fields. The fee columns answer the
+    two questions the framework cares about: how much USDT actually moved
+    (``usdt_value``), and how the base asset's balance changed net of fees
+    (``asset_net_q``). A fee in the quote asset comes out of the USDT leg,
+    which is the cost of doing business; a fee in the base asset erodes the
+    asset whose balance is kept stable and shows up in the net quantity
+    instead.
 
     Parameters
     ----------
@@ -70,6 +131,11 @@ def prepare_items_for_pg(
     -------
     list[dict[str, str]]
         List of prepared items as dictionaries.
+
+    Raises
+    ------
+    ValueError
+        If an item carries a symbol that is not of the form ``BASE/QUOTE``.
     """
     imported_items = deepcopy(raw_items)
 
@@ -85,59 +151,45 @@ def prepare_items_for_pg(
         if "order" in item:
             item["order_id"] = item.pop("order")
 
-        # Integrating empty statement in case of nonexistent values
-
         item["fee_cost"] = ""
         item["fee_currency"] = ""
         item["usdt_value"] = ""
         item["asset_net_q"] = ""
 
-        fee = item.get("fee")
-        if isinstance(fee, dict):
-            item["fee_cost"] = fee.get("cost", "")
-            item["fee_currency"] = fee.get("currency", "")
+        cost_str = str(item.get("cost", "0"))
+        cost = _float_or_zero(item.get("cost"))
+        amount = _float_or_zero(item.get("amount"))
+        side = str(item.get("side") or "")
 
-        for fee in item.get("fees", []):
-            if float(fee.get("cost", "0")) != 0.0:
-                item["fee_cost"] = fee.get("cost", "")
-                item["fee_currency"] = fee.get("currency", "")
+        fee_cost, fee_currency = _reported_fee(item)
+        if fee_currency:
+            item["fee_cost"] = str(fee_cost)
+            item["fee_currency"] = fee_currency
+
+        base, quote = base_quote(str(item.get("symbol") or ""))
+
+        # USDT flow of the trade. A fee in the quote asset is paid out of
+        # (buy) or deducted from (sell) the USDT leg; a fee in any other
+        # asset is paid in kind and leaves the flow alone.
+        if fee_currency == quote:
+            item["usdt_value"] = str(
+                cost + fee_cost if side == "buy" else cost - fee_cost
+            )
+        else:
+            item["usdt_value"] = cost_str
+
+        # Net change in the base asset's balance. Only a fee charged in the
+        # base asset changes it: a buy delivers the amount minus the fee, a
+        # sell takes the amount plus the fee out of the balance.
+        if fee_currency and fee_currency == base:
+            item["asset_net_q"] = str(
+                amount - fee_cost if side == "buy" else amount + fee_cost
+            )
+        else:
+            item["asset_net_q"] = str(amount)
+
         item["exchange"] = client.name
 
-        # Generate usdt_value column
-        cost_str = str(item.get("cost", "0"))
-        fee_cost_str = str(item.get("fee_cost", "0"))
-
-        assert isinstance(cost_str, str)
-        try:
-            cost = float(cost_str)
-        except ValueError:
-            cost = 0.0
-
-        assert isinstance(fee_cost_str, str)
-        try:
-            fee_cost = float(fee_cost_str)
-        except ValueError:
-            fee_cost = 0.0
-
-        if item["fee_currency"] != "USDT":
-            item["usdt_value"] = cost_str
-        elif item.get("side") == "buy":
-            item["usdt_value"] = str(cost + fee_cost)
-        else:
-            item["usdt_value"] = str(cost - fee_cost)
-
-        # Generate asset_net_q column
-        amount_str = str(item.get("amount", "0"))
-        assert isinstance(amount_str, str)
-        try:
-            amount = float(amount_str)
-        except ValueError:
-            amount = 0.0
-
-        if item["fee_currency"] != "USDT":
-            item["asset_net_q"] = str(amount - fee_cost)
-        else:
-            item["asset_net_q"] = amount_str
         # Flatten dicts and lists in order to export them to columns.
         flattened_item = dict_to_text(item)
         prepared_items.append(flattened_item)
@@ -178,6 +230,49 @@ def dict_to_text(d: ccxtItem) -> dict[str, str]:
     return {key: convert(value) for key, value in d.items()}
 
 
+async def fetch_finished_orders(
+    client: CustomExchange, ticker: str, start: int | None, end: int | None
+) -> list[ccxtItem]:
+    """
+    Fetch every order that finished in a window, over whatever the venue has.
+
+    Venues differ in what they expose: some list cancelled and closed orders
+    together, others only closed ones. Which endpoints to use is read from
+    the client's ``has`` map rather than decided per venue name.
+
+    Parameters
+    ----------
+    client : CustomExchange
+        The exchange client.
+    ticker : str
+        The trading pair symbol.
+    start : int | None
+        Start timestamp in milliseconds.
+    end : int | None
+        End timestamp in milliseconds.
+
+    Returns
+    -------
+    list[ccxtItem]
+        CCXT unified orders.
+    """
+    has = getattr(client, "has", {}) or {}
+    params: dict[str, str | int | None] = {"until": end}
+    if has.get("fetchCanceledAndClosedOrders"):
+        orders: (
+            ccxtItem | list[ccxtItem]
+        ) = await client.fetch_canceled_and_closed_orders(
+            symbol=ticker, limit=100, since=start, params=params
+        )
+    else:
+        orders = await client.fetch_closed_orders(
+            symbol=ticker, limit=100, since=start, params=params
+        )
+    if isinstance(orders, list):
+        return orders
+    return [orders]
+
+
 async def retrieve_and_prepare_orders(
     client: CustomExchange,
     ticker: str,
@@ -203,14 +298,7 @@ async def retrieve_and_prepare_orders(
     list[dict[str, str]]
         List of prepared orders.
     """
-    if client.name == "Bitget":
-        orders = await client.fetch_canceled_and_closed_orders(
-            symbol=ticker, limit=100, since=start, params={"until": end}
-        )
-    else:
-        orders = await client.fetch_closed_orders(
-            symbol=ticker, limit=100, since=start, params={"until": end}
-        )
+    orders = await fetch_finished_orders(client, ticker, start, end)
 
     return prepare_items_for_pg(client, orders)
 
