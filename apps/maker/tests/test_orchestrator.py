@@ -91,6 +91,7 @@ def test_shutdown_phases_order_strategies_oms_feeds_recorder():
     assert by_name["feeds and broker"] == [
         "balance",
         "broker",
+        "fees",
         "matcher",
         "order_watcher",
         "unknown_tool",
@@ -150,6 +151,7 @@ def test_shutdown_stops_phases_in_order(monkeypatch):
         "order_watcher",
         "matcher",
         "balance",
+        "fees",
     }
 
 

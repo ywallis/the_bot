@@ -87,6 +87,7 @@ filesystem. Section 7 describes the link between them.
 | `md:book:{venue}:{symbol}`   | watcher             | strategies, recorder            | top-N levels, every update              |
 | `md:trade:{venue}:{symbol}`  | trade watcher       | strategies, recorder            | one event per trade or CCXT batch       |
 | `acct:balance:{venue}`       | balance watcher     | strategies, recorder            | full balance snapshot                   |
+| `acct:fees:{venue}`          | fee watcher         | strategies, matcher, recorder   | fee schedule, refreshed on an interval  |
 | `oms:intents`                | strategies          | oms (consumer group `oms`)      | order and cancel intents                |
 | `oms:events`                 | oms, order watcher  | strategies, matcher, recorder   | order lifecycle and fills               |
 | `oms:latency`                | oms, broker         | recorder                        | timing records per intent               |
@@ -150,6 +151,23 @@ Account
 
 - `BalanceEvent`: venue, seq, ts_recv, ts_exch, balances as
   `{asset: {free, used, total}}`.
+- `FeeScheduleEvent`: venue, fee_currency, symbols (list of `SymbolFees`),
+  source (`trading_fees`, `markets`, `config`), ts_recv. A `SymbolFees`
+  entry carries maker and taker rates as `Decimal` fractions of traded
+  value, the venue's minimum notional, and the amount precision.
+  `fee_currency` is the venue's declared policy — `quote` (always the quote
+  asset), `base` (always the base asset), `received` (base on buys, quote
+  on sells) or an explicit asset code for venues that charge their own
+  token. Rates move with the account's volume tier and the charged currency
+  with the account's fee mode, so the schedule is fetched periodically by a
+  feed handler (`apps/maker/src/fees.py`) on `acct:fees:<venue>` plus the
+  snapshot key `fees-<venue>`, rather than fixed in code. Rates resolve
+  from `fetch_trading_fees` (the account's tier) where the venue supports
+  it, from market defaults otherwise, and from static config overrides
+  where the API hides the schedule. Consumers: the matcher sizes hedges
+  with it and checks every fill's reported fee against it (a mismatch is
+  logged as a warning, which is the alert that a policy or a tier moved);
+  strategies read it through the runtime's `fees` accessor.
 
 Order management
 
@@ -211,9 +229,17 @@ consumer = "oms"
 # Intents older than this are rejected rather than sent to a venue.
 max_intent_age_s = 5.0
 
+[fees]
+# Seconds between fee schedule fetches: rates follow the account's volume.
+refresh_s = 3600
+
 [[venues]]
 id = "gate"
 name = "Gate.io"
+# Which currency fees are charged in: "quote", "base", "received" (base on
+# buys, quote on sells) or an asset code. Verified against what fills
+# actually report; the matcher sizes hedges with it.
+fee_currency = "received"
 
 [[strategies]]
 identifier = "lam"
@@ -233,6 +259,10 @@ Rules
 
 - `subscriptions` is the only source of truth for which venue and symbol
   feeds the watchers run. Nothing is inferred from strategy parameters.
+- `fee_currency` is the only place a venue's fee behaviour is declared. The
+  fee watcher publishes it on `acct:fees:<venue>`, the matcher hedges with
+  it, and a fill charged in a currency the policy does not predict is a
+  loud warning, not a silent correction.
 - There is no fallback from strategy parameters to subscriptions. The
   strategies repo was migrated to this shape on 2026-09-06, so a strategy
   without `subscriptions`, or with a parameter outside `[strategies.params]`,
@@ -286,6 +316,21 @@ The order watcher is a feed handler (`order_watcher.py`) that turns CCXT
 `watch_orders` updates into `OrderEvent`s. The matching logic consumes
 `oms:events` like any strategy; it no longer holds an exchange connection at
 all, which is what makes it movable to the strategies repo.
+
+Hedge sizing is fee-driven. The framework's goal is to generate the quote
+asset while keeping the base asset's balance stable, so the two fee
+currencies matter differently: a fee in quote comes out of the USDT leg and
+is left to the accountant, a fee in base erodes the balance and must be
+compensated exactly. The matcher sizes the fill's base flow from the origin
+venue's policy and maker rate, moves exactly that much the other way, and
+sizes the hedge up where the matching venue charges the hedge's own fee in
+base. It sizes from the fee schedule on `acct:fees` — fetched rates, not
+constants — and checks each fill's reported fee against the schedule,
+logging a mismatch as a warning: the schedule is an input, not a promise,
+and a venue that switches its account to a different fee mode would
+otherwise mis-size every hedge until someone noticed. A venue whose
+schedule is missing hedges unadjusted and logs loudly, because a hedge
+sized wrong is worse than one sized late.
 
 After every websocket drop it survives, the order watcher reconciles over
 REST: it fetches every order that changed since five seconds before the
@@ -441,9 +486,10 @@ the streams. A strategy subclasses `Strategy`, overrides the hooks it needs
 `on_timer`) and never touches Redis. The `Runtime`
 
 - derives the streams to read from the strategy's declared `subscriptions`:
-  one book or trade stream per subscribed feed, the balance stream of every
-  subscribed venue, and `oms:events` filtered to the strategy's own orders
-  (those whose strategy key starts with its identifier);
+  one book or trade stream per subscribed feed, the balance and fee
+  schedule stream of every subscribed venue, and `oms:events` filtered to
+  the strategy's own orders (those whose strategy key starts with its
+  identifier);
 - runs one `XREAD` over all of them, resolving each tail once and then
   advancing through concrete entry ids (section 12);
 - owns the `Clock` and advances it with the `ts_recv` of every delivered
@@ -460,13 +506,17 @@ the streams. A strategy subclasses `Strategy`, overrides the hooks it needs
   `cancel_resting(venue, symbol, slot)`, the empty-target cancel a strategy
   sends at start to clear what an earlier run left behind;
 - primes the strategy at start with the latest entry of every snapshot
-  stream, the subscribed balances first and then the books, before reading
-  new entries. A balance or a book entry supersedes every earlier one, so
-  the last one is complete state; a trade or an order event is not and is
-  never primed. Without priming, a strategy that starts after the feed
-  handlers, which the orchestrator guarantees, would not see a balance
-  until one changed, and a balance changes when an order fills, which no
-  quote is sent without a balance to fund it;
+  stream, the subscribed balances first, then the fee schedules, then the
+  books, before reading new entries. A balance, fee schedule or book entry
+  supersedes every earlier one, so the last one is complete state; a trade
+  or an order event is not and is never primed. Without priming, a strategy
+  that starts after the feed handlers, which the orchestrator guarantees,
+  would not see a balance until one changed, and a balance changes when an
+  order fills, which no quote is sent without a balance to fund it;
+- keeps the latest `FeeScheduleEvent` per venue and exposes it through
+  `fees(venue, symbol)` and `fee_schedule(venue)`, so quote sizing can
+  account for the rates and fee currency the venue is actually charging
+  instead of hardcoding them;
 - reads and writes every stream under an optional key prefix, so a backtest
   is a prefix and a replay clock away.
 

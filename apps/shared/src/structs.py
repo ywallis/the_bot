@@ -25,6 +25,8 @@ class ccxtItem(TypedDict):
 
     Attributes
     ----------
+    symbol : str, optional
+        The trading pair symbol.
     order_id : str, optional
         The ID of the order.
     order : str, optional
@@ -51,6 +53,7 @@ class ccxtItem(TypedDict):
         The name of the exchange.
     """
 
+    symbol: NotRequired[str]
     order_id: NotRequired[str]
     order: NotRequired[str]
     fee: NotRequired[ccxtFee]

@@ -32,6 +32,12 @@ BOOK_FEED = "book"
 TRADE_FEED = "trade"
 KNOWN_FEEDS: frozenset[str] = frozenset({BOOK_FEED, TRADE_FEED})
 
+# Fee currency policies a venue can declare: always the quote asset, always
+# the base asset, or the asset received (base on buys, quote on sells). Any
+# other uppercase asset code is accepted and means the venue charges its own
+# token regardless of side.
+FEE_POLICY_KEYWORDS: frozenset[str] = frozenset({"quote", "received", "base"})
+
 
 class ConfigError(Exception):
     """Raised when the configuration is missing or inconsistent."""
@@ -127,6 +133,21 @@ class OmsConfig(msgspec.Struct, frozen=True):
     max_intent_age_s: float = 5.0
 
 
+class FeesConfig(msgspec.Struct, frozen=True):
+    """
+    Settings for the fee schedule feed.
+
+    Attributes
+    ----------
+    refresh_s : int
+        Seconds between fee schedule fetches. Fee levels follow the
+        account's rolling volume and balance, so rates are refreshed rather
+        than fetched once at startup.
+    """
+
+    refresh_s: int = 3600
+
+
 class VenueConfig(msgspec.Struct, frozen=True):
     """
     A trading venue.
@@ -140,11 +161,25 @@ class VenueConfig(msgspec.Struct, frozen=True):
     options : dict[str, Any]
         CCXT ``options`` passed to the client constructor, e.g.
         ``{"watchOrderBook": {"checksum": False}}``.
+    fee_currency : str
+        Which currency the venue charges fees in: one of
+        ``FEE_POLICY_KEYWORDS`` or an explicit asset code. Verified against
+        the fee currencies venues actually report on fills.
+    maker_fee : float | None
+        Static maker fee rate as a fraction of traded value, overriding
+        what the venue reports. For venues whose API does not expose their
+        fee schedule.
+    taker_fee : float | None
+        Static taker fee rate as a fraction of traded value, see
+        ``maker_fee``.
     """
 
     id: str
     name: str
     options: dict[str, Any] = {}
+    fee_currency: str = "quote"
+    maker_fee: float | None = None
+    taker_fee: float | None = None
 
 
 class Subscription(msgspec.Struct, frozen=True):
@@ -261,6 +296,8 @@ class AppConfig(msgspec.Struct, frozen=True):
         Stream recorder settings.
     oms : OmsConfig
         Order manager settings.
+    fees : FeesConfig
+        Fee schedule feed settings.
     """
 
     redis: RedisConfig
@@ -270,6 +307,7 @@ class AppConfig(msgspec.Struct, frozen=True):
     refresh_speed: float | None = None
     recorder: RecorderConfig = RecorderConfig()
     oms: OmsConfig = OmsConfig()
+    fees: FeesConfig = FeesConfig()
 
     @property
     def venue_ids(self) -> set[str]:
@@ -477,6 +515,37 @@ def _parse_strategy(raw: dict[str, Any]) -> StrategyConfig:
         raise ConfigError(f"Strategy {raw['identifier']!r} is invalid: {e}") from e
 
 
+def _validate_fee_policy(venue: VenueConfig) -> None:
+    """
+    Check that a venue's fee currency policy is a keyword or asset code.
+
+    Parameters
+    ----------
+    venue : VenueConfig
+        The venue whose policy is checked.
+
+    Raises
+    ------
+    ConfigError
+        If the policy is neither a keyword nor an asset code, or a static
+        fee override is not a fraction of traded value.
+    """
+    policy = venue.fee_currency
+    if policy not in FEE_POLICY_KEYWORDS and not (
+        policy.isalnum() and policy == policy.upper()
+    ):
+        raise ConfigError(
+            f"Venue {venue.id!r} has invalid fee_currency {policy!r}; use one "
+            f"of {sorted(FEE_POLICY_KEYWORDS)} or an explicit asset code"
+        )
+    for name, rate in (("maker_fee", venue.maker_fee), ("taker_fee", venue.taker_fee)):
+        if rate is not None and not 0 <= rate < 1:
+            raise ConfigError(
+                f"Venue {venue.id!r} has invalid {name} {rate!r}; a fee rate "
+                "is a fraction of traded value, e.g. 0.001 for 0.1%"
+            )
+
+
 def _validate(config: AppConfig) -> None:
     """
     Check cross-field invariants.
@@ -493,6 +562,8 @@ def _validate(config: AppConfig) -> None:
         undeclared venues or unknown feed names.
     """
     venue_ids = config.venue_ids
+    for venue in config.venues:
+        _validate_fee_policy(venue)
     for production in (True, False):
         seen: set[str] = set()
         for strategy in config.active_strategies(production):
@@ -543,6 +614,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
         market_data = msgspec.convert(raw.get("market_data", {}), MarketDataConfig)
         recorder = msgspec.convert(raw.get("recorder", {}), RecorderConfig)
         oms = msgspec.convert(raw.get("oms", {}), OmsConfig)
+        fees = msgspec.convert(raw.get("fees", {}), FeesConfig)
         venues = msgspec.convert(raw.get("venues", []), tuple[VenueConfig, ...])
     except msgspec.ValidationError as e:
         raise ConfigError(str(e)) from e
@@ -562,6 +634,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
         refresh_speed=refresh_speed,
         recorder=recorder,
         oms=oms,
+        fees=fees,
     )
     _validate(config)
     return config

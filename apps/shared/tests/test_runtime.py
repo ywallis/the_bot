@@ -27,11 +27,14 @@ from apps.shared.src.events import (
     BalanceEvent,
     BookEvent,
     CancelIntent,
+    FeeScheduleEvent,
+    FeeSource,
     OrderEvent,
     OrderIntent,
     OrderKind,
     OrderState,
     Side,
+    SymbolFees,
     TradeEvent,
     from_stream_fields,
     now_ns,
@@ -71,19 +74,19 @@ def strategy_config(identifier: str = "fmb") -> StrategyConfig:
         type="fake_maker",
         production=False,
         subscriptions=(
-            Subscription(venue="mexc", symbol="ALPH/USDT", feeds=("book", "trade")),
-            Subscription(venue="bitget", symbol="ALPH/USDT", feeds=("book",)),
+            Subscription(venue="venue_b", symbol="TEST/USDT", feeds=("book", "trade")),
+            Subscription(venue="venue_c", symbol="TEST/USDT", feeds=("book",)),
         ),
         params={},
     )
 
 
-def book(venue: str = "mexc", ts_recv: int = T0, seq: int = 1) -> BookEvent:
+def book(venue: str = "venue_b", ts_recv: int = T0, seq: int = 1) -> BookEvent:
     """Return a one-level book."""
     return BookEvent(
         ts_recv=ts_recv,
         venue=venue,
-        symbol="ALPH/USDT",
+        symbol="TEST/USDT",
         seq=seq,
         ts_exch=None,
         bids=[(0.34, 100.0)],
@@ -95,8 +98,8 @@ def trade(ts_recv: int = T0) -> TradeEvent:
     """Return a trade."""
     return TradeEvent(
         ts_recv=ts_recv,
-        venue="mexc",
-        symbol="ALPH/USDT",
+        venue="venue_b",
+        symbol="TEST/USDT",
         seq=1,
         ts_exch=None,
         trade_id="1",
@@ -106,7 +109,7 @@ def trade(ts_recv: int = T0) -> TradeEvent:
     )
 
 
-def balance(venue: str = "mexc", ts_recv: int = T0) -> BalanceEvent:
+def balance(venue: str = "venue_b", ts_recv: int = T0) -> BalanceEvent:
     """Return a balance snapshot."""
     return BalanceEvent(
         ts_recv=ts_recv,
@@ -117,14 +120,33 @@ def balance(venue: str = "mexc", ts_recv: int = T0) -> BalanceEvent:
     )
 
 
+def fee_schedule(venue: str = "venue_b", ts_recv: int = T0) -> FeeScheduleEvent:
+    """Return a fee schedule for one venue."""
+    return FeeScheduleEvent(
+        ts_recv=ts_recv,
+        venue=venue,
+        fee_currency="received",
+        symbols=[
+            SymbolFees(
+                symbol="TEST/USDT",
+                maker=Decimal("0.001"),
+                taker=Decimal("0.002"),
+                min_cost=1.0,
+                amount_precision=4,
+            )
+        ],
+        source=FeeSource.MARKETS,
+    )
+
+
 def order_event(strategy: str, ts_recv: int = T0) -> OrderEvent:
     """Return an order event for a strategy key."""
     return OrderEvent(
         ts_recv=ts_recv,
         intent_id=f"t-1_{strategy}",
         strategy=strategy,
-        venue="mexc",
-        symbol="ALPH/USDT",
+        venue="venue_b",
+        symbol="TEST/USDT",
         state=OrderState.OPEN,
         side=Side.SELL,
     )
@@ -243,11 +265,13 @@ def test_owner_of_reads_the_strategy_key():
 def test_subscribed_streams_follow_the_config():
     """Feeds, venues and order events, in a stable order, without duplicates."""
     assert subscribed_streams(strategy_config(), prefix="bt:1") == [
-        "bt:1:md:book:mexc:ALPH/USDT",
-        "bt:1:md:trade:mexc:ALPH/USDT",
-        "bt:1:md:book:bitget:ALPH/USDT",
-        "bt:1:acct:balance:mexc",
-        "bt:1:acct:balance:bitget",
+        "bt:1:md:book:venue_b:TEST/USDT",
+        "bt:1:md:trade:venue_b:TEST/USDT",
+        "bt:1:md:book:venue_c:TEST/USDT",
+        "bt:1:acct:balance:venue_b",
+        "bt:1:acct:balance:venue_c",
+        "bt:1:acct:fees:venue_b",
+        "bt:1:acct:fees:venue_c",
         "bt:1:oms:events",
     ]
 
@@ -268,8 +292,8 @@ async def test_order_intent_is_stamped_by_the_clock(redis: Any):
     clock.advance(T0)
     runtime = Runtime(redis, config(), strategy_config(), Recorder(), clock=clock)
     intent = runtime.order_intent(
-        venue="mexc",
-        symbol="ALPH/USDT",
+        venue="venue_b",
+        symbol="TEST/USDT",
         side=Side.SELL,
         amount=40.0,
         price=0.35,
@@ -306,8 +330,8 @@ async def test_submit_publishes_under_the_prefix(redis: Any):
     """Intents land on the prefixed intents stream and are remembered."""
     runtime = Runtime(redis, config(), strategy_config(), Recorder(), prefix="bt:1")
     intent = runtime.order_intent(
-        venue="mexc",
-        symbol="ALPH/USDT",
+        venue="venue_b",
+        symbol="TEST/USDT",
         side=Side.BUY,
         amount="40",
         price="0.34",
@@ -326,8 +350,8 @@ async def test_cancel_names_the_order_it_was_given(redis: Any):
     runtime = Runtime(redis, config(), strategy_config(), Recorder())
     intent = await runtime.submit(
         runtime.order_intent(
-            venue="bitget",
-            symbol="ALPH/USDT",
+            venue="venue_c",
+            symbol="TEST/USDT",
             side=Side.BUY,
             amount=40,
             price=0.34,
@@ -338,8 +362,8 @@ async def test_cancel_names_the_order_it_was_given(redis: Any):
     assert isinstance(cancel, CancelIntent)
     assert cancel.target_intent_id == intent.intent_id
     assert (cancel.venue, cancel.symbol, cancel.strategy) == (
-        "bitget",
-        "ALPH/USDT",
+        "venue_c",
+        "TEST/USDT",
         "fmb_eb",
     )
     _intent, published = await intents_on(redis)
@@ -358,8 +382,8 @@ async def test_cancel_of_an_unknown_intent_is_an_error(redis: Any):
 async def test_cancel_resting_has_an_empty_target(redis: Any):
     """Cancelling a slot after a restart names no order."""
     runtime = Runtime(redis, config(), strategy_config(), Recorder())
-    first = await runtime.cancel_resting("mexc", "ALPH/USDT", "es")
-    second = await runtime.cancel_resting("mexc", "ALPH/USDT", "es")
+    first = await runtime.cancel_resting("venue_b", "TEST/USDT", "es")
+    second = await runtime.cancel_resting("venue_b", "TEST/USDT", "es")
     assert first.target_intent_id == ""
     assert first.strategy == "fmb_es"
     assert first.intent_id != second.intent_id
@@ -397,13 +421,15 @@ async def test_events_are_dispatched_by_type_and_ownership(redis: Any):
     assert handler.events[-1].strategy == "fmb_es"  # type: ignore[union-attr]
 
 
-def test_snapshot_streams_are_balances_then_books():
+def test_snapshot_streams_are_balances_fees_then_books():
     """Balances first, so a primed book already knows what it can fund."""
     assert snapshot_streams(strategy_config(), prefix="bt:1") == [
-        "bt:1:acct:balance:mexc",
-        "bt:1:acct:balance:bitget",
-        "bt:1:md:book:mexc:ALPH/USDT",
-        "bt:1:md:book:bitget:ALPH/USDT",
+        "bt:1:acct:balance:venue_b",
+        "bt:1:acct:balance:venue_c",
+        "bt:1:acct:fees:venue_b",
+        "bt:1:acct:fees:venue_c",
+        "bt:1:md:book:venue_b:TEST/USDT",
+        "bt:1:md:book:venue_c:TEST/USDT",
     ]
 
 
@@ -447,6 +473,53 @@ async def test_start_primes_after_on_start(redis: Any):
 
 
 @pytest.mark.asyncio
+async def test_fee_schedules_are_kept_and_readable(redis: Any):
+    """A delivered schedule is the latest one the accessors return."""
+    handler = Recorder()
+    runtime = Runtime(redis, config(), strategy_config(), handler)
+    await runtime.start()
+    assert runtime.fee_schedule("venue_b") is None
+    assert runtime.fees("venue_b", "TEST/USDT") is None
+
+    await publish(redis, fee_schedule())
+    await runtime.step()
+
+    assert runtime.fee_schedule("venue_b") == fee_schedule()
+    entry = runtime.fees("venue_b", "TEST/USDT")
+    assert entry is not None and entry.taker == Decimal("0.002")
+    assert runtime.fees("venue_b", "ETH/USDT") is None
+    assert runtime.fee_schedule("venue_c") is None
+    # The schedule is state, not an event a handler is called with.
+    assert handler.events == []
+
+
+@pytest.mark.asyncio
+async def test_start_primes_the_fee_schedule(redis: Any):
+    """A strategy starting between hourly refreshes still sees the schedule."""
+    await publish(redis, fee_schedule())
+    handler = Recorder()
+    runtime = Runtime(redis, config(), strategy_config(), handler)
+    await runtime.start()
+
+    assert runtime.fees("venue_b", "TEST/USDT") is not None
+    assert handler.events == []
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_schedule_supersedes_the_old_one(redis: Any):
+    """The accessor answers with the newest schedule on the stream."""
+    handler = Recorder()
+    runtime = Runtime(redis, config(), strategy_config(), handler)
+    await runtime.start()
+    await publish(redis, fee_schedule(ts_recv=T0 + 1))
+    await runtime.step()
+    await publish(redis, fee_schedule(ts_recv=T0 + 2))
+    await runtime.step()
+
+    assert runtime.fee_schedule("venue_b") == fee_schedule(ts_recv=T0 + 2)
+
+
+@pytest.mark.asyncio
 async def test_reading_starts_at_the_tail(redis: Any):
     """Events published before the runtime started are not replayed, beyond the snapshot."""
     await publish(redis, trade(), book(seq=1))
@@ -467,7 +540,7 @@ async def test_nothing_published_between_reads_is_lost(redis: Any):
     await runtime.start()
     await publish(redis, book(seq=1))
     await runtime.step()
-    await publish(redis, book(seq=2), book(venue="bitget", seq=3))
+    await publish(redis, book(seq=2), book(venue="venue_c", seq=3))
     await runtime.step()
     assert sorted(event.seq for event in handler.events) == [1, 2, 3]  # type: ignore[union-attr]
 
@@ -489,7 +562,7 @@ async def test_an_undecodable_entry_is_skipped(redis: Any):
     handler = Recorder()
     runtime = Runtime(redis, config(), strategy_config(), handler)
     await runtime.start()
-    await redis.xadd("md:book:mexc:ALPH/USDT", {"type": "book", "data": "{"})
+    await redis.xadd("md:book:venue_b:TEST/USDT", {"type": "book", "data": "{"})
     await publish(redis, book(seq=2))
     await runtime.step()
     assert [event.seq for event in handler.events] == [2]  # type: ignore[union-attr]

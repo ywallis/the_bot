@@ -22,6 +22,7 @@ from apps.shared.src.events import (
     AnyEvent,
     balance_stream,
     book_stream,
+    fees_stream,
     prefixed,
     stream_for,
     to_stream_fields,
@@ -204,8 +205,8 @@ def configured_streams(config: AppConfig, production: bool | None) -> list[str]:
     -------
     list[str]
         Sorted, unprefixed stream names: one book and trade stream per
-        subscribed feed, one balance stream per venue and the order
-        management streams.
+        subscribed feed, one balance and fee schedule stream per venue and
+        the order management streams.
     """
     streams: set[str] = set()
     for venue, symbol in config.feed_pairs(BOOK_FEED, production):
@@ -214,6 +215,7 @@ def configured_streams(config: AppConfig, production: bool | None) -> list[str]:
         streams.add(trade_stream(venue, symbol))
     for venue_config in config.venues:
         streams.add(balance_stream(venue_config.id))
+        streams.add(fees_stream(venue_config.id))
     streams.update({INTENTS_STREAM, ORDER_EVENTS_STREAM, LATENCY_STREAM})
     return sorted(streams)
 

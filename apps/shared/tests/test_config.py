@@ -9,7 +9,7 @@ from apps.shared.src.config import (
     parse_app_config,
 )
 
-VENUES = [{"id": "gate", "name": "Gate.io"}, {"id": "mexc", "name": "Mexc"}]
+VENUES = [{"id": "venue_a", "name": "Venue A"}, {"id": "venue_b", "name": "Venue B"}]
 
 
 def new_strategy(**overrides):
@@ -19,8 +19,8 @@ def new_strategy(**overrides):
         "type": "latency_arb",
         "production": True,
         "subscriptions": [
-            {"venue": "gate", "symbol": "BTC/USDT", "feeds": ["book", "trade"]},
-            {"venue": "mexc", "symbol": "SOL/USDT"},
+            {"venue": "venue_a", "symbol": "BTC/USDT", "feeds": ["book", "trade"]},
+            {"venue": "venue_b", "symbol": "SOL/USDT"},
         ],
         "params": {"lag_ms": 400, "threshold": 0.002},
     }
@@ -38,17 +38,17 @@ def test_new_strategy_shape():
     assert config.symbols() == {"BTC/USDT", "SOL/USDT"}
     flat = strategy.to_strategy_dict(None)
     assert flat["lag_ms"] == 400
-    assert flat["subscriptions"][0]["venue"] == "gate"
+    assert flat["subscriptions"][0]["venue"] == "venue_a"
     assert "refresh_speed" not in flat
     assert strategy.to_strategy_dict(0.01)["refresh_speed"] == 0.01
 
 
 def test_strategy_dict_matches_what_strategies_read():
     """Params are flattened to the top level, as strategies index them."""
-    raw = new_strategy(params={"maker_exchange": "mexc", "spread": 1.0025})
+    raw = new_strategy(params={"maker_exchange": "venue_b", "spread": 1.0025})
     config = parse_app_config({"venues": VENUES, "strategies": [raw]})
     flat = config.strategies[0].to_strategy_dict(0.01)
-    assert flat["maker_exchange"] == "mexc"
+    assert flat["maker_exchange"] == "venue_b"
     assert flat["spread"] == 1.0025
     assert flat["identifier"] == "lat"
     assert "params" not in flat
@@ -167,14 +167,14 @@ refresh_speed = 0.01
 host = "127.0.0.1"
 
 [[venues]]
-id = "gate"
-name = "Gate.io"
+id = "venue_a"
+name = "Venue A"
 
 [[strategies]]
 identifier = "x"
 type = "demo"
 production = false
-subscriptions = [{ venue = "gate", symbol = "BTC/USDT" }]
+subscriptions = [{ venue = "venue_a", symbol = "BTC/USDT" }]
 
 [strategies.params]
 threshold = 0.5
@@ -195,7 +195,7 @@ def test_missing_file(tmp_path):
 def test_real_config_loads():
     """The checked-in config in the strategies submodule parses."""
     config = load_app_config()
-    assert config.venue_ids >= {"mexc", "bitget"}
+    assert len(config.venue_ids) >= 2
     assert config.strategies
     assert all(s.subscriptions for s in config.strategies)
 
@@ -220,7 +220,7 @@ def test_recorder_config_defaults_and_override():
 def test_unknown_feed_is_rejected():
     """A typo in a feed name fails loudly instead of silently disabling it."""
     bad = new_strategy(
-        subscriptions=[{"venue": "gate", "symbol": "BTC/USDT", "feeds": ["books"]}]
+        subscriptions=[{"venue": "venue_a", "symbol": "BTC/USDT", "feeds": ["books"]}]
     )
     with pytest.raises(ConfigError, match="unknown feeds"):
         parse_app_config({"venues": VENUES, "strategies": [bad]})
@@ -229,24 +229,27 @@ def test_unknown_feed_is_rejected():
 def test_feed_pairs_filters_by_feed():
     """feed_pairs returns only the venue/symbol tuples subscribed to a feed."""
     config = parse_app_config({"venues": VENUES, "strategies": [new_strategy()]})
-    assert config.feed_pairs("book") == {("gate", "BTC/USDT"), ("mexc", "SOL/USDT")}
-    assert config.feed_pairs("trade") == {("gate", "BTC/USDT")}
+    assert config.feed_pairs("book") == {
+        ("venue_a", "BTC/USDT"),
+        ("venue_b", "SOL/USDT"),
+    }
+    assert config.feed_pairs("trade") == {("venue_a", "BTC/USDT")}
 
 
 def test_venue_options_default_and_parsed():
     """Per-venue CCXT options are optional and passed through untouched."""
     venues = [
-        {"id": "gate", "name": "Gate.io"},
+        {"id": "venue_a", "name": "Venue A"},
         {
-            "id": "mexc",
-            "name": "Mexc",
+            "id": "venue_b",
+            "name": "Venue B",
             "options": {"watchOrderBook": {"checksum": False}},
         },
     ]
     config = parse_app_config({"venues": venues, "strategies": [new_strategy()]})
     by_id = {v.id: v for v in config.venues}
-    assert by_id["gate"].options == {}
-    assert by_id["mexc"].options == {"watchOrderBook": {"checksum": False}}
+    assert by_id["venue_a"].options == {}
+    assert by_id["venue_b"].options == {"watchOrderBook": {"checksum": False}}
 
 
 def test_oms_settings_default():
@@ -270,3 +273,58 @@ def test_oms_settings_are_overridable():
     assert config.oms.max_intent_age_s == 0.5
     assert config.oms.batch == 5
     assert config.oms.block_ms == 1000
+
+
+def test_fee_policy_defaults_and_parse():
+    """The fee currency policy and static overrides are per venue."""
+    venues = [
+        {"id": "venue_a", "name": "Venue A", "fee_currency": "received"},
+        {
+            "id": "venue_b",
+            "name": "Venue B",
+            "fee_currency": "USDT",
+            "maker_fee": 0.001,
+            "taker_fee": 0.002,
+        },
+    ]
+    config = parse_app_config({"venues": venues, "strategies": [new_strategy()]})
+    by_id = {v.id: v for v in config.venues}
+    assert by_id["venue_a"].fee_currency == "received"
+    assert by_id["venue_b"].fee_currency == "USDT"
+    assert by_id["venue_b"].maker_fee == 0.001
+    assert by_id["venue_b"].taker_fee == 0.002
+
+
+def test_invalid_fee_policy_rejected():
+    """A policy that is neither keyword nor asset code fails loudly."""
+    venues = [{"id": "venue_a", "name": "Venue A", "fee_currency": "whatever"}]
+    with pytest.raises(ConfigError, match="fee_currency"):
+        parse_app_config({"venues": venues, "strategies": [new_strategy()]})
+
+
+def test_lowercase_asset_code_fee_policy_rejected():
+    """An explicit asset code must be uppercase, so it reads as one."""
+    venues = [{"id": "venue_a", "name": "Venue A", "fee_currency": "vt"}]
+    with pytest.raises(ConfigError, match="fee_currency"):
+        parse_app_config({"venues": venues, "strategies": [new_strategy()]})
+
+
+def test_out_of_range_fee_override_rejected():
+    """A static fee that is not a fraction of traded value is a config error."""
+    venues = [{"id": "venue_a", "name": "Venue A", "taker_fee": 5.0}]
+    with pytest.raises(ConfigError, match="taker_fee"):
+        parse_app_config({"venues": venues, "strategies": [new_strategy()]})
+
+
+def test_fees_settings_default_and_override():
+    """The fees section is optional and fully defaulted."""
+    config = parse_app_config({"venues": VENUES, "strategies": [new_strategy()]})
+    assert config.fees.refresh_s == 3600
+    config = parse_app_config(
+        {
+            "venues": VENUES,
+            "fees": {"refresh_s": 900},
+            "strategies": [new_strategy()],
+        }
+    )
+    assert config.fees.refresh_s == 900

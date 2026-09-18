@@ -85,6 +85,23 @@ def balance_stream(venue: str) -> str:
     return f"acct:balance:{venue}"
 
 
+def fees_stream(venue: str) -> str:
+    """
+    Return the fee schedule stream name for a venue.
+
+    Parameters
+    ----------
+    venue : str
+        CCXT short id.
+
+    Returns
+    -------
+    str
+        Stream name.
+    """
+    return f"acct:fees:{venue}"
+
+
 def snapshot_key(venue: str, symbol: str) -> str:
     """
     Return the legacy latest-snapshot key for an order book.
@@ -146,10 +163,19 @@ class EventType(str, Enum):
     BOOK = "book"
     TRADE = "trade"
     BALANCE = "balance"
+    FEE_SCHEDULE = "fee_schedule"
     ORDER_INTENT = "order_intent"
     CANCEL_INTENT = "cancel_intent"
     ORDER_EVENT = "order_event"
     LATENCY = "latency"
+
+
+class FeeSource(str, Enum):
+    """Where a fee schedule's rates came from."""
+
+    TRADING_FEES = "trading_fees"
+    MARKETS = "markets"
+    CONFIG = "config"
 
 
 class Side(str, Enum):
@@ -318,6 +344,65 @@ class BalanceEvent(Event, tag=EventType.BALANCE.value):
     seq: int
     ts_exch: int | None
     balances: dict[str, AssetBalance]
+
+
+class SymbolFees(msgspec.Struct):
+    """
+    Trading terms for one symbol on one venue.
+
+    Attributes
+    ----------
+    symbol : str
+        CCXT symbol.
+    maker : Decimal | None
+        Maker fee rate as a fraction of the traded value, None if unknown.
+    taker : Decimal | None
+        Taker fee rate as a fraction of the traded value, None if unknown.
+    min_cost : float | None
+        Smallest order notional the venue accepts, None if unreported.
+    amount_precision : int | None
+        Decimal places an order amount may carry, None if unreported.
+    """
+
+    symbol: str
+    maker: Decimal | None
+    taker: Decimal | None
+    min_cost: float | None
+    amount_precision: int | None
+
+
+class FeeScheduleEvent(Event, tag=EventType.FEE_SCHEDULE.value):
+    """
+    The fee schedule of one venue.
+
+    Published periodically rather than once: fee levels follow the account's
+    rolling volume and balance, so consumers size against a fresh schedule
+    instead of rates frozen at startup. Which currency a fee is charged in
+    is the policy declared in configuration (``fee_currency``), resolved
+    against the base and quote assets of the symbol being traded; the
+    ScheduleEvent's rates say how much, not in what.
+
+    Attributes
+    ----------
+    venue : str
+        CCXT short id.
+    fee_currency : str
+        Fee policy: ``quote`` (always the quote asset), ``base`` (always
+        the base asset), ``received`` (base on buys, quote on sells) or an
+        explicit asset code for venues that charge their own token.
+    symbols : list[SymbolFees]
+        One entry per traded symbol the venue lists.
+    source : FeeSource
+        Where the rates came from.
+    ts_fetched : int | None
+        When the schedule was fetched, milliseconds since the epoch.
+    """
+
+    venue: str
+    fee_currency: str
+    symbols: list[SymbolFees]
+    source: FeeSource
+    ts_fetched: int | None = None
 
 
 class OrderIntent(Event, tag=EventType.ORDER_INTENT.value):
@@ -513,6 +598,7 @@ AnyEvent = Union[
     BookEvent,
     TradeEvent,
     BalanceEvent,
+    FeeScheduleEvent,
     OrderIntent,
     CancelIntent,
     OrderEvent,
@@ -523,6 +609,7 @@ EVENT_TYPES: dict[type, EventType] = {
     BookEvent: EventType.BOOK,
     TradeEvent: EventType.TRADE,
     BalanceEvent: EventType.BALANCE,
+    FeeScheduleEvent: EventType.FEE_SCHEDULE,
     OrderIntent: EventType.ORDER_INTENT,
     CancelIntent: EventType.CANCEL_INTENT,
     OrderEvent: EventType.ORDER_EVENT,
@@ -659,6 +746,8 @@ def stream_for(event: AnyEvent) -> str:
             return trade_stream(event.venue, event.symbol)
         case BalanceEvent():
             return balance_stream(event.venue)
+        case FeeScheduleEvent():
+            return fees_stream(event.venue)
         case OrderIntent() | CancelIntent():
             return INTENTS_STREAM
         case OrderEvent():
