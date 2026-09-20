@@ -15,9 +15,18 @@ Usage
     uv run -m apps.maker.src.tools.market_screener --venues venue_a venue_b
         --quote USDT --top 30 --interval 6 --json screen.json
 
+    uv run -m apps.maker.src.tools.market_screener --recorded data \
+        --symbols BASE/QUOTE --start 2026-09-08T12:00Z
+
 Venues default to the ones in ``config.toml``. Fees default to the static
 rates configured per venue and fall back to ``--fee-bps`` when a venue has
 none. No keys are needed.
+
+With ``--recorded`` the same arithmetic runs over the recorder's files
+instead of live REST: every book update and every trade, which is what the
+live sample approximates. That is how a shortlisted market, recorded through
+the ``observe`` strategy, is measured before a quoting strategy is pointed
+at it.
 
 What the numbers mean: ``harvest`` is the quote notional per hour of maker
 venue prints that landed at least an edge past the prevailing taker touch,
@@ -38,11 +47,21 @@ import statistics
 import sys
 import time
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import ccxt.async_support as ccxt  # pyright: ignore[reportMissingTypeStubs]
 
 from apps.shared.src.config import AppConfig, VenueConfig, load_app_config
+from apps.shared.src.events import (
+    BookEvent,
+    TradeEvent,
+    book_stream,
+    from_stream_fields,
+    trade_stream,
+)
+from apps.shared.src.streams import recording_files, stream_path
 
 logger = logging.getLogger(__name__)
 
@@ -714,6 +733,175 @@ class Screener:
         await asyncio.gather(*(client.close() for client in self.clients.values()))
 
 
+def recorded_events(directory: Path, start_ns: int, end_ns: int) -> list[Any]:
+    """
+    Read the events the recorder wrote for one stream inside a range.
+
+    Parameters
+    ----------
+    directory : Path
+        The stream's recording directory.
+    start_ns : int
+        Earliest receive time kept, inclusive.
+    end_ns : int
+        Latest receive time kept, exclusive.
+
+    Returns
+    -------
+    list[Any]
+        Decoded events in receive order; none if the directory is missing.
+    """
+    out: list[Any] = []
+    if not directory.is_dir():
+        return out
+    for path in recording_files(directory):
+        with open(path) as fh:
+            for line in fh:
+                try:
+                    record = json.loads(line)
+                    event = from_stream_fields(
+                        {"type": record["type"], "data": json.dumps(record["data"])}
+                    )
+                except Exception:  # noqa: BLE001, a torn last line is normal
+                    continue
+                if start_ns <= event.ts_recv < end_ns:
+                    out.append(event)
+    out.sort(key=lambda e: e.ts_recv)
+    return out
+
+
+def sample_from_recording(
+    root: Path, venue: str, symbol: str, start_ns: int, end_ns: int
+) -> Sample:
+    """
+    Build a sample from a venue's recorded books and trades.
+
+    Parameters
+    ----------
+    root : Path
+        Recording root.
+    venue : str
+        Venue id.
+    symbol : str
+        CCXT symbol.
+    start_ns : int
+        Earliest receive time kept, inclusive.
+    end_ns : int
+        Latest receive time kept, exclusive.
+
+    Returns
+    -------
+    Sample
+        One snapshot per book update and one print per trade.
+    """
+    sample = Sample()
+    for event in recorded_events(
+        stream_path(root, book_stream(venue, symbol)), start_ns, end_ns
+    ):
+        if isinstance(event, BookEvent) and event.bids and event.asks:
+            sample.snapshots.append(
+                Snapshot(
+                    ts_ms=event.ts_recv // 1_000_000,
+                    bid=event.bids[0][0],
+                    ask=event.asks[0][0],
+                    bid_depth=sum(p * a for p, a in event.bids[:DEPTH_LEVELS]),
+                    ask_depth=sum(p * a for p, a in event.asks[:DEPTH_LEVELS]),
+                )
+            )
+    for event in recorded_events(
+        stream_path(root, trade_stream(venue, symbol)), start_ns, end_ns
+    ):
+        if isinstance(event, TradeEvent):
+            sample.prints.append(
+                Print(
+                    ts_ms=event.ts_recv // 1_000_000,
+                    side=event.side.value if event.side is not None else "",
+                    price=event.price,
+                    amount=event.amount,
+                )
+            )
+    return sample
+
+
+def parse_when(value: str | None, default_ns: int) -> int:
+    """
+    Parse an ISO 8601 time into nanoseconds, UTC unless a zone is given.
+
+    Parameters
+    ----------
+    value : str | None
+        The time, or None for the default.
+    default_ns : int
+        Returned for None.
+
+    Returns
+    -------
+    int
+        Nanoseconds since the epoch.
+    """
+    if value is None:
+        return default_ns
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return int(parsed.timestamp() * 1e9)
+
+
+def score_recording(
+    root: Path,
+    venue_ids: list[str],
+    symbols: list[str],
+    fees: dict[tuple[str, str], float],
+    start_ns: int,
+    end_ns: int,
+) -> list[PairScore]:
+    """
+    Score symbols from a recording, every venue as maker against every other.
+
+    Parameters
+    ----------
+    root : Path
+        Recording root.
+    venue_ids : list[str]
+        Venues to score.
+    symbols : list[str]
+        Symbols to score.
+    fees : dict[tuple[str, str], float]
+        Fee budget in basis points per (maker, taker) venue pair.
+    start_ns : int
+        Earliest receive time kept, inclusive.
+    end_ns : int
+        Latest receive time kept, exclusive.
+
+    Returns
+    -------
+    list[PairScore]
+        Ranked scores.
+    """
+    samples = {
+        (venue, symbol): sample_from_recording(root, venue, symbol, start_ns, end_ns)
+        for venue in venue_ids
+        for symbol in symbols
+    }
+    out: list[PairScore] = []
+    for symbol in symbols:
+        for maker in venue_ids:
+            for taker in venue_ids:
+                if maker == taker:
+                    continue
+                score = score_pair(
+                    symbol,
+                    maker,
+                    taker,
+                    samples[(maker, symbol)],
+                    samples[(taker, symbol)],
+                    fees[(maker, taker)],
+                )
+                if score is not None:
+                    out.append(score)
+    return rank(out)
+
+
 def public_clients(config: AppConfig, venue_ids: list[str]) -> dict[str, Any]:
     """
     Build unauthenticated CCXT clients for a list of venues.
@@ -802,6 +990,22 @@ async def run(args: argparse.Namespace) -> list[PairScore]:
         for taker in venue_ids
         if maker != taker
     }
+    if args.recorded:
+        if not args.symbols:
+            raise SystemExit("--recorded needs --symbols")
+        scores = score_recording(
+            Path(args.recorded),
+            venue_ids,
+            args.symbols,
+            fees,
+            parse_when(args.start, 0),
+            parse_when(args.end, 2**63 - 1),
+        )
+        print(format_table(scores, args.rows))
+        if args.json:
+            with open(args.json, "w") as fh:
+                json.dump([asdict(s) for s in scores], fh, indent=1)
+        return scores
     screener = Screener(public_clients(config, venue_ids))
     try:
         markets = await screener.load_markets()
@@ -850,6 +1054,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--fee-bps", type=float, default=DEFAULT_FEE_BPS)
     parser.add_argument("--rows", type=int, default=40, help="rows to print")
     parser.add_argument("--json", help="write every score here")
+    parser.add_argument("--recorded", help="score this recording root instead")
+    parser.add_argument("--start", help="--recorded: ISO 8601, inclusive")
+    parser.add_argument("--end", help="--recorded: ISO 8601, exclusive")
     return parser.parse_args(argv)
 
 
