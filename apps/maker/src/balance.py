@@ -3,6 +3,14 @@
 Fetches each venue's balance once, then follows ``watch_balance`` updates.
 Every snapshot is published as a ``BalanceEvent`` on ``acct:balance:{venue}``
 and written to the legacy ``balance-{venue}`` key for polling strategies.
+
+A ``BalanceEvent`` is a full snapshot by contract: a consumer replaces what
+it holds with the latest event. Some venues deliver ``watch_balance`` updates
+that carry only the currencies that changed, and publishing one of those as
+it comes makes every other currency vanish from the strategies' view. Live,
+that was one side of the quoting silently going insolvent after the first
+fill. So every update is overlaid onto the last full snapshot of its venue
+before it is published, and what goes out is always complete.
 """
 
 import asyncio
@@ -23,6 +31,61 @@ from apps.shared.src.structs import CustomExchange
 
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
+
+
+# Keys of the CCXT balance structure that are not currencies.
+BALANCE_META_KEYS: frozenset[str] = frozenset(
+    {"info", "timestamp", "datetime", "free", "used", "total", "debt"}
+)
+
+# The last full balance published per venue, which deltas are overlaid on.
+BalanceCache = dict[str, dict[str, Any]]
+
+
+def merge_balance(
+    previous: dict[str, Any] | None, update: dict[str, Any]
+) -> dict[str, Any]:
+    """
+    Overlay a balance update onto the last full snapshot of its venue.
+
+    Parameters
+    ----------
+    previous : dict[str, Any] | None
+        The last full CCXT balance published for the venue, or None before
+        the first fetch.
+    update : dict[str, Any]
+        A CCXT balance as delivered, which may carry only the currencies
+        that changed.
+
+    Returns
+    -------
+    dict[str, Any]
+        A CCXT balance holding every currency ever reported for the venue,
+        each at its latest figures, with the update's ``info`` and
+        timestamps and rebuilt ``free``, ``used`` and ``total`` maps.
+    """
+    currencies: dict[str, Any] = {}
+    if previous is not None:
+        for asset, figures in previous.items():
+            if asset not in BALANCE_META_KEYS and isinstance(figures, dict):
+                currencies[asset] = dict(figures)
+    for asset, figures in update.items():
+        if asset not in BALANCE_META_KEYS and isinstance(figures, dict):
+            currencies[asset] = dict(figures)
+
+    merged: dict[str, Any] = dict(currencies)
+    for meta in ("info", "timestamp", "datetime"):
+        if meta in update:
+            merged[meta] = update[meta]
+        elif previous is not None and meta in previous:
+            merged[meta] = previous[meta]
+    for figure in ("free", "used", "total"):
+        merged[figure] = {
+            asset: values.get(figure)
+            for asset, values in currencies.items()
+            if values.get(figure) is not None
+        }
+    return merged
 
 
 def legacy_balance_key(venue: str) -> str:
@@ -79,7 +142,10 @@ async def publish_balance(
 
 
 async def fetch_balance(
-    client: CustomExchange, redis: Redis, publisher: StreamPublisher
+    client: CustomExchange,
+    redis: Redis,
+    publisher: StreamPublisher,
+    cache: BalanceCache | None = None,
 ) -> None:
     """
     Fetch a balance once and publish it.
@@ -92,11 +158,17 @@ async def fetch_balance(
         A redis client instance.
     publisher : StreamPublisher
         Publisher holding sequence numbers and trimming settings.
+    cache : BalanceCache | None
+        Last full balance per venue, updated in place so later deltas are
+        overlaid on this fetch.
     """
     try:
         balance = await client.fetch_balance()
         ts_recv = now_ns()
         logger.debug(f"Balances on {client.name} are {balance}")
+        if cache is not None:
+            balance = merge_balance(cache.get(client.id), balance)
+            cache[client.id] = balance
         await publish_balance(redis, publisher, client.id, balance, ts_recv)
     except NetworkError as e:
         logger.error(
@@ -108,10 +180,13 @@ async def fetch_balance(
 
 
 async def watch_balance(
-    client: CustomExchange, redis: Redis, publisher: StreamPublisher
+    client: CustomExchange,
+    redis: Redis,
+    publisher: StreamPublisher,
+    cache: BalanceCache | None = None,
 ) -> None:
     """
-    Follow balance updates over websocket and publish each one.
+    Follow balance updates over websocket and publish each one, complete.
 
     Parameters
     ----------
@@ -121,12 +196,20 @@ async def watch_balance(
         A redis client instance.
     publisher : StreamPublisher
         Publisher holding sequence numbers and trimming settings.
+    cache : BalanceCache | None
+        Last full balance per venue. Every update is overlaid onto it and
+        the result is what gets published, so a delta carrying one currency
+        never hides the others. Without a cache updates are published as
+        they come.
     """
     while True:
         try:
             balance = await client.watch_balance()
             ts_recv = now_ns()
             logger.debug(f"Balances on {client.name} are {balance}")
+            if cache is not None:
+                balance = merge_balance(cache.get(client.id), balance)
+                cache[client.id] = balance
             await publish_balance(redis, publisher, client.id, balance, ts_recv)
         except NetworkError as e:
             logger.error(
@@ -153,14 +236,21 @@ async def main(config: AppConfig, clients: dict[str, CustomExchange]) -> None:
     )
     redis = Redis(decode_responses=True, connection_pool=pool)
     publisher = StreamPublisher(maxlen=config.market_data.stream_maxlen)
+    cache: BalanceCache = {}
 
     # watch_balance only delivers changes, so seed each venue with a fetch.
     await asyncio.gather(
-        *[fetch_balance(client, redis, publisher) for client in clients.values()],
+        *[
+            fetch_balance(client, redis, publisher, cache)
+            for client in clients.values()
+        ],
     )
     try:
         await asyncio.gather(
-            *[watch_balance(client, redis, publisher) for client in clients.values()],
+            *[
+                watch_balance(client, redis, publisher, cache)
+                for client in clients.values()
+            ],
         )
     finally:
         for client in clients.values():
