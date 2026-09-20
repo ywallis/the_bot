@@ -173,3 +173,84 @@ def test_select_symbols_keeps_the_liquid_ones_busiest_first():
     symbols = ["AAA/USDT", "BBB/USDT", "CCC/USDT"]
     assert select_symbols(symbols, volumes, 10_000.0, 5) == ["BBB/USDT", "CCC/USDT"]
     assert select_symbols(symbols, volumes, 10_000.0, 1) == ["BBB/USDT"]
+
+
+def test_score_recording_reads_books_and_trades_from_the_recorder_files(tmp_path):
+    """The recorded mode builds samples from the recorder's files and scores them."""
+    import json as _json
+
+    from apps.shared.src.events import (
+        BookEvent,
+        Side,
+        TradeEvent,
+        book_stream,
+        to_stream_fields,
+        trade_stream,
+    )
+    from apps.shared.src.streams import stream_path
+
+    from apps.maker.src.tools.market_screener import score_recording
+
+    t0 = 1_757_200_000_000_000_000
+
+    def write(stream: str, events: list) -> None:
+        directory = stream_path(tmp_path, stream)
+        directory.mkdir(parents=True)
+        with open(directory / "2025-09-07T00.jsonl", "w") as fh:
+            for i, ev in enumerate(events):
+                fields = to_stream_fields(ev)
+                data = fields["data"]
+                fh.write(
+                    _json.dumps(
+                        {
+                            "id": f"{ev.ts_recv // 1_000_000}-{i}",
+                            "type": fields["type"],
+                            "data": _json.loads(
+                                data if isinstance(data, str) else data.decode()
+                            ),
+                        }
+                    )
+                    + "\n"
+                )
+
+    hour = 3_600 * 10**9
+    for venue, bid, ask in (("a", 0.9990, 1.0020), ("b", 1.0000, 1.0000)):
+        write(
+            book_stream(venue, "X/USDT"),
+            [
+                BookEvent(
+                    ts_recv=t0 + k * hour,
+                    venue=venue,
+                    symbol="X/USDT",
+                    seq=k,
+                    ts_exch=None,
+                    bids=[[bid, 10.0]],
+                    asks=[[ask, 10.0]],
+                )
+                for k in (0, 1)
+            ],
+        )
+    write(
+        trade_stream("a", "X/USDT"),
+        [
+            TradeEvent(
+                ts_recv=t0 + 1000,
+                venue="a",
+                symbol="X/USDT",
+                seq=1,
+                ts_exch=None,
+                trade_id="1",
+                side=Side.BUY,
+                price=1.0045,
+                amount=1000 / 1.0045,
+            )
+        ],
+    )
+    scores = score_recording(
+        tmp_path, ["a", "b"], ["X/USDT"], {("a", "b"): 12.0, ("b", "a"): 12.0}, 0, 2**63
+    )
+    assert [(s.maker, s.taker) for s in scores] == [("a", "b"), ("b", "a")]
+    top = scores[0]
+    assert round(top.sell_offset_bps, 6) == 20.0
+    assert round(top.harvest_per_h[30]) == 1000
+    assert round(top.hours, 6) == 1.0
