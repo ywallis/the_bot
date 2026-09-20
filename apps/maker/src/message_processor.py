@@ -1177,14 +1177,23 @@ class OrderManager:
         then is the book swept. A placement that landed inside that window
         is in the book by the time the sweep reads it.
 
+        The queue is walked from a snapshot, and every ``await`` in the walk
+        lets an in-flight task finish and ``drain`` its own strategy's
+        entry. Whatever it drained is processed by that task, so an entry
+        gone missing here is skipped rather than deleted again: the
+        ``KeyError`` that used to raise instead unwound this method before
+        the sweep, and left every resting order at the venue.
+
         Parameters
         ----------
         grace_s : float
             How long to wait for in-flight intents before sweeping anyway.
         """
         self.closing = True
-        for strategy, queued in list(self.queued.items()):
-            del self.queued[strategy]
+        for strategy in list(self.queued):
+            queued = self.queued.pop(strategy, None)
+            if queued is None:
+                continue
             await self.reject(queued.intent, "order manager is shutting down")
             await self.ack(queued.entry_id)
         in_flight = [task for task in self.tasks if not task.done()]

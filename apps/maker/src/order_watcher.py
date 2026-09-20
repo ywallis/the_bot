@@ -30,7 +30,7 @@ from apps.maker.src.watcher import handle_feed_error
 from apps.shared.src.ccxt_events import order_event_from_ccxt
 from apps.shared.src.ccxt_orders import fetch_orders_since
 from apps.shared.src.config import AppConfig, load_app_config
-from apps.shared.src.events import OrderEvent, now_ns
+from apps.shared.src.events import OrderEvent, OrderState, now_ns
 from apps.shared.src.exchange_clients import authenticated_clients
 from apps.shared.src.streams import StreamPublisher
 from apps.shared.src.structs import CustomExchange
@@ -61,6 +61,17 @@ RECONCILE_EVERY_S = 60.0
 # to cover any order still open, small enough to stay bounded in a process
 # that runs for weeks.
 ORDER_MEMORY = 2000
+
+# States an order does not leave. An update reporting anything else about an
+# order already seen in one of these is a stale snapshot, not a transition.
+TERMINAL_STATES: frozenset[OrderState] = frozenset(
+    {
+        OrderState.FILLED,
+        OrderState.CANCELLED,
+        OrderState.EXPIRED,
+        OrderState.REJECTED,
+    }
+)
 
 
 @dataclass
@@ -137,6 +148,63 @@ class BoundedDict:
     def __len__(self) -> int:
         """Return the number of keys held."""
         return len(self._items)
+
+
+@dataclass
+class OrderMemory:
+    """
+    What one watch loop remembers about the orders it has reported.
+
+    Shared between the socket loop and the reconciliations, which publish
+    onto the same stream and must agree on what is already out there.
+
+    Attributes
+    ----------
+    seen : LimitedSet
+        Update keys already published, see ``update_key``.
+    filled_so_far : BoundedDict
+        Cumulative filled size per order id, as last published.
+    finished : LimitedSet
+        Order ids already reported in a terminal state.
+    """
+
+    seen: LimitedSet
+    filled_so_far: BoundedDict
+    finished: LimitedSet
+
+    @classmethod
+    def sized(cls, max_size: int) -> "OrderMemory":
+        """
+        Return an empty memory bounded to ``max_size`` orders per part.
+
+        Parameters
+        ----------
+        max_size : int
+            Orders remembered by each part.
+
+        Returns
+        -------
+        OrderMemory
+            The memory.
+        """
+        return cls(LimitedSet(max_size), BoundedDict(max_size), LimitedSet(max_size))
+
+
+def order_identity(order: dict[str, Any]) -> str:
+    """
+    Return the id an order is remembered under.
+
+    Parameters
+    ----------
+    order : dict[str, Any]
+        CCXT unified order.
+
+    Returns
+    -------
+    str
+        Our client order id where the order has one, else the venue's id.
+    """
+    return str(order.get("clientOrderId") or order.get("id") or "")
 
 
 def oid_components(client_order_id: Any) -> tuple[str, str]:
@@ -239,7 +307,9 @@ def event_from_order(
         Local receive time in nanoseconds.
     filled_so_far : BoundedDict
         Cumulative filled size per order id, updated in place so the next
-        update of the same order can report the fill that caused it.
+        update of the same order can report the fill that caused it. Never
+        moved backwards: an update reporting less filled than already
+        published is a stale snapshot, and the caller drops it.
 
     Returns
     -------
@@ -247,7 +317,7 @@ def event_from_order(
         The event.
     """
     strategy_identifier, order_identifier = oid_components(order.get("clientOrderId"))
-    order_id = str(order.get("clientOrderId") or order.get("id") or "")
+    order_id = order_identity(order)
     previous_filled = filled_so_far.get(order_id, Decimal(0))
     event = order_event_from_ccxt(
         venue,
@@ -257,8 +327,43 @@ def event_from_order(
         previous_filled=previous_filled,
         tags={STRATEGY_TAG: strategy_identifier, ORDER_TAG: order_identifier},
     )
-    filled_so_far.set(order_id, event.filled)
+    if event.filled >= previous_filled:
+        filled_so_far.set(order_id, event.filled)
     return event
+
+
+def staleness(event: OrderEvent, order_id: str, memory: OrderMemory) -> str | None:
+    """
+    Say why an update is a stale snapshot of its order, if it is one.
+
+    A REST reconciliation runs while the socket keeps delivering, so a
+    snapshot fetched before a fill can be processed after the socket has
+    reported it. ``update_key`` cannot tell: the lower filled size is a
+    key nobody has seen. Published, it would show consumers a fill going
+    backwards, and its filled size would be remembered as the baseline for
+    the next delta, which then over-reports the next fill by the same
+    amount.
+
+    Parameters
+    ----------
+    event : OrderEvent
+        The event built from the update.
+    order_id : str
+        The id the order is remembered under, see ``order_identity``.
+    memory : OrderMemory
+        What has been published so far.
+
+    Returns
+    -------
+    str | None
+        A reason to drop the update, None if it is a genuine transition.
+    """
+    if order_id in memory.finished:
+        return "the order was already reported in a terminal state"
+    published = memory.filled_so_far.get(order_id, Decimal(0))
+    if event.filled < published:
+        return f"it reports {event.filled} filled after {published} was published"
+    return None
 
 
 async def publish_updates(
@@ -267,11 +372,15 @@ async def publish_updates(
     ts_recv: int,
     redis: Redis,
     publisher: StreamPublisher,
-    seen: LimitedSet,
-    filled_so_far: BoundedDict,
+    memory: OrderMemory,
 ) -> int:
     """
     Publish every order update not already published.
+
+    A replay of an update already published is dropped by its key; a stale
+    snapshot of an order that has moved on since is dropped by
+    ``staleness``. Both come out of the same REST fetch, and only the
+    second kind could otherwise get through.
 
     Parameters
     ----------
@@ -285,10 +394,8 @@ async def publish_updates(
         The Redis client.
     publisher : StreamPublisher
         Publisher writing to ``oms:events``.
-    seen : LimitedSet
-        Update keys already published, updated in place.
-    filled_so_far : BoundedDict
-        Cumulative filled size per order id, updated in place.
+    memory : OrderMemory
+        What this loop has published so far, updated in place.
 
     Returns
     -------
@@ -298,11 +405,20 @@ async def publish_updates(
     published = 0
     for order in list(orders):
         key = update_key(order)
-        if key in seen:
+        if key in memory.seen:
             logger.debug(f"Dropping replayed order update {key}")
             continue
-        seen.add(key)
-        event = event_from_order(client.id, order, ts_recv, filled_so_far)
+        order_id = order_identity(order)
+        event = event_from_order(client.id, order, ts_recv, memory.filled_so_far)
+        stale = staleness(event, order_id, memory)
+        if stale is not None:
+            logger.warning(
+                f"Dropping stale update for {event.intent_id} on {client.id}: {stale}"
+            )
+            continue
+        memory.seen.add(key)
+        if event.state in TERMINAL_STATES:
+            memory.finished.add(order_id)
         await publisher.publish(redis, event)
         published += 1
         logger.info(
@@ -318,8 +434,7 @@ async def reconcile(
     since: int,
     redis: Redis,
     publisher: StreamPublisher,
-    seen: LimitedSet,
-    filled_so_far: BoundedDict,
+    memory: OrderMemory,
 ) -> int:
     """
     Publish what the websocket missed while it was down.
@@ -348,10 +463,8 @@ async def reconcile(
         The Redis client.
     publisher : StreamPublisher
         Publisher writing to ``oms:events``.
-    seen : LimitedSet
-        Update keys already published, updated in place.
-    filled_so_far : BoundedDict
-        Cumulative filled size per order id, updated in place.
+    memory : OrderMemory
+        What this loop has published so far, updated in place.
 
     Returns
     -------
@@ -366,7 +479,7 @@ async def reconcile(
         logger.error(f"Could not reconcile orders on {client.id} {ticker}: {error}")
         return 0
     published = await publish_updates(
-        client, orders, now_ns(), redis, publisher, seen, filled_so_far
+        client, orders, now_ns(), redis, publisher, memory
     )
     logger.info(
         f"Reconciled {client.id} {ticker} from {since}: {len(orders)} orders "
@@ -381,11 +494,15 @@ async def reconcile_periodically(
     delivery: Delivery,
     redis: Redis,
     publisher: StreamPublisher,
-    seen: LimitedSet,
-    filled_so_far: BoundedDict,
+    memory: OrderMemory,
 ) -> None:
     """
     Reconcile on a timer, for the gaps a healthy-looking socket hides.
+
+    A failed pass is logged and the timer keeps running. ``reconcile``
+    only guards its REST call; an error while publishing what it fetched
+    would otherwise end this task, silently, and leave the socket without
+    the safety net this timer exists to provide.
 
     Parameters
     ----------
@@ -399,22 +516,26 @@ async def reconcile_periodically(
         The Redis client.
     publisher : StreamPublisher
         Publisher writing to ``oms:events``.
-    seen : LimitedSet
-        Update keys already published, shared with the socket loop.
-    filled_so_far : BoundedDict
-        Cumulative filled size per order id, shared with the socket loop.
+    memory : OrderMemory
+        What has been published so far, shared with the socket loop.
     """
     while True:
         await asyncio.sleep(RECONCILE_EVERY_S)
-        await reconcile(
-            client,
-            ticker,
-            delivery.last_ms - RECONCILE_MARGIN_MS,
-            redis,
-            publisher,
-            seen,
-            filled_so_far,
-        )
+        try:
+            await reconcile(
+                client,
+                ticker,
+                delivery.last_ms - RECONCILE_MARGIN_MS,
+                redis,
+                publisher,
+                memory,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:  # noqa: BLE001, the timer must survive
+            logger.error(
+                f"Periodic reconciliation of {client.id} {ticker} failed: {error}"
+            )
 
 
 async def watch_orders(
@@ -445,17 +566,14 @@ async def watch_orders(
     publisher : StreamPublisher
         Publisher writing to ``oms:events``.
     """
-    seen = LimitedSet(ORDER_MEMORY)
-    filled_so_far = BoundedDict(ORDER_MEMORY)
+    memory = OrderMemory.sized(ORDER_MEMORY)
     # Orders that predate this process are the order manager's business at
     # startup, not this loop's, so the venue is asked only for what happens
     # from now on. Anything the venue replays anyway is dropped by `seen`.
     since = int(time.time() * 1000)
     delivery = Delivery(last_ms=since)
     periodic = asyncio.create_task(
-        reconcile_periodically(
-            client, ticker, delivery, redis, publisher, seen, filled_so_far
-        )
+        reconcile_periodically(client, ticker, delivery, redis, publisher, memory)
     )
     try:
         while True:
@@ -465,9 +583,7 @@ async def watch_orders(
                 )
                 ts_recv = now_ns()
                 delivery.last_ms = ts_recv // 1_000_000
-                await publish_updates(
-                    client, orders, ts_recv, redis, publisher, seen, filled_so_far
-                )
+                await publish_updates(client, orders, ts_recv, redis, publisher, memory)
             except BaseException as e:  # noqa: B036, narrowed in handle_feed_error
                 await handle_feed_error(e, client, "watch_orders", ticker)
                 await reconcile(
@@ -476,8 +592,7 @@ async def watch_orders(
                     delivery.last_ms - RECONCILE_MARGIN_MS,
                     redis,
                     publisher,
-                    seen,
-                    filled_so_far,
+                    memory,
                 )
     finally:
         periodic.cancel()

@@ -13,6 +13,8 @@ from apps.maker.src.matcher import (
     HedgeBook,
     hedge_id,
     consume_order_events,
+    resolve_cursors,
+    size_hedge,
     fee_mismatch,
     handle_order_event,
     hedge_intent,
@@ -37,6 +39,7 @@ from apps.shared.src.events import (
     ORDER_EVENTS_STREAM,
     FeeScheduleEvent,
     FeeSource,
+    fees_stream,
     Fill,
     Liquidity,
     OrderEvent,
@@ -243,6 +246,34 @@ def test_quantizing_below_the_minimum_bumps_the_hedge_back_over_it():
         Decimal(1),
     )
     assert quantity == Decimal(4)
+
+
+def test_a_bumped_hedge_covers_more_than_the_fill():
+    """The bump is reported in the fill's units, to net off the next report."""
+    size = size_hedge(
+        QUOTE,
+        schedule("venue_b", "quote", min_cost="1.0", precision=0),
+        SYMBOL,
+        Side.SELL,
+        Decimal("10"),
+        Decimal("0.01"),
+    )
+    assert size.quantity == Decimal("103")
+    assert size.covers == Decimal("103")
+
+
+def test_a_hedge_that_is_not_bumped_covers_exactly_the_fill():
+    """Fee adjustment changes the quantity sent, not the fill it covers."""
+    size = size_hedge(
+        QUOTE,
+        schedule("venue_b", "received", precision=2),
+        SYMBOL,
+        Side.SELL,
+        Decimal(40),
+        Decimal(1),
+    )
+    assert size.quantity == Decimal("40.08")
+    assert size.covers == Decimal(40)
 
 
 def test_a_fill_smaller_than_the_tick_sizes_to_nothing():
@@ -465,15 +496,38 @@ def test_a_partial_fill_is_hedged_at_once():
 def test_later_reports_hedge_only_what_is_new():
     """Each report hedges the size added since the last one, and no more."""
     hedged = HedgeBook(10)
+    key = ("venue_a", "t-250906120000_lmb_eb")
     first = fill_event(state=OrderState.PARTIALLY_FILLED, filled=Decimal("16"))
     assert should_hedge(first, SHOULD_MATCH, hedged) == ("venue_b", Decimal("16"))
+    hedged.record(key, Decimal("16"))
     again = fill_event(state=OrderState.PARTIALLY_FILLED, filled=Decimal("16"))
     assert should_hedge(again, SHOULD_MATCH, hedged) is None
     more = fill_event(state=OrderState.PARTIALLY_FILLED, filled=Decimal("40"))
     assert should_hedge(more, SHOULD_MATCH, hedged) == ("venue_b", Decimal("24"))
+    hedged.record(key, Decimal("24"))
     done = fill_event(state=OrderState.CANCELLED, filled=Decimal("40"))
     assert should_hedge(done, SHOULD_MATCH, hedged) is None
-    assert hedged.hedges(("venue_a", "t-250906120000_lmb_eb")) == 2
+    assert hedged.hedges(key) == 2
+
+
+def test_should_hedge_does_not_write_the_book():
+    """Deciding on a hedge covers nothing; only a published hedge does."""
+    hedged = HedgeBook(10)
+    event = fill_event(state=OrderState.PARTIALLY_FILLED, filled=Decimal("16"))
+    assert should_hedge(event, SHOULD_MATCH, hedged) == ("venue_b", Decimal("16"))
+    assert should_hedge(event, SHOULD_MATCH, hedged) == ("venue_b", Decimal("16"))
+    assert hedged.hedged(("venue_a", event.intent_id)) == 0
+
+
+def test_a_report_behind_a_bumped_hedge_adds_nothing():
+    """After a bump, the fill has to catch up with the hedge before more goes out."""
+    hedged = HedgeBook(10)
+    key = ("venue_a", "t-250906120000_lmb_eb")
+    hedged.record(key, Decimal("103"))
+    behind = fill_event(state=OrderState.PARTIALLY_FILLED, filled=Decimal("100"))
+    assert should_hedge(behind, SHOULD_MATCH, hedged) is None
+    ahead = fill_event(state=OrderState.PARTIALLY_FILLED, filled=Decimal("110"))
+    assert should_hedge(ahead, SHOULD_MATCH, hedged) == ("venue_b", Decimal("7"))
 
 
 def test_hedge_ids_stay_unique_and_attributable():
@@ -537,12 +591,23 @@ def test_an_order_without_a_side_is_not_hedged():
     assert should_hedge(event, SHOULD_MATCH, HedgeBook(10)) is None
 
 
-def test_the_same_order_is_only_hedged_once():
+@pytest.mark.asyncio
+async def test_the_same_order_is_only_hedged_once():
     """A replayed terminal event must not open a second position."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+    schedules = {"venue_a": QUOTE, "venue_b": schedule("venue_b", "quote")}
     hedged = HedgeBook(HEDGE_MEMORY)
-    event = fill_event()
-    assert should_hedge(event, SHOULD_MATCH, hedged) == ("venue_b", Decimal("40"))
-    assert should_hedge(fill_event(), SHOULD_MATCH, hedged) is None
+
+    first = await handle_order_event(
+        redis, publisher, fill_event(), SHOULD_MATCH, hedged, schedules
+    )
+    replay = await handle_order_event(
+        redis, publisher, fill_event(), SHOULD_MATCH, hedged, schedules
+    )
+
+    assert first is not None and replay is None
+    assert len(await intents_on(redis)) == 1
 
 
 def test_the_same_order_id_on_two_venues_is_hedged_separately():
@@ -615,6 +680,113 @@ async def test_an_unpriceable_fill_is_skipped():
 
 
 @pytest.mark.asyncio
+async def test_a_fill_that_could_not_be_hedged_is_hedged_by_the_next_report():
+    """A hedge that never went out covers nothing; the next report carries it."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+    schedules = {"venue_a": QUOTE, "venue_b": schedule("venue_b", "quote")}
+    hedged = HedgeBook(10)
+
+    unpriced = await handle_order_event(
+        redis,
+        publisher,
+        fill_event(
+            state=OrderState.PARTIALLY_FILLED, filled=Decimal("16"), avg_price=None
+        ),
+        SHOULD_MATCH,
+        hedged,
+        schedules,
+    )
+    final = await handle_order_event(
+        redis,
+        publisher,
+        fill_event(state=OrderState.FILLED, filled=Decimal("40")),
+        SHOULD_MATCH,
+        hedged,
+        schedules,
+    )
+
+    assert unpriced is None
+    assert final is not None and final.amount == Decimal("40")
+    assert final.intent_id == fill_event().intent_id, "this was the first hedge"
+    assert len(await intents_on(redis)) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_hedge_that_fails_to_publish_covers_nothing():
+    """The book is written after the publish, so a failed one leaves it unhedged."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    schedules = {"venue_a": QUOTE, "venue_b": schedule("venue_b", "quote")}
+    hedged = HedgeBook(10)
+
+    class FailingPublisher(StreamPublisher):
+        async def publish(self, redis: Any, event: Any) -> str:
+            raise ConnectionError("redis went away")
+
+    with pytest.raises(ConnectionError):
+        await handle_order_event(
+            redis,
+            FailingPublisher(maxlen=100),
+            fill_event(),
+            SHOULD_MATCH,
+            hedged,
+            schedules,
+        )
+
+    assert hedged.hedged(("venue_a", fill_event().intent_id)) == 0
+    assert hedged.hedges(("venue_a", fill_event().intent_id)) == 0
+    retried = await handle_order_event(
+        redis,
+        StreamPublisher(maxlen=100),
+        fill_event(),
+        SHOULD_MATCH,
+        hedged,
+        schedules,
+    )
+    assert retried is not None and retried.amount == Decimal("40")
+
+
+@pytest.mark.asyncio
+async def test_sub_minimum_partials_do_not_pile_up_bumped_hedges():
+    """
+    Twenty dust partials of one order hedge about the order, not twenty bumps.
+
+    Each partial on its own is under the matching venue's minimum notional
+    and would be bumped to clear it. The bump covers fill that has not
+    happened yet, so it has to count against the next reports rather than
+    be sent again on each of them.
+    """
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+    schedules = {
+        "venue_a": QUOTE,
+        "venue_b": schedule("venue_b", "quote", min_cost="1.0", precision=0),
+    }
+    hedged = HedgeBook(10)
+
+    for step in range(1, 21):
+        state = OrderState.FILLED if step == 20 else OrderState.PARTIALLY_FILLED
+        await handle_order_event(
+            redis,
+            publisher,
+            fill_event(
+                state=state, filled=Decimal(10 * step), avg_price=Decimal("0.01")
+            ),
+            SHOULD_MATCH,
+            hedged,
+            schedules,
+        )
+
+    intents = await intents_on(redis)
+    total = sum(intent.amount for intent in intents)
+    # One bump of 103 covers the first ten partials; the eleventh leaves 7
+    # uncovered, which is dust again and is bumped once more.
+    assert [intent.amount for intent in intents] == [Decimal("103"), Decimal("103")]
+    assert total == Decimal("206")
+    assert total < Decimal("200") + Decimal("103") * 2, "one bump at most is left over"
+
+
+@pytest.mark.asyncio
 async def test_a_hedge_that_sizes_to_nothing_is_not_published(caplog):
     """A zero-amount intent is an order the venue can only reject."""
     redis = fakeredis.FakeRedis(decode_responses=True)
@@ -671,7 +843,15 @@ async def test_consume_order_events_hedges_what_it_reads(decode: bool):
 
     cursor = await stream_tail(redis, ORDER_EVENTS_STREAM)
     consumer = asyncio.create_task(
-        consume_order_events(redis, publisher, SHOULD_MATCH, 10, 10, schedules, cursor)
+        consume_order_events(
+            redis,
+            publisher,
+            SHOULD_MATCH,
+            10,
+            10,
+            schedules,
+            {ORDER_EVENTS_STREAM: cursor},
+        )
     )
     await asyncio.sleep(0.05)
     # Two fills, read separately, so the cursor built from the first read has
@@ -696,7 +876,15 @@ async def test_consume_order_events_survives_an_undecodable_entry():
 
     cursor = await stream_tail(redis, ORDER_EVENTS_STREAM)
     consumer = asyncio.create_task(
-        consume_order_events(redis, publisher, SHOULD_MATCH, 10, 10, schedules, cursor)
+        consume_order_events(
+            redis,
+            publisher,
+            SHOULD_MATCH,
+            10,
+            10,
+            schedules,
+            {ORDER_EVENTS_STREAM: cursor},
+        )
     )
     await asyncio.sleep(0.05)
     await redis.xadd(ORDER_EVENTS_STREAM, {"type": "order_event", "data": "{"})
@@ -705,6 +893,44 @@ async def test_consume_order_events_survives_an_undecodable_entry():
     consumer.cancel()
 
     assert [i.intent_id for i in await intents_on(redis)] == ["after"]
+
+
+@pytest.mark.asyncio
+async def test_consume_order_events_picks_up_a_refreshed_fee_schedule():
+    """A schedule the fee watcher republishes replaces the one loaded at startup."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+    # The startup schedule charges nothing, so a hedge is sized one for one.
+    schedules = {
+        "venue_a": QUOTE,
+        "venue_b": schedule("venue_b", "received", taker="0", precision=2),
+    }
+    cursors = await resolve_cursors(redis, {"venue_a", "venue_b"})
+    assert set(cursors) == {
+        ORDER_EVENTS_STREAM,
+        fees_stream("venue_a"),
+        fees_stream("venue_b"),
+    }
+    consumer = asyncio.create_task(
+        consume_order_events(redis, publisher, SHOULD_MATCH, 10, 10, schedules, cursors)
+    )
+    await asyncio.sleep(0.05)
+
+    await publisher.publish(redis, fill_event(intent_id="before"))
+    await asyncio.sleep(0.15)
+    # The account moves tier: the venue now charges 0.2% taker in base.
+    await publisher.publish(redis, schedule("venue_b", "received", precision=2))
+    await asyncio.sleep(0.15)
+    await publisher.publish(redis, fill_event(intent_id="after"))
+    await asyncio.sleep(0.15)
+
+    assert not consumer.done(), "the consumer died on a fee schedule"
+    consumer.cancel()
+
+    intents = {intent.intent_id: intent for intent in await intents_on(redis)}
+    assert intents["before"].amount == Decimal("40.00")
+    assert intents["after"].amount == Decimal("40.08")
+    assert schedules["venue_b"].symbols[0].taker == Decimal("0.002")
 
 
 # Schedule loading ----------------------------------------------------------
@@ -928,7 +1154,15 @@ async def test_a_fill_during_the_startup_wait_is_still_hedged():
     await publisher.publish(redis, fill_event(intent_id="during_the_wait"))
 
     consumer = asyncio.create_task(
-        consume_order_events(redis, publisher, SHOULD_MATCH, 10, 10, schedules, cursor)
+        consume_order_events(
+            redis,
+            publisher,
+            SHOULD_MATCH,
+            10,
+            10,
+            schedules,
+            {ORDER_EVENTS_STREAM: cursor},
+        )
     )
     await asyncio.sleep(0.1)
     consumer.cancel()
