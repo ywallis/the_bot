@@ -350,7 +350,9 @@ def snapshot_from_book(book: dict[str, Any], ts_ms: int) -> Snapshot | None:
     )
 
 
-def nearest_snapshot(snapshots: list[Snapshot], ts_ms: int) -> Snapshot | None:
+def nearest_snapshot(
+    snapshots: list[Snapshot], ts_ms: int, times: list[int] | None = None
+) -> Snapshot | None:
     """
     Return the snapshot closest in time to a moment, within the allowed gap.
 
@@ -360,6 +362,10 @@ def nearest_snapshot(snapshots: list[Snapshot], ts_ms: int) -> Snapshot | None:
         Snapshots in time order.
     ts_ms : int
         The moment, milliseconds.
+    times : list[int] | None
+        The snapshots' times, precomputed by a caller that asks many times:
+        a recording holds a hundred thousand snapshots and rebuilding the
+        list per lookup made scoring a few hours take longer than the hours.
 
     Returns
     -------
@@ -369,7 +375,8 @@ def nearest_snapshot(snapshots: list[Snapshot], ts_ms: int) -> Snapshot | None:
     """
     if not snapshots:
         return None
-    times = [s.ts_ms for s in snapshots]
+    if times is None:
+        times = [s.ts_ms for s in snapshots]
     i = bisect.bisect_left(times, ts_ms)
     candidates = [snapshots[j] for j in (i - 1, i) if 0 <= j < len(snapshots)]
     best = min(candidates, key=lambda s: abs(s.ts_ms - ts_ms))
@@ -439,8 +446,9 @@ def score_pair(
     buy_offsets: list[float] = []
     spreads: list[float] = []
     crossed = 0
+    taker_times = [s.ts_ms for s in taker_sample.snapshots]
     for snap in maker_sample.snapshots:
-        other = nearest_snapshot(taker_sample.snapshots, snap.ts_ms)
+        other = nearest_snapshot(taker_sample.snapshots, snap.ts_ms, taker_times)
         if other is None:
             continue
         sell_offsets.append(bps(snap.ask / other.ask))
@@ -456,7 +464,7 @@ def score_pair(
     for trade in maker_sample.prints:
         notional = trade.price * trade.amount
         volume += notional
-        other = nearest_snapshot(taker_sample.snapshots, trade.ts_ms)
+        other = nearest_snapshot(taker_sample.snapshots, trade.ts_ms, taker_times)
         if other is None:
             continue
         if trade.side == "buy":
