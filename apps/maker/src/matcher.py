@@ -26,6 +26,7 @@ it the natural candidate to move into the strategies repo. See
 import asyncio
 import logging
 import time
+from collections import OrderedDict
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
 from typing import Any, cast
 
@@ -33,7 +34,6 @@ from redis.asyncio import ConnectionPool, Redis
 
 import apps.shared.src.logging_config as logging_config
 from apps.maker.src.order_watcher import STRATEGY_TAG
-from apps.maker.src.structs import LimitedSet
 from apps.shared.src.config import AppConfig, load_app_config
 from apps.shared.src.events import (
     ORDER_EVENTS_STREAM,
@@ -83,14 +83,98 @@ FALLBACK_PRECISION = 4
 # mismatch means the configured policy or the account's fee tier moved.
 MAGNITUDE_TOLERANCE = Decimal("1.5")
 
-# An order is worth hedging once it can no longer fill any further. A
-# cancelled or expired order that filled in part still leaves a position.
+# States whose report can carry size that has filled and is not yet hedged.
+# A partial fill is hedged as soon as it is reported rather than when the
+# order finishes: live, 161 base units of a quote sat unhedged for 24 seconds
+# until the strategy happened to replace the order, and a sweep is exactly
+# the moment the other venue is moving. A cancelled or expired order that
+# filled in part still leaves whatever of that was not hedged yet.
 HEDGEABLE_STATES: frozenset[OrderState] = frozenset(
-    {OrderState.FILLED, OrderState.CANCELLED, OrderState.EXPIRED}
+    {
+        OrderState.PARTIALLY_FILLED,
+        OrderState.FILLED,
+        OrderState.CANCELLED,
+        OrderState.EXPIRED,
+    }
 )
 
-# Orders remembered so a repeated terminal event does not hedge twice.
+# Orders remembered so a repeated report does not hedge the same size twice.
 HEDGE_MEMORY = 1000
+
+
+class HedgeBook:
+    """
+    How much of each order has been hedged so far.
+
+    Attributes
+    ----------
+    max_size : int
+        Orders remembered; the oldest is forgotten once full.
+    """
+
+    def __init__(self, max_size: int) -> None:
+        """
+        Initialize the book.
+
+        Parameters
+        ----------
+        max_size : int
+            Orders remembered.
+        """
+        self.max_size = max_size
+        self._hedged: OrderedDict[tuple[str, str], Decimal] = OrderedDict()
+        self._count: dict[tuple[str, str], int] = {}
+
+    def hedged(self, key: tuple[str, str]) -> Decimal:
+        """
+        Return the size already hedged for an order.
+
+        Parameters
+        ----------
+        key : tuple[str, str]
+            Venue and intent id.
+
+        Returns
+        -------
+        Decimal
+            Size hedged so far, zero for an order never seen.
+        """
+        return self._hedged.get(key, Decimal(0))
+
+    def hedges(self, key: tuple[str, str]) -> int:
+        """
+        Return how many hedges have gone out for an order.
+
+        Parameters
+        ----------
+        key : tuple[str, str]
+            Venue and intent id.
+
+        Returns
+        -------
+        int
+            The count.
+        """
+        return self._count.get(key, 0)
+
+    def record(self, key: tuple[str, str], filled: Decimal) -> None:
+        """
+        Note that everything filled so far on an order is now hedged.
+
+        Parameters
+        ----------
+        key : tuple[str, str]
+            Venue and intent id.
+        filled : Decimal
+            Cumulative filled size the hedge covers.
+        """
+        if key in self._hedged:
+            self._hedged.move_to_end(key)
+        elif len(self._hedged) >= self.max_size:
+            oldest, _ = self._hedged.popitem(last=False)
+            self._count.pop(oldest, None)
+        self._hedged[key] = filled
+        self._count[key] = self._count.get(key, 0) + 1
 
 
 def _leg(
@@ -287,8 +371,43 @@ def fee_mismatch(event: OrderEvent, schedule: FeeScheduleEvent | None) -> str | 
     return None
 
 
+def hedge_id(event: OrderEvent, sequence: int) -> str:
+    """
+    Return the client order id of the ``sequence``-th hedge of an order.
+
+    Parameters
+    ----------
+    event : OrderEvent
+        The order event that reported the fill.
+    sequence : int
+        1 for the first hedge of the order, 2 for the next, and so on.
+
+    Returns
+    -------
+    str
+        The filled order's own id for the first hedge, which is unique per
+        venue and keeps the hedge traceable to what it hedges. A later hedge
+        of the same order needs an id the venue has not seen, so it carries
+        a fresh stamp in the same ``t-<stamp>_<strategy>_<slot>`` shape,
+        which the order watcher still attributes to the strategy; the
+        ``hedge_of`` tag names the order for everything else.
+    """
+    if sequence <= 1:
+        return event.intent_id
+    try:
+        _prefix, rest = event.intent_id.split("-", 1)
+        _stamp, strategy, slot = rest.split("_")
+    except ValueError:
+        return f"{event.intent_id}h{sequence}"
+    return f"t-{now_ns() // 1000:018d}_{strategy}_{slot}"
+
+
 def hedge_intent(
-    event: OrderEvent, matching_venue: str, quantity: Decimal, price: Decimal
+    event: OrderEvent,
+    matching_venue: str,
+    quantity: Decimal,
+    price: Decimal,
+    sequence: int = 1,
 ) -> OrderIntent:
     """
     Build the market order that flattens a fill.
@@ -304,17 +423,18 @@ def hedge_intent(
     price : Decimal
         Price the fill executed at, passed through for venues that size a
         market order by cost.
+    sequence : int
+        Which hedge of the order this is, see ``hedge_id``.
 
     Returns
     -------
     OrderIntent
-        The intent. It reuses the filled order's client id, which is unique
-        per venue and makes the hedge traceable back to what it hedges.
+        The intent.
     """
     side = Side.BUY if event.side is Side.SELL else Side.SELL
     return OrderIntent(
         ts_recv=now_ns(),
-        intent_id=event.intent_id,
+        intent_id=hedge_id(event, sequence),
         strategy="matching",
         venue=matching_venue,
         symbol=event.symbol,
@@ -327,10 +447,10 @@ def hedge_intent(
 
 
 def should_hedge(
-    event: OrderEvent, should_match: dict[str, str], hedged: LimitedSet
-) -> str | None:
+    event: OrderEvent, should_match: dict[str, str], hedged: HedgeBook
+) -> tuple[str, Decimal] | None:
     """
-    Decide whether an order event calls for a hedge, and where.
+    Decide whether an order event calls for a hedge, where, and how much.
 
     Parameters
     ----------
@@ -338,13 +458,15 @@ def should_hedge(
         The order event.
     should_match : dict[str, str]
         Taker venue per strategy identifier.
-    hedged : LimitedSet
-        Orders already hedged.
+    hedged : HedgeBook
+        Size already hedged per order, updated in place.
 
     Returns
     -------
-    str | None
-        The venue to hedge on, or None if the event needs no hedge.
+    tuple[str, Decimal] | None
+        The venue to hedge on and the size not yet hedged, or None if the
+        event adds nothing to hedge: the size it reports is already covered,
+        which is what a repeated report of the same fill looks like.
     """
     if event.state not in HEDGEABLE_STATES or event.filled <= 0:
         return None
@@ -362,11 +484,12 @@ def should_hedge(
         return None
 
     key = (event.venue, event.intent_id)
-    if key in hedged:
-        logger.warning(f"The order no {event.intent_id} tried getting matched twice.")
+    unhedged = event.filled - hedged.hedged(key)
+    if unhedged <= 0:
+        logger.debug(f"{event.intent_id} reports {event.filled} filled, all hedged")
         return None
-    hedged.add(key)
-    return matching_venue
+    hedged.record(key, event.filled)
+    return matching_venue, unhedged
 
 
 def hedging_venues(config: AppConfig, production_mode: bool) -> set[str]:
@@ -459,7 +582,7 @@ async def handle_order_event(
     publisher: StreamPublisher,
     event: OrderEvent,
     should_match: dict[str, str],
-    hedged: LimitedSet,
+    hedged: HedgeBook,
     schedules: dict[str, FeeScheduleEvent],
 ) -> OrderIntent | None:
     """
@@ -475,8 +598,8 @@ async def handle_order_event(
         The order event.
     should_match : dict[str, str]
         Taker venue per strategy identifier.
-    hedged : LimitedSet
-        Orders already hedged.
+    hedged : HedgeBook
+        Size already hedged per order, updated in place.
     schedules : dict[str, FeeScheduleEvent]
         Fee schedules by venue id, see ``load_schedules``.
 
@@ -485,9 +608,10 @@ async def handle_order_event(
     OrderIntent | None
         The hedge that was published, if any.
     """
-    matching_venue = should_hedge(event, should_match, hedged)
-    if matching_venue is None:
+    decision = should_hedge(event, should_match, hedged)
+    if decision is None:
         return None
+    matching_venue, unhedged = decision
 
     price = hedge_price(event)
     if price is None or price <= 0:
@@ -508,17 +632,18 @@ async def handle_order_event(
         schedules.get(matching_venue),
         event.symbol,
         event.side or Side.BUY,
-        event.filled,
+        unhedged,
         price,
     )
     if quantity <= 0:
         logger.error(
             f"Hedge for {event.intent_id} sizes to {quantity} from a fill of "
-            f"{event.filled} at {price}; leaving it unhedged"
+            f"{unhedged} at {price}; leaving it unhedged"
         )
         return None
 
-    intent = hedge_intent(event, matching_venue, quantity, price)
+    sequence = hedged.hedges((event.venue, event.intent_id))
+    intent = hedge_intent(event, matching_venue, quantity, price, sequence)
     await publisher.publish(redis, intent)
     logger.info(f"Matching order was sent: {intent}")
     return intent
@@ -561,7 +686,7 @@ async def consume_order_events(
     cursor : str
         Stream id to read from, see ``stream_tail``.
     """
-    hedged = LimitedSet(HEDGE_MEMORY)
+    hedged = HedgeBook(HEDGE_MEMORY)
     while True:
         response = await redis.xread(
             {ORDER_EVENTS_STREAM: cursor}, count=batch, block=block_ms

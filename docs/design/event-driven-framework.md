@@ -865,3 +865,82 @@ it is roughly 15 GB/day and about a week.
   once intents are durable and replayable.
 - Whether balances should also be published as deltas for strategies that
   care about inventory changes.
+
+## 14. Where the money is not, 2026-09-20
+
+Two spread changes had been made to the maker strategies without asking
+whether the configured market could pay any spread at all. Measured over
+the recordings of 2026-09-06 to 09-09, some 40 hours of books and trades,
+it cannot:
+
+- The two venues' touches sit 5 to 10 bps apart 85% of the time, while
+  each venue's own spread is 30 to 45 bps. A quote 30 bps from the taker
+  touch therefore rests behind the maker venue's own best and fills only
+  when a sweep runs through the book.
+- The maker venue prints 1200 to 1800 quote units an hour. Of that, the
+  volume landing 30 bps or more past the prevailing taker touch, which is
+  the most a quote at `spread = 1.003` could ever have filled with nothing
+  queued ahead of it, is 9 quote units an hour in the quiet window and 45
+  in the window that holds the 2026-09-08 sweeps. Net of the 12 bps the
+  hedge costs, that is an upper bound of a few cents an hour.
+- The six hedged fills that did happen, all on the afternoon of
+  2026-09-08, are worth -0.09 quote units before fees by the realized PnL
+  report below: median gross of -4 bps, because the hedge was on average
+  taken at a worse price than the fill it offset. Sweeps are adverse
+  selection, which is the term the fill model in section 9 lacks.
+- Take-take is not there either: the books cross by 25 bps or more for 123
+  seconds in 28 hours, in 23 episodes almost all under a second, with 1 to
+  27 quote units at the touch, against a 300 ms round trip.
+
+So the lever is the market, then the hedge cost, and not the parameters.
+What was built for that:
+
+- `apps/maker/src/tools/market_screener.py` ranks every spot market the
+  configured venues share by touch offset, taker depth, volume, how often
+  the books cross and the print volume landing past the taker touch at
+  the fee budget plus 5, 10, 20 and 30 bps, from public REST samples; with
+  `--recorded` the same arithmetic runs over the recorder's files, which
+  is what the REST sample approximates and how a candidate is measured
+  before money goes on it. The `observe` strategy in the strategies repo
+  subscribes and places nothing, so a candidate is recorded on its full
+  feed first.
+- `apps/maker/src/tools/pnl.py` values every hedged maker fill in a
+  recording in quote units, maker fill against the hedge sharing its
+  client order id, fees from the fill or the schedule, residual base
+  marked at the hedge price. Nothing else in the system said whether a
+  fill made money.
+- Four defects the live runs had surfaced are fixed: the balance feed
+  overlays deltas onto the last full snapshot (a delta had hidden one
+  side's quote currency for a whole session); the order watcher reconciles
+  over REST every minute on a healthy socket, not only after a drop; the
+  order manager marks itself closing and rejects intents before the
+  shutdown sweep, so nothing is placed behind it; and maker quotes are
+  post-only by default, carried as `time_in_force = post_only` through
+  the broker message to CCXT's `postOnly`, so the quote that lifted the
+  maker book as a taker on 2026-09-08 is refused rather than filled.
+- Static `fee_currency`, `maker_fee` and `taker_fee` per venue in the
+  private config, feeding the screener's fee budget, the PnL report and,
+  through the fee schedule feed, hedge sizing.
+- A fifth defect the live run of the same day surfaced: a quote that had
+  filled 16 of 202 was replaced, the venue reported it with CCXT status
+  `closed`, and the watcher labelled it filled. Closed with size remaining
+  now maps to cancelled. The matcher had hedged the 16 once, on the order
+  manager's cancelled event, and deduplicated the second report.
+- And a sixth, from the same run: a partial fill of 161 base units sat
+  unhedged for 24 seconds, because the matcher hedged only terminal states
+  and the hedge went out when the strategy happened to replace the order.
+  The matcher now keeps a `HedgeBook` of how much of each order is hedged
+  and hedges the increment on every report, partial or terminal; a
+  follow-up hedge of the same order carries a fresh stamp in the same id
+  shape, since the venue has seen the first, and the `hedge_of` tag ties
+  them together for the PnL report, which merges several hedge legs of one
+  fill.
+
+The next step after the market choice is the host: the trading host is to
+move to a VM in Asia, where the operator knows from experience that latency
+to these venues is far better. The `oms:latency` records of every run so
+far, all from the current host, are the baseline: a broker round trip of
+305 to 313 ms median per placement. That round trip is the requote cycle
+and the delay before a hedge lands, so it bounds both the fill rate of a
+quote that follows the other venue and the adverse selection paid on a
+sweep, and it is what the move should be measured against.

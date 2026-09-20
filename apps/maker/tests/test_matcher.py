@@ -10,6 +10,8 @@ from fakeredis import aioredis as fakeredis
 from apps.maker.src import matcher
 from apps.maker.src.matcher import (
     HEDGE_MEMORY,
+    HedgeBook,
+    hedge_id,
     consume_order_events,
     fee_mismatch,
     handle_order_event,
@@ -22,7 +24,6 @@ from apps.maker.src.matcher import (
     should_hedge,
 )
 from apps.maker.src.order_watcher import STRATEGY_TAG
-from apps.maker.src.structs import LimitedSet
 from apps.shared.src.config import (
     AppConfig,
     MarketDataConfig,
@@ -449,66 +450,106 @@ def test_hedge_intent_of_a_buy_sells():
 def test_an_open_order_is_not_hedged():
     """Only an order that can no longer fill further is hedged."""
     event = fill_event(state=OrderState.OPEN)
-    assert should_hedge(event, SHOULD_MATCH, LimitedSet(10)) is None
+    assert should_hedge(event, SHOULD_MATCH, HedgeBook(10)) is None
 
 
-def test_a_partially_filled_order_waits():
-    """A partial fill is not hedged: the order can still fill further."""
-    event = fill_event(state=OrderState.PARTIALLY_FILLED)
-    assert should_hedge(event, SHOULD_MATCH, LimitedSet(10)) is None
+def test_a_partial_fill_is_hedged_at_once():
+    """A partial fill is hedged when reported, not when the order finishes."""
+    event = fill_event(state=OrderState.PARTIALLY_FILLED, filled=Decimal("16"))
+    assert should_hedge(event, SHOULD_MATCH, HedgeBook(10)) == (
+        "venue_b",
+        Decimal("16"),
+    )
+
+
+def test_later_reports_hedge_only_what_is_new():
+    """Each report hedges the size added since the last one, and no more."""
+    hedged = HedgeBook(10)
+    first = fill_event(state=OrderState.PARTIALLY_FILLED, filled=Decimal("16"))
+    assert should_hedge(first, SHOULD_MATCH, hedged) == ("venue_b", Decimal("16"))
+    again = fill_event(state=OrderState.PARTIALLY_FILLED, filled=Decimal("16"))
+    assert should_hedge(again, SHOULD_MATCH, hedged) is None
+    more = fill_event(state=OrderState.PARTIALLY_FILLED, filled=Decimal("40"))
+    assert should_hedge(more, SHOULD_MATCH, hedged) == ("venue_b", Decimal("24"))
+    done = fill_event(state=OrderState.CANCELLED, filled=Decimal("40"))
+    assert should_hedge(done, SHOULD_MATCH, hedged) is None
+    assert hedged.hedges(("venue_a", "t-250906120000_lmb_eb")) == 2
+
+
+def test_hedge_ids_stay_unique_and_attributable():
+    """The first hedge keeps the order's id; later ones get a fresh stamp."""
+    event = fill_event()
+    assert hedge_id(event, 1) == event.intent_id
+    second = hedge_id(event, 2)
+    assert second != event.intent_id
+    assert second.startswith("t-") and second.endswith("_lmb_eb")
+    assert hedge_id(fill_event(intent_id="foreign"), 2) == "foreignh2"
+
+
+def test_the_hedge_book_forgets_its_oldest_order():
+    """The book is bounded, and forgets counts with sizes."""
+    book = HedgeBook(2)
+    book.record(("v", "a"), Decimal(1))
+    book.record(("v", "b"), Decimal(1))
+    book.record(("v", "c"), Decimal(1))
+    assert book.hedged(("v", "a")) == 0 and book.hedges(("v", "a")) == 0
+    assert book.hedged(("v", "c")) == 1
 
 
 def test_a_cancelled_order_that_filled_is_still_hedged():
     """A cancellation after a partial fill still leaves a position to close."""
     event = fill_event(state=OrderState.CANCELLED, filled=Decimal("10"))
-    assert should_hedge(event, SHOULD_MATCH, LimitedSet(10)) == "venue_b"
+    assert should_hedge(event, SHOULD_MATCH, HedgeBook(10)) == (
+        "venue_b",
+        Decimal("10"),
+    )
 
 
 def test_an_unfilled_order_is_not_hedged():
     """Nothing filled, nothing to hedge."""
     event = fill_event(state=OrderState.CANCELLED, filled=Decimal(0))
-    assert should_hedge(event, SHOULD_MATCH, LimitedSet(10)) is None
+    assert should_hedge(event, SHOULD_MATCH, HedgeBook(10)) is None
 
 
 def test_an_order_of_another_strategy_is_not_hedged():
     """Only strategies that asked to be matched are matched."""
     event = fill_event(strategy_id="other")
-    assert should_hedge(event, SHOULD_MATCH, LimitedSet(10)) is None
+    assert should_hedge(event, SHOULD_MATCH, HedgeBook(10)) is None
 
 
 def test_an_unattributed_order_is_not_hedged():
     """An order placed outside this system belongs to no strategy."""
     event = fill_event()
     event.tags = {}
-    assert should_hedge(event, SHOULD_MATCH, LimitedSet(10)) is None
+    assert should_hedge(event, SHOULD_MATCH, HedgeBook(10)) is None
 
 
 def test_a_fill_on_the_taker_venue_is_not_hedged():
     """The hedge venue cannot hedge against itself."""
     event = fill_event(venue="venue_b")
-    assert should_hedge(event, SHOULD_MATCH, LimitedSet(10)) is None
+    assert should_hedge(event, SHOULD_MATCH, HedgeBook(10)) is None
 
 
 def test_an_order_without_a_side_is_not_hedged():
     """A hedge needs a direction, and guessing one would double a position."""
     event = fill_event()
     event.side = None
-    assert should_hedge(event, SHOULD_MATCH, LimitedSet(10)) is None
+    assert should_hedge(event, SHOULD_MATCH, HedgeBook(10)) is None
 
 
 def test_the_same_order_is_only_hedged_once():
     """A replayed terminal event must not open a second position."""
-    hedged = LimitedSet(HEDGE_MEMORY)
+    hedged = HedgeBook(HEDGE_MEMORY)
     event = fill_event()
-    assert should_hedge(event, SHOULD_MATCH, hedged) == "venue_b"
+    assert should_hedge(event, SHOULD_MATCH, hedged) == ("venue_b", Decimal("40"))
     assert should_hedge(fill_event(), SHOULD_MATCH, hedged) is None
 
 
 def test_the_same_order_id_on_two_venues_is_hedged_separately():
     """Order ids are unique per venue, so the dedupe key carries the venue."""
-    hedged = LimitedSet(HEDGE_MEMORY)
-    assert should_hedge(fill_event(venue="venue_a"), SHOULD_MATCH, hedged) == "venue_b"
-    assert should_hedge(fill_event(venue="venue_c"), SHOULD_MATCH, hedged) == "venue_b"
+    hedged = HedgeBook(HEDGE_MEMORY)
+    assert should_hedge(fill_event(venue="venue_a"), SHOULD_MATCH, hedged) is not None
+    assert should_hedge(fill_event(venue="venue_c"), SHOULD_MATCH, hedged) is not None
 
 
 # Publication ---------------------------------------------------------------
@@ -522,7 +563,7 @@ async def test_a_fill_publishes_a_hedge_intent():
     schedules = {"venue_a": QUOTE, "venue_b": schedule("venue_b", "quote")}
 
     intent = await handle_order_event(
-        redis, publisher, fill_event(), SHOULD_MATCH, LimitedSet(10), schedules
+        redis, publisher, fill_event(), SHOULD_MATCH, HedgeBook(10), schedules
     )
 
     assert intent is not None
@@ -545,7 +586,7 @@ async def test_an_event_that_needs_no_hedge_publishes_nothing():
         publisher,
         fill_event(state=OrderState.OPEN),
         SHOULD_MATCH,
-        LimitedSet(10),
+        HedgeBook(10),
         schedules,
     )
 
@@ -565,7 +606,7 @@ async def test_an_unpriceable_fill_is_skipped():
         publisher,
         fill_event(avg_price=None),
         SHOULD_MATCH,
-        LimitedSet(10),
+        HedgeBook(10),
         schedules,
     )
 
@@ -588,7 +629,7 @@ async def test_a_hedge_that_sizes_to_nothing_is_not_published(caplog):
         publisher,
         fill_event(filled=Decimal("0.00001")),
         SHOULD_MATCH,
-        LimitedSet(10),
+        HedgeBook(10),
         schedules,
     )
 
@@ -604,7 +645,7 @@ async def test_a_hedge_without_a_schedule_still_goes_out(caplog):
     publisher = StreamPublisher(maxlen=100)
 
     intent = await handle_order_event(
-        redis, publisher, fill_event(), SHOULD_MATCH, LimitedSet(10), {}
+        redis, publisher, fill_event(), SHOULD_MATCH, HedgeBook(10), {}
     )
 
     assert intent is not None
@@ -893,3 +934,35 @@ async def test_a_fill_during_the_startup_wait_is_still_hedged():
     consumer.cancel()
 
     assert [i.intent_id for i in await intents_on(redis)] == ["during_the_wait"]
+
+
+@pytest.mark.asyncio
+async def test_a_second_increment_is_published_under_a_fresh_id():
+    """Two hedges of one order must not share a client order id at the venue."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+    schedules = {"venue_a": QUOTE, "venue_b": schedule("venue_b", "quote")}
+    hedged = HedgeBook(10)
+
+    first = await handle_order_event(
+        redis,
+        publisher,
+        fill_event(state=OrderState.PARTIALLY_FILLED, filled=Decimal("16")),
+        SHOULD_MATCH,
+        hedged,
+        schedules,
+    )
+    second = await handle_order_event(
+        redis,
+        publisher,
+        fill_event(state=OrderState.FILLED, filled=Decimal("40")),
+        SHOULD_MATCH,
+        hedged,
+        schedules,
+    )
+    assert first is not None and second is not None
+    assert first.intent_id == fill_event().intent_id
+    assert second.intent_id != first.intent_id
+    assert second.amount == Decimal("24")
+    assert second.tags["hedge_of"] == fill_event().intent_id
+    assert len(await intents_on(redis)) == 2
