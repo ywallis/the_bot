@@ -280,3 +280,23 @@ def test_realized_pnl_end_to_end(tmp_path: Path):
         config_for(tmp_path), tmp_path, TS, TS + 10**11, 5.0, 20.0
     )
     assert round(pairs[0].fees_quote, 6) == round(200.6 * 0.0005 + 100 * 0.002 * 2.0, 6)
+
+
+def test_several_hedges_of_one_fill_are_merged_through_the_hedge_of_tag():
+    """A fill hedged in two increments is valued against both legs together."""
+    maker = event("venue_a", "t-1_fmb_es", Side.SELL, "100", "2.0", ts=TS)
+    first = event("venue_b", "t-1_fmb_es", Side.BUY, "40", "1.99", ts=TS + 1)
+    second = event("venue_b", "t-2_fmb_es", Side.BUY, "60", "2.01", ts=TS + 2)
+    second.tags["hedge_of"] = "t-1_fmb_es"
+    legs = fold_legs([maker, first, second])
+    pairs = pair_legs(legs, {"fmb": ("venue_a", "venue_b")})
+    assert len(pairs) == 1
+    _maker_leg, hedge = pairs[0]
+    assert hedge is not None
+    assert hedge.filled == Decimal(100)
+    assert (
+        hedge.avg_price
+        == (Decimal(40) * Decimal("1.99") + Decimal(60) * Decimal("2.01")) / 100
+    )
+    # And the follow-up hedge is not mistaken for a maker fill of its own.
+    assert [m.intent_id for m, _ in pairs] == ["t-1_fmb_es"]

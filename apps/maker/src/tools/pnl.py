@@ -77,6 +77,9 @@ class Leg:
         Currency of the reported fees, None when nothing was reported.
     first_fill_ns : int
         Receive time of the first event that carried a fill.
+    hedge_of : str | None
+        Intent id of the order this leg hedges, from the matcher's tag, or
+        None for an order a strategy placed.
     """
 
     venue: str
@@ -89,6 +92,7 @@ class Leg:
     fee: Decimal = Decimal(0)
     fee_currency: str | None = None
     first_fill_ns: int = 0
+    hedge_of: str | None = None
     _fills_seen: set[Decimal] = field(default_factory=set, repr=False)
 
     def absorb(self, event: OrderEvent) -> None:
@@ -237,6 +241,9 @@ def read_events(directory: Path, start_ns: int, end_ns: int) -> list[OrderEvent]
     return out
 
 
+HEDGE_OF_TAG = "hedge_of"
+
+
 def fold_legs(events: list[OrderEvent]) -> dict[tuple[str, str], Leg]:
     """
     Reduce order events to one leg per venue and client order id.
@@ -249,7 +256,9 @@ def fold_legs(events: list[OrderEvent]) -> dict[tuple[str, str], Leg]:
     Returns
     -------
     dict[tuple[str, str], Leg]
-        Legs that filled at all, keyed by venue and intent id.
+        Legs that filled at all, keyed by venue and intent id. A leg placed
+        by the matcher knows which order it hedges, from the ``hedge_of``
+        tag the order manager copies onto its events.
     """
     legs: dict[tuple[str, str], Leg] = {}
     for event in events:
@@ -266,8 +275,51 @@ def fold_legs(events: list[OrderEvent]) -> dict[tuple[str, str], Leg]:
                 strategy_id=event.tags.get(STRATEGY_TAG, event.strategy.split("_")[0]),
             )
             legs[key] = leg
+        if HEDGE_OF_TAG in event.tags:
+            leg.hedge_of = event.tags[HEDGE_OF_TAG]
         leg.absorb(event)
     return {key: leg for key, leg in legs.items() if leg.filled > 0}
+
+
+def merge_legs(legs: list[Leg]) -> Leg:
+    """
+    Combine several hedge legs of one order into one.
+
+    Parameters
+    ----------
+    legs : list[Leg]
+        Legs on one venue, same side, hedging the same order.
+
+    Returns
+    -------
+    Leg
+        One leg with the sizes and fees summed and the price averaged by
+        size. A single leg is returned as it is.
+    """
+    if len(legs) == 1:
+        return legs[0]
+    first = legs[0]
+    filled = sum((leg.filled for leg in legs), Decimal(0))
+    priced = [leg for leg in legs if leg.avg_price is not None]
+    avg = (
+        sum((leg.filled * (leg.avg_price or 0) for leg in priced), Decimal(0))
+        / sum((leg.filled for leg in priced), Decimal(0))
+        if priced and sum((leg.filled for leg in priced), Decimal(0)) > 0
+        else None
+    )
+    return Leg(
+        venue=first.venue,
+        intent_id=first.intent_id,
+        symbol=first.symbol,
+        side=first.side,
+        strategy_id=first.strategy_id,
+        filled=filled,
+        avg_price=avg,
+        fee=sum((leg.fee for leg in legs), Decimal(0)),
+        fee_currency=next((leg.fee_currency for leg in legs if leg.fee_currency), None),
+        first_fill_ns=min(leg.first_fill_ns for leg in legs),
+        hedge_of=first.hedge_of,
+    )
 
 
 def fee_quote(leg: Leg, rate: FeeRate, price: Decimal) -> tuple[Decimal, Decimal]:
@@ -420,23 +472,32 @@ def pair_legs(
     """
     pairs: list[tuple[Leg, Leg | None]] = []
     for (venue, intent_id), leg in legs.items():
+        if leg.hedge_of is not None:
+            continue  # a hedge is never the maker side of a pair
         known = venues.get(leg.strategy_id)
         if known is not None:
             maker_venue, taker_venue = known
             if venue != maker_venue:
                 continue
-            hedge = legs.get((taker_venue, intent_id))
+            hedges = [
+                other
+                for (v, i), other in legs.items()
+                if v == taker_venue and (i == intent_id or other.hedge_of == intent_id)
+            ]
+            hedge = merge_legs(hedges) if hedges else None
         else:
             others = [
                 other
                 for (v, i), other in legs.items()
-                if i == intent_id and v != venue and other.side is not leg.side
+                if (i == intent_id or other.hedge_of == intent_id)
+                and v != venue
+                and other.side is not leg.side
             ]
             if others and min(others, key=lambda o: o.first_fill_ns).first_fill_ns < (
                 leg.first_fill_ns
             ):
                 continue  # the other venue filled first, so it is the maker
-            hedge = others[0] if others else None
+            hedge = merge_legs(others) if others else None
         pairs.append((leg, hedge))
     pairs.sort(key=lambda p: p[0].first_fill_ns)
     return pairs
