@@ -44,3 +44,32 @@ async def test_create_and_return_order_type(order_kind, expected_type):
     assert result == {"status": "success"}
     mock_client.create_order.assert_called_once()
     assert mock_client.create_order.call_args.kwargs["type"] == expected_type
+
+
+@pytest.mark.asyncio
+async def test_create_and_return_order_passes_post_only_through():
+    """A post-only order reaches CCXT with its unified flag, others without."""
+    order = OrderMessage(
+        kind=MessageType.ORDER,
+        strategy="fmb_es",
+        exchange="venue_a",
+        id="t-prefix_fmb_es",
+        exchange_id="_",
+        pair="BASE/QUOTE",
+        side=OrderSide.SELL,
+        order_type=OrderType.REPLACE,
+        price=Decimal("1.5"),
+        amount=Decimal("10"),
+        post_only=True,
+    )
+    mock_client = AsyncMock()
+    mock_client.create_order.return_value = {"id": "1"}
+
+    await create_and_return_order(order, mock_client)
+    params = mock_client.create_order.call_args.kwargs["params"]
+    assert params == {"clientOrderId": "t-prefix_fmb_es", "postOnly": True}
+
+    del order["post_only"]
+    await create_and_return_order(order, mock_client)
+    params = mock_client.create_order.call_args.kwargs["params"]
+    assert params == {"clientOrderId": "t-prefix_fmb_es"}

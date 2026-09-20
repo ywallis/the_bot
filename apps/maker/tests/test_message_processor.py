@@ -1,6 +1,7 @@
 """Tests for the order manager."""
 
 import asyncio
+import json
 from decimal import Decimal
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
@@ -22,6 +23,7 @@ from apps.maker.src.message_processor import (
     venue_ack_ns,
 )
 from apps.maker.src.structs import OrderBatchMessage, OrderMessage, Response
+from apps.maker.src.utils import parse_message
 from apps.shared.src.config import (
     AppConfig,
     MarketDataConfig,
@@ -44,6 +46,7 @@ from apps.shared.src.events import (
     from_stream_fields,
     now_ns,
     to_stream_fields,
+    TimeInForce,
 )
 from apps.shared.src.streams import StreamPublisher
 
@@ -1003,3 +1006,65 @@ async def test_an_intent_that_goes_stale_while_queued_is_rejected(decode: bool):
     ]
     assert len(rejected) == 1
     assert "max_intent_age_s" in (rejected[0].reason or "")
+
+
+# Post-only and wind-down -----------------------------------------------------
+
+
+def test_broker_order_from_intent_marks_post_only_quotes():
+    """A post-only intent tells the broker so; any other carries no flag."""
+    intent = msgspec.structs.replace(
+        order_intent(), time_in_force=TimeInForce.POST_ONLY
+    )
+    assert broker_order_from_intent(intent).get("post_only") is True
+    assert "post_only" not in broker_order_from_intent(order_intent())
+    # The flag survives the broker channel's JSON round trip.
+    raw = json.dumps(broker_order_from_intent(intent), default=str)
+    parsed = parse_message(raw)
+    assert isinstance(parsed, dict) and parsed.get("post_only") is True
+
+
+@pytest.mark.asyncio
+async def test_wind_down_rejects_intents_read_after_it_began(
+    manager: OrderManager, broker: FakeBroker
+):
+    """An intent that arrives during the wind-down never reaches the broker."""
+    await submit(manager, order_intent(intent_id="resting"))
+    await manager.wind_down()
+    await submit(manager, order_intent(intent_id="late"))
+
+    assert [m["id"] for m in broker.orders] == ["resting"]
+    assert [m["id"] for m in broker.cancellations] == ["venue-resting"]
+    rejected = [
+        e
+        for e in await events_on(manager, ORDER_EVENTS_STREAM)
+        if isinstance(e, OrderEvent) and e.state is OrderState.REJECTED
+    ]
+    assert [e.intent_id for e in rejected] == ["late"]
+    assert await pending_count(manager) == 0
+
+
+@pytest.mark.asyncio
+async def test_wind_down_sweeps_a_placement_that_was_in_flight(
+    manager: OrderManager, broker: FakeBroker
+):
+    """An intent waiting on the broker when shutdown begins is still cancelled."""
+    broker.gate = asyncio.Event()
+    publisher = StreamPublisher(maxlen=1000)
+    await publisher.publish(manager.redis, order_intent(intent_id="inflight"))
+    await manager.consume_once()
+    await asyncio.sleep(0)  # the task is now blocked inside the broker call
+
+    async def release() -> None:
+        await asyncio.sleep(0.05)
+        assert broker.gate is not None
+        broker.gate.set()
+
+    releaser = asyncio.create_task(release())
+    await manager.wind_down(grace_s=2.0)
+    await releaser
+    await settle(manager)
+
+    assert [m["id"] for m in broker.orders] == ["inflight"]
+    assert [m["id"] for m in broker.cancellations] == ["venue-inflight"]
+    assert manager.resting == {}

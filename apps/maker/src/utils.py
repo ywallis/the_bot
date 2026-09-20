@@ -71,7 +71,7 @@ def parse_message(
 
     match message.get("kind"):
         case MessageType.ORDER.value:
-            return OrderMessage(
+            order = OrderMessage(
                 kind=MessageType.ORDER,
                 strategy=message["strategy"],
                 exchange=message["exchange"],
@@ -83,6 +83,9 @@ def parse_message(
                 price=Decimal(message["price"]),
                 amount=Decimal(message["amount"]),
             )
+            if message.get("post_only"):
+                order["post_only"] = True
+            return order
         case MessageType.CANCELLATION.value:
             return CancellationMessage(
                 kind=MessageType.CANCELLATION,

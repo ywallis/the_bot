@@ -2,7 +2,7 @@
 
 from collections import deque
 from decimal import Decimal
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
 
@@ -61,6 +61,9 @@ class OrderMessage(TypedDict):
         The price of the order.
     amount : Decimal
         The amount of the order.
+    post_only : bool
+        Whether the venue must reject the order rather than let it take.
+        Absent means no.
     """
 
     kind: MessageType
@@ -73,6 +76,7 @@ class OrderMessage(TypedDict):
     order_type: OrderType
     price: Decimal
     amount: Decimal
+    post_only: NotRequired[bool]
 
 
 class OrderBatchMessage(TypedDict):
