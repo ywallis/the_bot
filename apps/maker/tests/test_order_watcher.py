@@ -1,5 +1,6 @@
 """Tests for the order feed handler."""
 
+import asyncio
 import time
 from decimal import Decimal
 from typing import Any
@@ -8,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fakeredis import aioredis as fakeredis
 
+from apps.maker.src import order_watcher as watcher_module
 from apps.maker.src import watcher
 from apps.maker.src.order_watcher import (
     ORDER_TAG,
@@ -497,3 +499,37 @@ async def test_fetch_orders_since_falls_back_to_closed_and_cancelled():
         "fetch_closed_orders",
         "fetch_canceled_orders",
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_healthy_socket_is_reconciled_on_a_timer(monkeypatch):
+    """A fill the socket never delivered is found by the periodic REST check."""
+    monkeypatch.setattr(watcher_module, "RECONCILE_EVERY_S", 0.01)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    silent_fill = ccxt_order(
+        clientOrderId="t-250906120001000000_lmb_es",
+        id="venue-100",
+        status="closed",
+        filled=40,
+        remaining=0,
+        average=0.35,
+    )
+
+    class SlowClient(FakeClient):
+        async def watch_orders(self, symbol: str, since: int | None = None):
+            await asyncio.sleep(0.05)
+            return await super().watch_orders(symbol, since)
+
+    client = SlowClient("mexc", [[ccxt_order()]], rest_results=[[silent_fill]])
+
+    with pytest.raises(StopWatching):
+        await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
+
+    events = await events_on(redis)
+    assert ("lmb_es", OrderState.FILLED) in [
+        (e.intent_id[-6:], e.state) for e in events
+    ]
+    assert client.rest_calls and client.rest_calls[0][0] == "fetch_orders"
+    # The periodic task does not outlive the loop.
+    await asyncio.sleep(0.05)
+    assert not [t for t in asyncio.all_tasks() if "reconcile_periodically" in repr(t)]

@@ -16,6 +16,7 @@ import asyncio
 import logging
 import time
 from collections import OrderedDict
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
@@ -42,16 +43,38 @@ logger = logging.getLogger(__name__)
 # route on the strategy without re-parsing the client order id.
 STRATEGY_TAG = "strategy_id"
 
+ORDER_TAG = "order_id"
+
 # How far before the last websocket delivery a reconciliation fetches from.
 # Venue timestamps and ours disagree by a little, and an update can be in
 # flight when the socket drops; overlap is harmless, a gap is not.
 RECONCILE_MARGIN_MS = 5_000
-ORDER_TAG = "order_id"
+
+# How often a healthy socket is checked against REST anyway. A socket that
+# stays up but quietly stops delivering looks exactly like a quiet market,
+# and a fill in that gap would go unhedged until something else broke. One
+# REST call a minute per venue and symbol is cheap; an unhedged position is
+# not.
+RECONCILE_EVERY_S = 60.0
 
 # Orders remembered per loop, for deduplication and fill deltas. Large enough
 # to cover any order still open, small enough to stay bounded in a process
 # that runs for weeks.
 ORDER_MEMORY = 2000
+
+
+@dataclass
+class Delivery:
+    """
+    When the socket last delivered, shared with the periodic reconcile.
+
+    Attributes
+    ----------
+    last_ms : int
+        Milliseconds since the epoch of the last websocket delivery.
+    """
+
+    last_ms: int
 
 
 class BoundedDict:
@@ -352,6 +375,48 @@ async def reconcile(
     return published
 
 
+async def reconcile_periodically(
+    client: CustomExchange,
+    ticker: str,
+    delivery: Delivery,
+    redis: Redis,
+    publisher: StreamPublisher,
+    seen: LimitedSet,
+    filled_so_far: BoundedDict,
+) -> None:
+    """
+    Reconcile on a timer, for the gaps a healthy-looking socket hides.
+
+    Parameters
+    ----------
+    client : CustomExchange
+        The exchange client.
+    ticker : str
+        The trading pair symbol.
+    delivery : Delivery
+        When the socket last delivered, read on every pass.
+    redis : Redis
+        The Redis client.
+    publisher : StreamPublisher
+        Publisher writing to ``oms:events``.
+    seen : LimitedSet
+        Update keys already published, shared with the socket loop.
+    filled_so_far : BoundedDict
+        Cumulative filled size per order id, shared with the socket loop.
+    """
+    while True:
+        await asyncio.sleep(RECONCILE_EVERY_S)
+        await reconcile(
+            client,
+            ticker,
+            delivery.last_ms - RECONCILE_MARGIN_MS,
+            redis,
+            publisher,
+            seen,
+            filled_so_far,
+        )
+
+
 async def watch_orders(
     client: CustomExchange,
     ticker: str,
@@ -365,7 +430,9 @@ async def watch_orders(
     REST for what changed while the socket was down (``reconcile``). Live,
     venues dropped the socket about twice an hour, and an order placed and
     finished inside one of those gaps is otherwise never reported. A fill
-    among them would go unhedged.
+    among them would go unhedged. The same check also runs every
+    ``RECONCILE_EVERY_S`` on a socket that has not dropped, since a socket
+    that silently stops delivering raises no error to reconcile on.
 
     Parameters
     ----------
@@ -384,28 +451,36 @@ async def watch_orders(
     # startup, not this loop's, so the venue is asked only for what happens
     # from now on. Anything the venue replays anyway is dropped by `seen`.
     since = int(time.time() * 1000)
-    last_delivery_ms = since
-    while True:
-        try:
-            orders: list[dict[str, Any]] = await client.watch_orders(
-                ticker, since=since
-            )
-            ts_recv = now_ns()
-            last_delivery_ms = ts_recv // 1_000_000
-            await publish_updates(
-                client, orders, ts_recv, redis, publisher, seen, filled_so_far
-            )
-        except BaseException as e:  # noqa: B036, narrowed in handle_feed_error
-            await handle_feed_error(e, client, "watch_orders", ticker)
-            await reconcile(
-                client,
-                ticker,
-                last_delivery_ms - RECONCILE_MARGIN_MS,
-                redis,
-                publisher,
-                seen,
-                filled_so_far,
-            )
+    delivery = Delivery(last_ms=since)
+    periodic = asyncio.create_task(
+        reconcile_periodically(
+            client, ticker, delivery, redis, publisher, seen, filled_so_far
+        )
+    )
+    try:
+        while True:
+            try:
+                orders: list[dict[str, Any]] = await client.watch_orders(
+                    ticker, since=since
+                )
+                ts_recv = now_ns()
+                delivery.last_ms = ts_recv // 1_000_000
+                await publish_updates(
+                    client, orders, ts_recv, redis, publisher, seen, filled_so_far
+                )
+            except BaseException as e:  # noqa: B036, narrowed in handle_feed_error
+                await handle_feed_error(e, client, "watch_orders", ticker)
+                await reconcile(
+                    client,
+                    ticker,
+                    delivery.last_ms - RECONCILE_MARGIN_MS,
+                    redis,
+                    publisher,
+                    seen,
+                    filled_so_far,
+                )
+    finally:
+        periodic.cancel()
 
 
 def build_tasks(
