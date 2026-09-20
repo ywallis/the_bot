@@ -944,3 +944,49 @@ far, all from the current host, are the baseline: a broker round trip of
 and the delay before a hedge lands, so it bounds both the fill rate of a
 quote that follows the other venue and the adverse selection paid on a
 sweep, and it is what the move should be measured against.
+
+### 14.1 The run of 2026-09-20, 11:51 to 13:00 UTC+2
+
+Both maker strategies quoted the configured market with everything above
+in place, sized 11 to 13 quote units after a small rebalance of the
+subaccounts, with the five screened candidates recorded through `observe`
+beside them. 362 quotes, 3 maker fills, 3 hedges, no rejection, no error,
+nothing open at either venue afterwards. Verified live rather than in a
+test: quotes rest at the venue with time in force `POST_ONLY`; the maker
+venue's balance event carries both currencies after its deltas; the minute
+reconcile ran on all twelve venue and symbol pairs and twice supplied the
+final fill of a market hedge that the taker venue's socket never delivered;
+the wind-down waited for one intent in flight, cancelled two orders, and the
+recorder stopped last.
+
+The realized PnL report values the three fills at +0.0425 quote units on
+21.16 of maker notional: gross 12, 31 and 31 bps against the hedge, fees
+0.021, a median of 31 bps where the six fills of 2026-09-08 had a median of
+-4. The balances agree to the cent. Two things the fills showed were fixed
+the same afternoon and are in the branch, not in the run: a cancelled
+partial fill reported as filled, and a partial fill hedged only when its
+order finished.
+
+The candidates, scored on 68 minutes of full feed with the same arithmetic,
+hold up against the market that has been quoted for two weeks:
+
+| market (maker venue) | sell offset bps | maker volume /h | harvestable /h at fee+30 bps |
+| --- | --- | --- | --- |
+| configured pair | 5 | 3080 | 0 |
+| candidate 1 | 58 | 419427 | 58224 |
+| candidate 2 | 16 | 189823 | 49019 |
+| candidate 3 | 40 | 18929 | 3510 |
+| candidate 4 | 19 | 43702 | 7369 |
+
+Those are upper bounds, and a persistent offset of 58 bps between two
+venues is usually a transfer that is suspended somewhere, which means the
+inventory drifts one way and cannot be walked back: each unit of capital
+earns the edge once until it is moved. That is still a great deal more than
+the configured market pays, and at the current 60 quote units a side,
+capital is the binding constraint on any of them. The other constraint is
+disk: twelve feeds wrote 335 MB in 69 minutes, about 7 GB a day, so the
+shipper of section 7.3 comes before recording more of them.
+
+Not done from the plan of the day: shared inventory accounting across
+strategies in the order manager, which matters once two strategies quote
+the same balance.
