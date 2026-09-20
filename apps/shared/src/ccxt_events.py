@@ -250,14 +250,20 @@ def _decimal(value: Any, default: Decimal | None = None) -> Decimal | None:
     return Decimal(str(value))
 
 
-def order_state_from_ccxt(status: Any, filled: Decimal) -> OrderState:
+def order_state_from_ccxt(
+    status: Any, filled: Decimal, remaining: Decimal | None = None
+) -> OrderState:
     """
     Map a CCXT order status to an ``OrderState``.
 
     An order CCXT still calls ``open`` is reported as partially filled once
     anything has executed against it, because that is the transition a
-    strategy reacts to. An unknown status is reported as ``OPEN`` rather
-    than dropped: losing an order update is worse than mislabelling one.
+    strategy reacts to. An order CCXT calls ``closed`` with size still
+    remaining did not fill: a venue reports a cancelled order that had
+    partly filled that way, and live it was labelled filled at 16 of 202.
+    It is reported as cancelled. An unknown status is reported as ``OPEN``
+    rather than dropped: losing an order update is worse than mislabelling
+    one.
 
     Parameters
     ----------
@@ -265,6 +271,8 @@ def order_state_from_ccxt(status: Any, filled: Decimal) -> OrderState:
         CCXT unified order status.
     filled : Decimal
         Cumulative filled size.
+    remaining : Decimal | None
+        Size still unfilled, when the update reports it.
 
     Returns
     -------
@@ -274,6 +282,8 @@ def order_state_from_ccxt(status: Any, filled: Decimal) -> OrderState:
     state = _ORDER_STATES.get(str(status), OrderState.OPEN)
     if state is OrderState.OPEN and filled > 0:
         return OrderState.PARTIALLY_FILLED
+    if state is OrderState.FILLED and remaining is not None and remaining > 0:
+        return OrderState.CANCELLED
     return state
 
 
@@ -363,7 +373,9 @@ def order_event_from_ccxt(
         strategy=strategy,
         venue=venue,
         symbol=str(order.get("symbol") or ""),
-        state=order_state_from_ccxt(order.get("status"), filled),
+        state=order_state_from_ccxt(
+            order.get("status"), filled, _decimal(order.get("remaining"), None)
+        ),
         side=Side(side_raw) if side_raw in ("buy", "sell") else None,
         ts_exch=_optional_int(order.get("timestamp")),
         venue_order_id=None if venue_order_id is None else str(venue_order_id),

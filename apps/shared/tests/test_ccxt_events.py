@@ -134,6 +134,16 @@ def test_order_state_from_ccxt(status: str, filled: Decimal, expected: OrderStat
     assert order_state_from_ccxt(status, filled) is expected
 
 
+def test_a_closed_order_with_size_remaining_was_cancelled_not_filled():
+    """A venue reports a cancelled partial fill as closed; it did not fill."""
+    assert (
+        order_state_from_ccxt("closed", Decimal(16), Decimal(186))
+        is OrderState.CANCELLED
+    )
+    assert order_state_from_ccxt("closed", Decimal(40), Decimal(0)) is OrderState.FILLED
+    assert order_state_from_ccxt("closed", Decimal(40), None) is OrderState.FILLED
+
+
 def test_an_unknown_status_is_reported_as_open():
     """A status we do not recognise is reported, never dropped."""
     assert order_state_from_ccxt("weird", Decimal(0)) is OrderState.OPEN
