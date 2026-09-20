@@ -1045,6 +1045,61 @@ async def test_wind_down_rejects_intents_read_after_it_began(
 
 
 @pytest.mark.asyncio
+async def test_wind_down_survives_a_queue_drained_under_it(
+    manager: OrderManager, broker: FakeBroker
+):
+    """
+    An in-flight task finishing mid-walk drains its own queue entry.
+
+    The walk over queued intents awaits between strategies, so a task that
+    finishes in that window pops the entry the walk is about to reach.
+    The walk used to delete it again, raise, and skip the sweep that
+    cancels everything resting.
+    """
+    broker.gate = asyncio.Event()
+    publisher = StreamPublisher(maxlen=1000)
+    # Two strategies, both with a placement blocked in the broker and a
+    # replacement queued behind it.
+    for strategy in ("aaa_eb", "bbb_eb"):
+        await publisher.publish(
+            manager.redis,
+            order_intent(intent_id=f"{strategy}-inflight", strategy=strategy),
+        )
+    await manager.consume_once()
+    await asyncio.sleep(0)
+    for strategy in ("aaa_eb", "bbb_eb"):
+        await publisher.publish(
+            manager.redis,
+            order_intent(intent_id=f"{strategy}-queued", strategy=strategy),
+        )
+    await manager.consume_once()
+    await asyncio.sleep(0)
+    assert set(manager.queued) == {"aaa_eb", "bbb_eb"}
+
+    original_reject = manager.reject
+
+    async def reject_and_let_the_broker_answer(intent: Any, reason: str) -> None:
+        # The first rejection yields; while it does, both in-flight tasks
+        # land and drain their strategies' queue entries.
+        assert broker.gate is not None
+        broker.gate.set()
+        await asyncio.sleep(0.05)
+        await original_reject(intent, reason)
+
+    manager.reject = reject_and_let_the_broker_answer  # ty: ignore[invalid-assignment]
+
+    await manager.wind_down(grace_s=2.0)
+    await settle(manager)
+
+    assert manager.queued == {}
+    assert manager.resting == {}
+    placed = {m["id"] for m in broker.orders}
+    cancelled = {m["id"].removeprefix("venue-") for m in broker.cancellations}
+    assert placed <= cancelled, "the sweep ran and covered every placement"
+    assert await pending_count(manager) == 0
+
+
+@pytest.mark.asyncio
 async def test_wind_down_sweeps_a_placement_that_was_in_flight(
     manager: OrderManager, broker: FakeBroker
 ):

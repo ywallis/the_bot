@@ -16,9 +16,12 @@ from apps.maker.src.order_watcher import (
     RECONCILE_MARGIN_MS,
     STRATEGY_TAG,
     BoundedDict,
+    OrderMemory,
     build_tasks,
     event_from_order,
     oid_components,
+    publish_updates,
+    reconcile_periodically,
     strategy_key,
     update_key,
     watch_orders,
@@ -445,6 +448,102 @@ async def test_a_failed_reconciliation_does_not_take_the_feed_down(monkeypatch):
         await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
 
     assert [e.state for e in await events_on(redis)] == [OrderState.OPEN]
+
+
+async def publish(client: FakeClient, redis: Any, memory: OrderMemory, *orders) -> int:
+    """Publish one batch of updates the way the socket loop or a reconcile would."""
+    return await publish_updates(
+        client, list(orders), 1, redis, StreamPublisher(maxlen=100), memory
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_snapshot_reporting_less_filled_than_published_is_dropped():
+    """
+    A REST snapshot fetched before a fill and processed after it is stale.
+
+    Published, consumers would see the fill go backwards, and the next delta
+    would be measured from the stale size and over-report the next fill.
+    """
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    memory = OrderMemory.sized(10)
+    client = FakeClient("mexc", [])
+
+    await publish(client, redis, memory, ccxt_order(filled=10, average=0.35))
+    dropped = await publish(client, redis, memory, ccxt_order(filled=5, average=0.35))
+    await publish(client, redis, memory, ccxt_order(filled=12, average=0.35))
+
+    assert dropped == 0
+    events = await events_on(redis)
+    assert [e.filled for e in events] == [Decimal(10), Decimal(12)]
+    assert [e.last_fill.amount for e in events] == [Decimal(10), Decimal(2)]
+
+
+@pytest.mark.asyncio
+async def test_a_snapshot_of_a_finished_order_is_dropped():
+    """An order the socket reported closed does not reopen from a REST snapshot."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    memory = OrderMemory.sized(10)
+    client = FakeClient("mexc", [])
+
+    await publish(client, redis, memory, ccxt_order(filled=10, average=0.35))
+    await publish(
+        client,
+        redis,
+        memory,
+        ccxt_order(status="closed", filled=40, remaining=0, average=0.35),
+    )
+    dropped = await publish(
+        client, redis, memory, ccxt_order(filled=40, remaining=0, average=0.35)
+    )
+
+    assert dropped == 0
+    assert [e.state for e in await events_on(redis)] == [
+        OrderState.PARTIALLY_FILLED,
+        OrderState.FILLED,
+    ]
+
+
+def test_a_stale_update_does_not_rewind_the_fill_baseline():
+    """The remembered filled size only ever grows."""
+    memory = BoundedDict(10)
+    event_from_order("mexc", ccxt_order(filled=10, average=0.35), 1, memory)
+    event_from_order("mexc", ccxt_order(filled=5, average=0.35), 2, memory)
+    assert memory.get(OID, Decimal(0)) == Decimal(10)
+
+
+@pytest.mark.asyncio
+async def test_the_periodic_reconcile_survives_a_failed_pass(monkeypatch):
+    """An error past the REST call is logged and the next pass still runs."""
+    monkeypatch.setattr(watcher_module, "RECONCILE_EVERY_S", 0.01)
+    calls = 0
+
+    async def flaky_reconcile(*args, **kwargs) -> int:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("redis hiccup while publishing")
+        return 0
+
+    monkeypatch.setattr(watcher_module, "reconcile", flaky_reconcile)
+    client = FakeClient("mexc", [])
+    task = asyncio.create_task(
+        reconcile_periodically(
+            client,
+            "ALPH/USDT",
+            watcher_module.Delivery(last_ms=0),
+            fakeredis.FakeRedis(decode_responses=True),
+            StreamPublisher(maxlen=100),
+            OrderMemory.sized(10),
+        )
+    )
+    await asyncio.sleep(0.1)
+
+    assert not task.done(), "one failed pass ended the timer"
+    assert calls >= 2
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
 
 @pytest.mark.asyncio
