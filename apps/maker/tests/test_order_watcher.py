@@ -212,7 +212,12 @@ async def test_watch_orders_drops_a_replayed_update():
     redis = fakeredis.FakeRedis(decode_responses=True)
     publisher = StreamPublisher(maxlen=100)
     client = FakeClient(
-        "mexc", [[ccxt_order()], [ccxt_order()], [ccxt_order(status="closed")]]
+        "mexc",
+        [
+            [ccxt_order()],
+            [ccxt_order()],
+            [ccxt_order(status="closed", filled=40, remaining=0)],
+        ],
     )
 
     with pytest.raises(StopWatching):
@@ -411,7 +416,7 @@ async def test_reconciliation_does_not_republish_what_the_socket_reported(monkey
             [ccxt_order()],
             NetworkError("gone"),
             [ccxt_order()],
-            [ccxt_order(status="closed")],
+            [ccxt_order(status="closed", filled=40, remaining=0)],
         ],
         rest_results=[[ccxt_order()]],
     )
