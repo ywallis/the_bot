@@ -27,6 +27,7 @@ import asyncio
 import logging
 import time
 from collections import OrderedDict
+from dataclasses import dataclass
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
 from typing import Any, cast
 
@@ -45,6 +46,7 @@ from apps.shared.src.events import (
     OrderState,
     Side,
     decode,
+    fees_stream,
     from_stream_fields,
     now_ns,
 )
@@ -104,7 +106,14 @@ HEDGE_MEMORY = 1000
 
 class HedgeBook:
     """
-    How much of each order has been hedged so far.
+    How much of each order's fill the hedges sent so far cover.
+
+    The book counts what was hedged, not what was filled. The two differ
+    when a hedge is bumped over the venue's minimum notional: the bump
+    covers fill that has not happened yet, and is netted off the next
+    report rather than sent again. Live, before this distinction, every
+    sub-minimum partial fill of one order was bumped on its own and the
+    hedges piled up to many times the position they flattened.
 
     Attributes
     ----------
@@ -127,7 +136,7 @@ class HedgeBook:
 
     def hedged(self, key: tuple[str, str]) -> Decimal:
         """
-        Return the size already hedged for an order.
+        Return the fill size the hedges of an order cover so far.
 
         Parameters
         ----------
@@ -137,7 +146,9 @@ class HedgeBook:
         Returns
         -------
         Decimal
-            Size hedged so far, zero for an order never seen.
+            Covered size, in the units of the filled order, zero for an
+            order never seen. It exceeds the size filled when the last
+            hedge was bumped over the venue's minimum.
         """
         return self._hedged.get(key, Decimal(0))
 
@@ -157,24 +168,51 @@ class HedgeBook:
         """
         return self._count.get(key, 0)
 
-    def record(self, key: tuple[str, str], filled: Decimal) -> None:
+    def record(self, key: tuple[str, str], covers: Decimal) -> None:
         """
-        Note that everything filled so far on an order is now hedged.
+        Note that one more hedge of an order went out.
+
+        Called once the hedge is published, not when it is decided on: a
+        hedge that is priced, sized or published unsuccessfully has not
+        covered anything, and recording it early left that size open with
+        nothing to hedge it later.
 
         Parameters
         ----------
         key : tuple[str, str]
             Venue and intent id.
-        filled : Decimal
-            Cumulative filled size the hedge covers.
+        covers : Decimal
+            Fill size this hedge covers, see ``HedgeSize.covers``. Added to
+            what earlier hedges covered.
         """
         if key in self._hedged:
             self._hedged.move_to_end(key)
         elif len(self._hedged) >= self.max_size:
             oldest, _ = self._hedged.popitem(last=False)
             self._count.pop(oldest, None)
-        self._hedged[key] = filled
+        self._hedged[key] = self._hedged.get(key, Decimal(0)) + covers
         self._count[key] = self._count.get(key, 0) + 1
+
+
+@dataclass(frozen=True)
+class HedgeSize:
+    """
+    The size of one hedge, on both sides of it.
+
+    Attributes
+    ----------
+    quantity : Decimal
+        Quantity to trade on the matching venue, quantized to its precision.
+    covers : Decimal
+        Fill size the hedge flattens, in the units of the filled order.
+        Equal to the size hedged, except when the hedge was bumped over the
+        matching venue's minimum notional: then it is larger by the bump,
+        so the excess is netted off the next fill instead of being hedged
+        again.
+    """
+
+    quantity: Decimal
+    covers: Decimal
 
 
 def _leg(
@@ -213,14 +251,14 @@ def _leg(
     return (rate if rate is not None else Decimal(0)), in_base, True
 
 
-def hedge_quantity(
+def size_hedge(
     origin: FeeScheduleEvent | None,
     matching: FeeScheduleEvent | None,
     symbol: str,
     side: Side,
     filled: Decimal,
     price: Decimal,
-) -> Decimal:
+) -> HedgeSize:
     """
     Size the hedge for a fill so the base balance ends where it started.
 
@@ -244,6 +282,11 @@ def hedge_quantity(
     decides what to do with that; there is no size that both hedges it and
     the venue accepts.
 
+    A bumped hedge covers more than the fill that triggered it. The
+    result says how much, in the fill's own units, so the excess counts
+    against the next fill of the same order rather than being hedged
+    twice.
+
     Parameters
     ----------
     origin : FeeScheduleEvent | None
@@ -262,8 +305,8 @@ def hedge_quantity(
 
     Returns
     -------
-    Decimal
-        Quantity to trade on the matching venue.
+    HedgeSize
+        Quantity to trade on the matching venue and the fill it covers.
     """
     origin_rate, origin_in_base, _ = _leg(origin, symbol, side, taker=False)
     hedge_side = Side.SELL if side is Side.BUY else Side.BUY
@@ -287,12 +330,50 @@ def hedge_quantity(
             precision = entry.amount_precision
     places = precision if precision is not None else FALLBACK_PRECISION
     tick = Decimal(1).scaleb(-places)
+    unbumped = quantity
     quantity = quantity.quantize(tick, rounding=ROUND_DOWN)
+    covers = filled
     if min_cost is not None and quantity * price < Decimal(str(min_cost)):
         quantity = (Decimal(str(min_cost)) * DUST_MARGIN / price).quantize(
             tick, rounding=ROUND_UP
         )
-    return quantity
+        if unbumped > 0:
+            covers = filled * quantity / unbumped
+    return HedgeSize(quantity=quantity, covers=covers)
+
+
+def hedge_quantity(
+    origin: FeeScheduleEvent | None,
+    matching: FeeScheduleEvent | None,
+    symbol: str,
+    side: Side,
+    filled: Decimal,
+    price: Decimal,
+) -> Decimal:
+    """
+    Return the quantity ``size_hedge`` would trade, without what it covers.
+
+    Parameters
+    ----------
+    origin : FeeScheduleEvent | None
+        See ``size_hedge``.
+    matching : FeeScheduleEvent | None
+        See ``size_hedge``.
+    symbol : str
+        CCXT symbol.
+    side : Side
+        Side of the filled order.
+    filled : Decimal
+        Quantity filled.
+    price : Decimal
+        Price the fill executed at.
+
+    Returns
+    -------
+    Decimal
+        Quantity to trade on the matching venue.
+    """
+    return size_hedge(origin, matching, symbol, side, filled, price).quantity
 
 
 def hedge_price(event: OrderEvent) -> Decimal | None:
@@ -459,14 +540,17 @@ def should_hedge(
     should_match : dict[str, str]
         Taker venue per strategy identifier.
     hedged : HedgeBook
-        Size already hedged per order, updated in place.
+        Fill size covered per order. Read here, written by the caller once
+        the hedge is actually out.
 
     Returns
     -------
     tuple[str, Decimal] | None
         The venue to hedge on and the size not yet hedged, or None if the
         event adds nothing to hedge: the size it reports is already covered,
-        which is what a repeated report of the same fill looks like.
+        which is what a repeated report of the same fill looks like, or
+        what a report after a bumped hedge looks like until the fill
+        catches up with the bump.
     """
     if event.state not in HEDGEABLE_STATES or event.filled <= 0:
         return None
@@ -488,7 +572,6 @@ def should_hedge(
     if unhedged <= 0:
         logger.debug(f"{event.intent_id} reports {event.filled} filled, all hedged")
         return None
-    hedged.record(key, event.filled)
     return matching_venue, unhedged
 
 
@@ -599,7 +682,7 @@ async def handle_order_event(
     should_match : dict[str, str]
         Taker venue per strategy identifier.
     hedged : HedgeBook
-        Size already hedged per order, updated in place.
+        Fill size covered per order, updated once the hedge is published.
     schedules : dict[str, FeeScheduleEvent]
         Fee schedules by venue id, see ``load_schedules``.
 
@@ -627,7 +710,7 @@ async def handle_order_event(
             f"Hedging {event.intent_id} without a fee schedule for "
             f"{event.venue if event.venue not in schedules else matching_venue}"
         )
-    quantity = hedge_quantity(
+    size = size_hedge(
         schedules.get(event.venue),
         schedules.get(matching_venue),
         event.symbol,
@@ -635,18 +718,44 @@ async def handle_order_event(
         unhedged,
         price,
     )
-    if quantity <= 0:
+    if size.quantity <= 0:
         logger.error(
-            f"Hedge for {event.intent_id} sizes to {quantity} from a fill of "
+            f"Hedge for {event.intent_id} sizes to {size.quantity} from a fill of "
             f"{unhedged} at {price}; leaving it unhedged"
         )
         return None
 
-    sequence = hedged.hedges((event.venue, event.intent_id))
-    intent = hedge_intent(event, matching_venue, quantity, price, sequence)
+    key = (event.venue, event.intent_id)
+    sequence = hedged.hedges(key) + 1
+    intent = hedge_intent(event, matching_venue, size.quantity, price, sequence)
     await publisher.publish(redis, intent)
+    # Only now: a hedge that never went out has covered nothing, and the
+    # next report of this order must still see its size as unhedged.
+    hedged.record(key, size.covers)
     logger.info(f"Matching order was sent: {intent}")
     return intent
+
+
+async def resolve_cursors(redis: Redis, venues: set[str]) -> dict[str, str]:
+    """
+    Find where ``consume_order_events`` starts reading each of its streams.
+
+    Parameters
+    ----------
+    redis : Redis
+        The Redis client.
+    venues : set[str]
+        Venues whose fee schedule streams are followed, see
+        ``hedging_venues``.
+
+    Returns
+    -------
+    dict[str, str]
+        The current tail of ``oms:events`` and of every venue's fee stream,
+        keyed by stream name.
+    """
+    streams = [ORDER_EVENTS_STREAM] + [fees_stream(venue) for venue in sorted(venues)]
+    return {stream: await stream_tail(redis, stream) for stream in streams}
 
 
 async def consume_order_events(
@@ -656,18 +765,24 @@ async def consume_order_events(
     block_ms: int,
     batch: int,
     schedules: dict[str, FeeScheduleEvent],
-    cursor: str,
+    cursors: dict[str, str],
 ) -> None:
     """
     Read ``oms:events`` and hedge every fill that calls for one.
 
-    Reading starts at ``cursor``, the tail of the stream as the caller
-    found it: a fill from before then has either been hedged already or is
-    old enough that hedging it now would open a new position rather than
-    close one. The tail is resolved once rather than passed as ``$`` on
-    every read, which would silently drop a fill published between two
-    reads, and it is resolved by the caller before any startup wait, so a
-    fill during that wait is still hedged.
+    Reading starts at ``cursors``, the tails of the streams as the caller
+    found them: a fill from before then has either been hedged already or
+    is old enough that hedging it now would open a new position rather
+    than close one. The tails are resolved once rather than passed as
+    ``$`` on every read, which would silently drop a fill published
+    between two reads, and they are resolved by the caller before any
+    startup wait, so a fill during that wait is still hedged.
+
+    The fee streams of the hedging venues are read alongside, and a new
+    schedule replaces the venue's entry in ``schedules`` as it arrives.
+    The fee watcher republishes on every refresh and whenever the account
+    changes tier; a matcher that only read the snapshot at startup sized
+    every hedge with the rate of the day it was started.
 
     Parameters
     ----------
@@ -682,24 +797,34 @@ async def consume_order_events(
     batch : int
         Maximum events fetched per read.
     schedules : dict[str, FeeScheduleEvent]
-        Fee schedules by venue id, see ``load_schedules``.
-    cursor : str
-        Stream id to read from, see ``stream_tail``.
+        Fee schedules by venue id, see ``load_schedules``. Updated in place
+        as the fee streams deliver.
+    cursors : dict[str, str]
+        Stream id to read from per stream, see ``resolve_cursors``.
     """
     hedged = HedgeBook(HEDGE_MEMORY)
+    positions: dict[Any, Any] = dict(cursors)
     while True:
-        response = await redis.xread(
-            {ORDER_EVENTS_STREAM: cursor}, count=batch, block=block_ms
-        )
+        response = await redis.xread(positions, count=batch, block=block_ms)
         # redis-py types the reply as list or dict (RESP3); the client is
         # RESP2 here so it is always the list form.
-        for _stream, entries in cast(list[Any], response or []):
+        for stream, entries in cast(list[Any], response or []):
+            stream_name = entry_id_str(stream)
             for entry_id, fields in entries:
-                cursor = entry_id_str(entry_id)
+                positions[stream_name] = entry_id_str(entry_id)
                 try:
                     event = from_stream_fields(fields)
                 except Exception as error:  # noqa: BLE001, keep consuming
-                    logger.error(f"Undecodable order event {entry_id}: {error}")
+                    logger.error(
+                        f"Undecodable entry {entry_id} on {stream_name}: {error}"
+                    )
+                    continue
+                if isinstance(event, FeeScheduleEvent):
+                    schedules[event.venue] = event
+                    logger.info(
+                        f"Fee schedule for {event.venue} refreshed "
+                        f"({event.source.value}, {len(event.symbols)} symbols)"
+                    )
                     continue
                 if not isinstance(event, OrderEvent):
                     continue
@@ -748,8 +873,9 @@ async def main(config: AppConfig) -> None:
     # Before the wait below, not after it: the orchestrator starts this
     # process ahead of the fee watcher, and a fill published while the
     # schedules are still missing is one this matcher owns.
-    cursor = await stream_tail(redis, ORDER_EVENTS_STREAM)
-    schedules = await load_schedules(redis, hedging_venues(config, production))
+    venues = hedging_venues(config, production)
+    cursors = await resolve_cursors(redis, venues)
+    schedules = await load_schedules(redis, venues)
     logger.info(
         f"Matching fills for {sorted(should_match)} with schedules for "
         f"{sorted(schedules)} (production={production})"
@@ -762,7 +888,7 @@ async def main(config: AppConfig) -> None:
             config.oms.block_ms,
             config.oms.batch,
             schedules,
-            cursor,
+            cursors,
         )
     finally:
         await redis.aclose()
