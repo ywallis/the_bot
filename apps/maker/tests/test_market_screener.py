@@ -254,3 +254,14 @@ def test_score_recording_reads_books_and_trades_from_the_recorder_files(tmp_path
     assert round(top.sell_offset_bps, 6) == 20.0
     assert round(top.harvest_per_h[30]) == 1000
     assert round(top.hours, 6) == 1.0
+
+
+def test_a_market_crossed_most_of_the_time_is_marked_suspect():
+    """Two assets under one ticker look like a huge edge; the table flags them."""
+    from apps.maker.src.tools.market_screener import format_table
+
+    maker = Sample(snapshots=snapshots([(2.0, 2.1), (2.0, 2.1)]))
+    taker = Sample(snapshots=snapshots([(1.0, 1.1), (1.0, 1.1)]))
+    score = score_pair("XXX/USDT", "a", "b", maker, taker, 12.0)
+    assert score is not None and score.suspect
+    assert format_table([score], 5).splitlines()[2].startswith("!XXX/USDT")

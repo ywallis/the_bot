@@ -80,6 +80,11 @@ DEPTH_LEVELS = 5
 # Fee budget assumed when neither venue configures a static rate.
 DEFAULT_FEE_BPS = 12.0
 
+# A market whose books are crossed this often is not one market: the two
+# venues list different assets under one ticker, or one book is halted. A
+# real cross that persistent would be taken by someone within seconds.
+SUSPECT_CROSSED_SHARE = 0.5
+
 
 @dataclass(frozen=True)
 class Snapshot:
@@ -203,6 +208,18 @@ class PairScore:
     harvest_per_h: dict[int, float]
     net_per_h: dict[int, float]
     hours: float
+
+    @property
+    def suspect(self) -> bool:
+        """
+        Return whether the two books cross too often to be the same market.
+
+        Returns
+        -------
+        bool
+            True above ``SUSPECT_CROSSED_SHARE``.
+        """
+        return self.crossed_share > SUSPECT_CROSSED_SHARE
 
     @property
     def best_net_per_h(self) -> float:
@@ -546,8 +563,9 @@ def format_table(scores: list[PairScore], limit: int) -> str:
     )
     lines = [head, "-" * len(head)]
     for s in scores[:limit]:
+        symbol = ("!" if s.suspect else "") + s.symbol
         lines.append(
-            f"{s.symbol:<14}{s.maker:<8}{s.taker:<8}{s.sell_offset_bps:>7.1f}"
+            f"{symbol:<14}{s.maker:<8}{s.taker:<8}{s.sell_offset_bps:>7.1f}"
             f"{s.buy_offset_bps:>7.1f}{s.maker_spread_bps:>6.0f}{s.taker_depth:>9.0f}"
             f"{s.maker_volume_per_h:>10.0f}{s.crossed_share * 100:>5.0f}%"
             + "".join(f"{s.harvest_per_h[e]:>9.1f}" for e in edges)
@@ -556,7 +574,8 @@ def format_table(scores: list[PairScore], limit: int) -> str:
     lines.append(
         "offsets and spread in bps (medians); depth and vol/h in quote units; "
         "h+N is harvestable quote/h at fee+N bps; net/h is the best of those "
-        "times its edge"
+        "times its edge; ! marks books crossed more than half the time, which "
+        "is two assets under one ticker or a halted book, not an edge"
     )
     return "\n".join(lines)
 
@@ -902,7 +921,9 @@ def score_recording(
     return rank(out)
 
 
-def public_clients(config: AppConfig, venue_ids: list[str]) -> dict[str, Any]:
+def public_clients(
+    config: AppConfig, venue_ids: list[str], rate_limit_ms: int | None = None
+) -> dict[str, Any]:
     """
     Build unauthenticated CCXT clients for a list of venues.
 
@@ -912,6 +933,10 @@ def public_clients(config: AppConfig, venue_ids: list[str]) -> dict[str, Any]:
         The application configuration, for per-venue CCXT options.
     venue_ids : list[str]
         CCXT ids. A venue absent from the config gets default options.
+    rate_limit_ms : int | None
+        Milliseconds between requests per client, overriding CCXT's default
+        for the venue. A 20 minute screen of 150 symbols drew 429s from one
+        venue at its default; 100 ms or more is a safer floor there.
 
     Returns
     -------
@@ -922,6 +947,8 @@ def public_clients(config: AppConfig, venue_ids: list[str]) -> dict[str, Any]:
     clients: dict[str, Any] = {}
     for venue_id in venue_ids:
         params: dict[str, Any] = {"enableRateLimit": True}
+        if rate_limit_ms is not None:
+            params["rateLimit"] = rate_limit_ms
         venue = configured.get(venue_id)
         if venue is not None and venue.options:
             params["options"] = dict(venue.options)
@@ -1006,7 +1033,7 @@ async def run(args: argparse.Namespace) -> list[PairScore]:
             with open(args.json, "w") as fh:
                 json.dump([asdict(s) for s in scores], fh, indent=1)
         return scores
-    screener = Screener(public_clients(config, venue_ids))
+    screener = Screener(public_clients(config, venue_ids, args.rate_limit_ms))
     try:
         markets = await screener.load_markets()
         symbols = common_symbols(markets, args.quote)
@@ -1053,6 +1080,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--interval", type=float, default=6.0)
     parser.add_argument("--fee-bps", type=float, default=DEFAULT_FEE_BPS)
     parser.add_argument("--rows", type=int, default=40, help="rows to print")
+    parser.add_argument("--rate-limit-ms", type=int, help="per-client request gap")
     parser.add_argument("--json", help="write every score here")
     parser.add_argument("--recorded", help="score this recording root instead")
     parser.add_argument("--start", help="--recorded: ISO 8601, inclusive")
