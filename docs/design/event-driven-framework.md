@@ -990,3 +990,21 @@ shipper of section 7.3 comes before recording more of them.
 Not done from the plan of the day: shared inventory accounting across
 strategies in the order manager, which matters once two strategies quote
 the same balance.
+
+A second session the same day, 13:14 to 15:15, ran the branch as it now
+stands, with the incremental hedging and the cancelled-partial mapping in:
+450 quotes, no fill, no error, balances unchanged to the last digit, clean
+wind-down. The two books sat within a few bps of each other for two hours
+and the maker venue's own spread was 24 to 40 bps, so a quote 30 bps past
+the taker touch rested behind the maker's best throughout; the recorded
+scoring of the configured market over the window gives 0 harvestable at
+fee+20 bps. The two new fixes therefore have no live fill behind them yet.
+Over the 200 minutes of the two sessions together: 3 fills, 1 an hour, all
+profitable, +0.0425 quote units.
+
+The candidates re-scored over the same two hours: the market that led the
+first window on a 58 bps offset fell to 27 bps and 500 quote units an hour
+harvestable at fee+30, so that offset was not as persistent as it looked;
+the second candidate held at 58k an hour with an 18 bps offset and a 53 bps
+maker spread, and a third held at 15k. A candidate wants a day of recording
+before it is quoted, not an hour.
