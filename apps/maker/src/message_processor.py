@@ -58,6 +58,7 @@ from apps.shared.src.events import (
     OrderKind,
     OrderState,
     Side,
+    TimeInForce,
     from_stream_fields,
     now_ns,
 )
@@ -223,7 +224,7 @@ def broker_order_from_intent(intent: OrderIntent) -> OrderMessage:
     OrderMessage
         The message to publish on the broker channel.
     """
-    return OrderMessage(
+    message = OrderMessage(
         kind=MessageType.ORDER,
         strategy=intent.strategy,
         exchange=intent.venue,
@@ -235,6 +236,9 @@ def broker_order_from_intent(intent: OrderIntent) -> OrderMessage:
         price=intent.price if intent.price is not None else Decimal(0),
         amount=intent.amount,
     )
+    if intent.time_in_force is TimeInForce.POST_ONLY:
+        message["post_only"] = True
+    return message
 
 
 def broker_cancellation_for(tracked: TrackedOrder) -> CancellationMessage:
@@ -350,6 +354,10 @@ class OrderManager:
         The one intent held per busy strategy, latest wins.
     tasks : list[asyncio.Task]
         In-flight intent processing.
+    closing : bool
+        Set once the wind-down has begun. An order intent read after that
+        is rejected rather than placed, so nothing can be placed behind the
+        cancel sweep.
     shutdown_event : asyncio.Event
         Set by SIGTERM.
     """
@@ -383,6 +391,7 @@ class OrderManager:
         self.queued: dict[str, QueuedIntent] = {}
         self.tasks: list[asyncio.Task] = []
         self.shutdown_event = asyncio.Event()
+        self.closing = False
         self.cursor = PENDING
         self.intents_handled = 0
 
@@ -548,6 +557,10 @@ class OrderManager:
             because an intent drained from the queue carries its original
             read time and may have aged a great deal since.
         """
+        if self.closing:
+            await self.reject(intent, "order manager is shutting down")
+            await self.ack(entry_id)
+            return
         if self.is_stale(intent, now_ns()):
             await self.reject(intent, "intent is older than max_intent_age_s")
             await self.ack(entry_id)
@@ -1152,6 +1165,38 @@ class OrderManager:
         await asyncio.gather(*cancellations, return_exceptions=True)
         logger.info("All open orders sucessfully cancelled")
 
+    async def wind_down(self, grace_s: float = 5.0) -> None:
+        """
+        Stop placing, let what is in flight land, then cancel what rests.
+
+        The sweep used to run while intents were still being processed, so
+        an intent that had already passed the staleness check and was
+        waiting on the broker was placed after the sweep and left resting
+        at the venue. Now every intent read from here on is rejected, the
+        tasks already running are given a bounded time to finish, and only
+        then is the book swept. A placement that landed inside that window
+        is in the book by the time the sweep reads it.
+
+        Parameters
+        ----------
+        grace_s : float
+            How long to wait for in-flight intents before sweeping anyway.
+        """
+        self.closing = True
+        for strategy, queued in list(self.queued.items()):
+            del self.queued[strategy]
+            await self.reject(queued.intent, "order manager is shutting down")
+            await self.ack(queued.entry_id)
+        in_flight = [task for task in self.tasks if not task.done()]
+        if in_flight:
+            logger.info(f"Winding down, waiting for {len(in_flight)} intents in flight")
+            _done, pending = await asyncio.wait(in_flight, timeout=grace_s)
+            if pending:
+                logger.warning(
+                    f"{len(pending)} intents still in flight, sweeping anyway"
+                )
+        await self.cancel_all_open()
+
     async def collect_results_periodically(self) -> None:
         """Drop finished intent tasks so the list does not grow unbounded."""
         while True:
@@ -1224,7 +1269,7 @@ async def main(config: AppConfig) -> None:
     ]
 
     await manager.shutdown_event.wait()
-    await manager.cancel_all_open()
+    await manager.wind_down()
     await manager.block_and_shutdown(long_running)
     await asyncio.gather(*long_running, return_exceptions=True)
     await redis.aclose()

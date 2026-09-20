@@ -112,6 +112,14 @@ async def create_and_return_order(
     else:
         order_type = "limit"
 
+    # CCXT's unified post-only flag: the venue rejects the order instead of
+    # letting it take, so a quote that crossed the book by the time it
+    # arrived is refused rather than filled at taker fee against the market
+    # it was priced off.
+    params: dict[str, object] = {"clientOrderId": order["id"]}
+    if order.get("post_only"):
+        params["postOnly"] = True
+
     for attempt in range(5):
         try:
             order_confirmation = await client.create_order(
@@ -120,7 +128,7 @@ async def create_and_return_order(
                 side=order["side"].value,
                 amount=float(order["amount"]),
                 price=float(order["price"]),
-                params={"clientOrderId": order["id"]},
+                params=params,
             )
 
         except RequestTimeout as e:

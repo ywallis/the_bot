@@ -90,7 +90,7 @@ class CustomExchange(Protocol):
         side: str,
         amount: float,
         price: float,
-        params: dict[str, str] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> dict[str, str]:
         """
         Create a new order on the exchange.
