@@ -25,3 +25,25 @@ def test_ccxt_params_minimal():
         "apiKey": "k",
         "secret": "s",
     }
+
+
+def test_a_swap_venue_addresses_the_futures_account():
+    """``market_type = "swap"`` becomes CCXT's defaultType unless options say."""
+    venue = VenueConfig(
+        id="venue_a_perp", ccxt_id="venue_a", name="Venue A perp", market_type="swap"
+    )
+    params = ccxt_params(venue, "k", "s", None, requires_password=False)
+    assert params["options"] == {"defaultType": "swap"}
+
+    explicit = VenueConfig(
+        id="venue_a_perp",
+        ccxt_id="venue_a",
+        name="Venue A perp",
+        market_type="swap",
+        options={"defaultType": "future", "watchOrderBook": {"checksum": False}},
+    )
+    params = ccxt_params(explicit, "k", "s", None, requires_password=False)
+    assert params["options"] == {
+        "defaultType": "future",
+        "watchOrderBook": {"checksum": False},
+    }
