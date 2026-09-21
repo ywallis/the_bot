@@ -64,6 +64,9 @@ class OrderMessage(TypedDict):
     post_only : bool
         Whether the venue must reject the order rather than let it take.
         Absent means no.
+    reduce_only : bool
+        Whether the venue must only shrink an existing position with this
+        order. Contract markets only. Absent means no.
     """
 
     kind: MessageType
@@ -77,6 +80,7 @@ class OrderMessage(TypedDict):
     price: Decimal
     amount: Decimal
     post_only: NotRequired[bool]
+    reduce_only: NotRequired[bool]
 
 
 class OrderBatchMessage(TypedDict):
