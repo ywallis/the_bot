@@ -175,14 +175,16 @@ A third, small one carries what the reconciler computes:
   its kill switch and the notifier reads it for the out-of-band alert.
 
 Two feed names join `KNOWN_FEEDS` so subscriptions declare them:
-`position` and `funding`. Both are REST polled. Neither configured venue
-exposes `watchPositions` or a funding websocket through CCXT, so the
-position feed runs `fetch_positions` on an interval (a few seconds is
-enough: the position changes only when our own orders fill) and once more
-immediately after every `OrderEvent` with a fill on that venue, which is
-the moment a consumer needs the fresh figure. The funding feed polls
-`fetch_funding_rate` every minute or so; the rate itself changes once per
-funding interval.
+`position` and `funding`. The position feed follows `watch_positions`
+where the venue's websocket class has it (the unified venue does; the
+conformance run of section 13 showed it) and polls `fetch_positions`
+otherwise, on an interval of a few seconds, which is enough because the
+position changes only when our own orders fill. In both cases it fetches
+once more immediately after every `OrderEvent` with a fill on that venue,
+which is the moment a consumer needs the fresh figure, and the fetch is
+what reconciles a websocket that dropped. No configured venue has a
+funding websocket, so the funding feed polls `fetch_funding_rate` every
+minute or so; the rate itself changes once per funding interval.
 
 The balance watcher needs no change: on a `swap` venue `fetch_balance`
 returns the futures wallet, on a unified venue the unified pool, and in
@@ -569,5 +571,46 @@ change for a spot config:
 - `venue_conformance --market-type swap` with the checks of the runbook's
   section 7, writing nothing unless `--place-orders` is passed.
 
-Not run yet: the conformance tool against either venue's futures account
-with the operator's keys. That run answers the remaining open question.
+### 13.1 The conformance run of 2026-09-21
+
+Run against the unified venue's futures account with the live key, on a
+liquid perpetual, because the venue lists no perpetual for the current
+candidate (nor for the configured pair). Three things the tool could not
+have known without the run, and the fixes each one produced:
+
+- **The account is unified, and CCXT has to be told.** With no option set
+  every private call failed with the venue's "classic account API is not
+  supported in unified mode" error, balance included. Passing the CCXT
+  class's own switch (`uta = true` in the client options) made positions,
+  funding and orders answer. The tool now builds its clients with the
+  configured venue's `options` and takes `--option key=value` overrides;
+  the venue entry in the private config wants `account = "unified"` and
+  `options = { uta = true }`.
+- **The key lacks the "UTA manage" permission.** Reading the account
+  settings, reading the unified balance, setting leverage and setting the
+  position mode were all refused for it. Trading was not: an order was
+  placed and cancelled. The permission has to be granted on the key before
+  the broker's start-up setup (section 6) can run against this venue.
+  Whether that permission also covers transfers is for the operator to
+  check when granting it (section 4).
+- **Orders needed a position side.** A plain limit order was refused with
+  the venue's "one-way position mode" error; the same order with CCXT's
+  `hedged` param, which adds `posSide`, was accepted. The venue's own
+  documentation says `posSide` is for hedge mode only, so the likelier
+  reading is that the account is in hedge mode and the message is
+  misleading. It cannot be settled without the permission above; once the
+  broker can set one-way mode at start, the plain order is what the design
+  wants, and if the venue still insists on `posSide` in one-way mode that
+  becomes a per-venue order parameter in config, never a code branch on
+  the venue id.
+
+Also learned: the venue's websocket class exposes `watchPositions`, which
+the REST class does not advertise, so the position feed can follow the
+socket there (section 5). The tool itself gained a plain message for a
+symbol the venue does not list, instead of a traceback out of the trade
+check, and sizes its test order to clear the venue's minimum notional at
+the far-off price rather than the minimum amount alone.
+
+Still to run: the same command on the other venue's futures account for
+the candidate's perpetual, and this venue again once the key has the
+permission.
