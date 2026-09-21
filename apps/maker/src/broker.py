@@ -28,11 +28,13 @@ from apps.maker.src.utils import (
     order_from_ccxt,
     parse_message,
 )
+from apps.shared.src.derivatives import configure_derivatives
 from apps.shared.src.errors import NetworkError
 from apps.shared.src.exchange_clients import (
     authenticated_clients,
+    config,
     load_clients,
-    symbols,
+    symbols_per_venue,
 )
 from apps.shared.src.structs import CustomExchange
 
@@ -58,7 +60,7 @@ async def fetch_all_open(clients: dict[str, CustomExchange]) -> OrderBatchMessag
     all_orders: list[OrderMessage] = []
 
     for name, client in clients.items():
-        for symbol in symbols:
+        for symbol in sorted(symbols_per_venue.get(name, set())):
             attempt: int = 1
             while True:
                 try:
@@ -85,6 +87,31 @@ async def fetch_all_open(clients: dict[str, CustomExchange]) -> OrderBatchMessag
         id="recollection",
         orders=all_orders,
     )
+
+
+async def configure_all(clients: dict[str, CustomExchange]) -> None:
+    """
+    Apply every derivatives venue's account settings before trading.
+
+    Parameters
+    ----------
+    clients : dict[str, CustomExchange]
+        Authenticated clients keyed by venue id, markets loaded.
+
+    Raises
+    ------
+    DerivativesSetupError
+        If a venue refused a setting; the broker must not serve it.
+    """
+    for venue in config.venues:
+        client = clients.get(venue.id)
+        if client is None:
+            continue
+        applied = await configure_derivatives(
+            client, venue, symbols_per_venue.get(venue.id, set())
+        )
+        if applied:
+            logger.info(f"Configured {venue.id}: {', '.join(applied)}")
 
 
 async def process_message(
@@ -221,6 +248,12 @@ async def redis_subscriber(
                     elif exchange == "INIT":
                         logger.info("INIT message received")
                         await load_clients()
+                        # Margin mode, leverage and position mode are set
+                        # before the first order and fail the broker if a
+                        # venue refuses: a hedge at the wrong leverage is
+                        # worse than no hedge, and the orchestrator winds
+                        # everything down when this process dies.
+                        await configure_all(authenticated_clients)
                         try:
                             all_open_orders = await fetch_all_open(
                                 authenticated_clients
