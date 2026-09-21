@@ -141,8 +141,26 @@ these checks:
 | swap place order / client order id | A post-only limit far below the bid is accepted under our `t-<stamp>_<strategy>_<slot>` id, read back with that id, and cancelled | If the venue alters the id the order watcher cannot attribute fills. If the cancel fails, cancel by hand now. |
 | swap reduce_only | A reduce-only order on a flat account is refused | An acceptance means the venue ignores the flag; an unwinding hedge cannot rely on it there. |
 
-Without `--place-orders` the tool reads and never writes. Then declare the
-venue:
+Without `--place-orders` the tool reads and never writes. Clients are
+built with the `options` of the venue as declared in config, so the tool
+tests what the system will run; `--option key=value` adds or overrides
+one for the run. Three things a first run is likely to hit:
+
+- **Unified account, classic endpoints refused.** Every private call
+  fails with the venue's "unified account mode" error until CCXT is told
+  the account type through the venue's own option (`--option uta=true` on
+  a venue whose CCXT class calls it that). Put the same option under the
+  venue's `options` in config and set `account = "unified"`.
+- **Permission on the key.** Reading account settings and setting
+  leverage or position mode can need a separate permission from trading
+  ("manage" on one venue). Grant it, and check what else it covers, before
+  the broker's start-up setup can run.
+- **Position mode.** An order refused with a "position mode" error while
+  the same order with CCXT's `hedged` param is accepted means the account
+  is in hedge mode. The broker sets one-way mode at start once the key
+  may; until then set it by hand in the venue's interface.
+
+Then declare the venue:
 
 ```toml
 [[venues]]
