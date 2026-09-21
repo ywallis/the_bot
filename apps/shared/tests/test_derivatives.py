@@ -40,9 +40,11 @@ class FakeClient:
         if "margin" in self.fail:
             raise self.fail["margin"]
 
-    async def set_leverage(self, leverage: int, symbol: str) -> None:
+    async def set_leverage(
+        self, leverage: int, symbol: str, params: dict[str, Any] | None = None
+    ) -> None:
         """Record the call and fail if told to."""
-        self.calls.append(("leverage", leverage, symbol))
+        self.calls.append(("leverage", leverage, symbol, params or {}))
         if "leverage" in self.fail:
             raise self.fail["leverage"]
 
@@ -74,7 +76,7 @@ async def test_every_setter_runs_on_every_contract_symbol_in_order():
     applied = await configure_derivatives(client, swap_venue(), {PERP, SPOT})
     assert client.calls == [
         ("margin", "cross", PERP, {"leverage": 2}),
-        ("leverage", 2, PERP),
+        ("leverage", 2, PERP, {}),
         ("position_mode", False, PERP),
     ]
     assert applied == [
@@ -124,7 +126,7 @@ async def test_missing_setters_are_skipped_with_the_rest_applied():
     """A venue without a setter in its has map is configured by hand."""
     client = FakeClient(has={"setLeverage": True})
     applied = await configure_derivatives(client, swap_venue(), {PERP})
-    assert client.calls == [("leverage", 2, PERP)]
+    assert client.calls == [("leverage", 2, PERP, {})]
     assert applied == [f"{PERP} leverage 2"]
 
 
@@ -142,6 +144,28 @@ async def test_a_unified_account_configures_its_contracts_only():
     client = FakeClient()
     venue = VenueConfig(id="venue_a", name="Venue A", account="unified", leverage=3)
     applied = await configure_derivatives(client, venue, {SPOT, PERP})
-    assert ("leverage", 3, PERP) in client.calls
+    assert ("leverage", 3, PERP, {}) in client.calls
     assert all(call[2] == PERP for call in client.calls)
     assert applied[0] == f"{PERP} leverage 3"
+
+
+@pytest.mark.asyncio
+async def test_leverage_params_make_one_call_each():
+    """A venue that keeps leverage per side gets one call per declared set."""
+    client = FakeClient(has={"setLeverage": True})
+    venue = swap_venue(
+        margin_mode=None,
+        leverage_params=(
+            {"openType": 2, "positionType": 1},
+            {"openType": 2, "positionType": 2},
+        ),
+    )
+    applied = await configure_derivatives(client, venue, {PERP})
+    assert client.calls == [
+        ("leverage", 2, PERP, {"openType": 2, "positionType": 1}),
+        ("leverage", 2, PERP, {"openType": 2, "positionType": 2}),
+    ]
+    assert applied == [
+        f"{PERP} leverage 2 openType=2 positionType=1",
+        f"{PERP} leverage 2 openType=2 positionType=2",
+    ]

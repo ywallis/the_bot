@@ -855,23 +855,38 @@ async def check_derivatives(
             return
 
         leverage = 1
+        leverage_params: tuple[dict[str, Any], ...] = ()
         try:
             config = load_app_config()
-            declared = next((v for v in config.venues if v.exchange == venue), None)
+            declared = next(
+                (v for v in config.venues if v.exchange == venue and v.derivatives),
+                None,
+            )
             if declared is not None and declared.leverage is not None:
                 leverage = declared.leverage
+                leverage_params = declared.leverage_params
         except Exception:  # noqa: BLE001, a missing config means leverage 1
             pass
         if setters["setLeverage"]:
             try:
-                await asyncio.wait_for(client.set_leverage(leverage, symbol), 30)
-                report.add("swap set_leverage", True, f"{leverage}x on {symbol}")
+                for extra in leverage_params or ({},):
+                    await asyncio.wait_for(
+                        client.set_leverage(leverage, symbol, params=dict(extra)), 30
+                    )
+                report.add(
+                    "swap set_leverage",
+                    True,
+                    f"{leverage}x on {symbol}"
+                    + (f" with {list(leverage_params)}" if leverage_params else ""),
+                )
             except Exception as e:  # noqa: BLE001
                 report.add(
                     "swap set_leverage",
                     False,
                     f"{type(e).__name__}: {str(e)[:100]}",
-                    "the broker fails the venue on this at start; set it by hand or fix the config",
+                    "the broker fails the venue on this at start; a venue that wants "
+                    "parameters (margin type, position side) takes them as "
+                    "leverage_params on the venue in config",
                 )
 
         book = await asyncio.wait_for(client.fetch_order_book(symbol, 5), 30)

@@ -155,6 +155,10 @@ one for the run. Three things a first run is likely to hit:
   leverage or position mode can need a separate permission from trading
   ("manage" on one venue). Grant it, and check what else it covers, before
   the broker's start-up setup can run.
+- **Closed order endpoints.** A venue can serve every query endpoint and
+  still refuse to place: one configured venue documents its futures order
+  and cancel endpoints as closed to API users, and the test order comes
+  back "contract not activated". Such a venue cannot host a hedge.
 - **Position mode.** An order refused with a "position mode" error while
   the same order with CCXT's `hedged` param is accepted means the account
   is in hedge mode. The broker sets one-way mode at start once the key
@@ -172,6 +176,10 @@ credentials = "venuea"     # only if it shares the spot entry's key
 fee_currency = "quote"
 margin_mode = "cross"
 leverage = 2
+# Only for a venue that keeps leverage per margin type and position side
+# and refuses a call without them; one leverage call per entry, with the
+# venue's own parameter names.
+# leverage_params = [{ openType = 2, positionType = 1 }, { openType = 2, positionType = 2 }]
 ```
 
 Subscriptions on it must use contract symbols. At start the broker sets
