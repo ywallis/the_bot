@@ -246,3 +246,36 @@ def test_stream_for_routes_every_event():
 def test_now_ns_is_nanoseconds():
     """The clock helper returns nanosecond precision epoch time."""
     assert events.now_ns() > 1_700_000_000 * 10**9
+
+
+def test_reduce_only_and_contract_size_default_off():
+    """The derivatives fields are optional so older producers still decode."""
+    intent = OrderIntent(
+        ts_recv=TS,
+        intent_id="t-1_lat_a",
+        strategy="lat",
+        venue="venue_b",
+        symbol="SOL/USDT:USDT",
+        side=Side.SELL,
+        order_type=OrderKind.MARKET,
+        amount=Decimal("3"),
+    )
+    assert intent.reduce_only is False
+    flagged = msgspec.structs.replace(intent, reduce_only=True)
+    decoded = events.decode(events.encode(flagged))
+    assert isinstance(decoded, OrderIntent) and decoded.reduce_only is True
+    # A payload from before the field existed still decodes.
+    payload = json.loads(events.encode(intent))
+    del payload["reduce_only"]
+    decoded = events.decode(json.dumps(payload))
+    assert isinstance(decoded, OrderIntent) and decoded.reduce_only is False
+
+    fees = SymbolFees(
+        symbol="SOL/USDT:USDT",
+        maker=None,
+        taker=None,
+        min_cost=None,
+        amount_precision=None,
+    )
+    assert fees.contract_size is None
+    assert events.SELF_HEDGED_TAG == "self_hedged"

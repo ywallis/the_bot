@@ -85,6 +85,8 @@ def parse_message(
             )
             if message.get("post_only"):
                 order["post_only"] = True
+            if message.get("reduce_only"):
+                order["reduce_only"] = True
             return order
         case MessageType.CANCELLATION.value:
             return CancellationMessage(

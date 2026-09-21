@@ -29,6 +29,12 @@ OMS_CONSUMER_GROUP = "oms"
 # it. Mirrors the empty ``target_intent_id`` of a ``CancelIntent``.
 REPLACE_RESTING = ""
 
+# Tag a strategy puts on an intent whose hedge it places itself, as one leg
+# of a pair sent together. The matcher skips a fill carrying it; without
+# the tag the taken basis would be hedged twice. Any value counts, ``"1"``
+# by convention. See ``docs/design/inventory-hedging.md`` section 7.
+SELF_HEDGED_TAG = "self_hedged"
+
 
 def book_stream(venue: str, symbol: str) -> str:
     """
@@ -430,11 +436,18 @@ class OrderIntent(Event, tag=EventType.ORDER_INTENT.value):
     order_type : OrderKind
         Limit or market.
     amount : Decimal
-        Size in base asset.
+        Size in the unit the market is traded in: base asset on spot,
+        contracts on a derivative (see ``SymbolFees.contract_size``).
     price : Decimal | None
         Limit price, None for market orders.
     time_in_force : TimeInForce
         Time in force, defaults to good till cancelled.
+    reduce_only : bool
+        Whether the venue must only shrink an existing position with this
+        order and never open one the other way. Meaningful on a contract
+        symbol only; the order manager rejects it on a spot symbol. This is
+        how an unwinding hedge is kept from flipping the short long when
+        our view of the position and the venue's disagree.
     replace_of : str | None
         Intent id this intent supersedes. The order manager cancels that
         order first and coalesces pending replacements per strategy. None
@@ -455,6 +468,7 @@ class OrderIntent(Event, tag=EventType.ORDER_INTENT.value):
     amount: Decimal
     price: Decimal | None = None
     time_in_force: TimeInForce = TimeInForce.GTC
+    reduce_only: bool = False
     replace_of: str | None = None
     tags: dict[str, str] = {}
 

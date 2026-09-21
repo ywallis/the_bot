@@ -1024,6 +1024,48 @@ def test_broker_order_from_intent_marks_post_only_quotes():
     assert isinstance(parsed, dict) and parsed.get("post_only") is True
 
 
+def test_broker_order_from_intent_marks_reduce_only_orders():
+    """A reduce-only intent tells the broker so, and the flag survives JSON."""
+    intent = msgspec.structs.replace(
+        order_intent(), symbol="BASE/QUOTE:QUOTE", reduce_only=True
+    )
+    assert broker_order_from_intent(intent).get("reduce_only") is True
+    assert "reduce_only" not in broker_order_from_intent(order_intent())
+    raw = json.dumps(broker_order_from_intent(intent), default=str)
+    parsed = parse_message(raw)
+    assert isinstance(parsed, dict) and parsed.get("reduce_only") is True
+
+
+@pytest.mark.asyncio
+async def test_reduce_only_on_a_spot_symbol_is_rejected(
+    manager: OrderManager, broker: FakeBroker
+):
+    """Reduce-only means nothing without a position; the strategy hears that."""
+    intent = msgspec.structs.replace(order_intent(), reduce_only=True)
+    await submit(manager, intent)
+    await settle(manager)
+    assert broker.orders == []
+    events = await events_on(manager, ORDER_EVENTS_STREAM)
+    rejected = [e for e in events if e.state is OrderState.REJECTED]
+    assert len(rejected) == 1
+    assert "reduce_only" in (rejected[0].reason or "")
+    assert await pending_count(manager) == 0
+
+
+@pytest.mark.asyncio
+async def test_reduce_only_on_a_contract_symbol_is_placed(
+    manager: OrderManager, broker: FakeBroker
+):
+    """On a perpetual the flag travels to the broker with the order."""
+    intent = msgspec.structs.replace(
+        order_intent(legacy=None), symbol="BASE/QUOTE:QUOTE", reduce_only=True
+    )
+    await submit(manager, intent)
+    await settle(manager)
+    assert len(broker.orders) == 1
+    assert broker.orders[0].get("reduce_only") is True
+
+
 @pytest.mark.asyncio
 async def test_wind_down_rejects_intents_read_after_it_began(
     manager: OrderManager, broker: FakeBroker

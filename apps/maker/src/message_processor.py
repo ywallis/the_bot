@@ -45,7 +45,7 @@ from apps.maker.src.structs import (
     Response,
 )
 from apps.maker.src.utils import identify_response, parse_message
-from apps.shared.src.config import AppConfig, load_app_config
+from apps.shared.src.config import AppConfig, is_contract, load_app_config
 from apps.shared.src.events import (
     INTENTS_STREAM,
     OMS_CONSUMER_GROUP,
@@ -238,6 +238,8 @@ def broker_order_from_intent(intent: OrderIntent) -> OrderMessage:
     )
     if intent.time_in_force is TimeInForce.POST_ONLY:
         message["post_only"] = True
+    if intent.reduce_only:
+        message["reduce_only"] = True
     return message
 
 
@@ -563,6 +565,14 @@ class OrderManager:
             return
         if self.is_stale(intent, now_ns()):
             await self.reject(intent, "intent is older than max_intent_age_s")
+            await self.ack(entry_id)
+            return
+        if intent.reduce_only and not is_contract(intent.symbol):
+            # Reduce-only has no meaning without a position to reduce. A
+            # spot venue would at best ignore the flag and at worst refuse
+            # the order for it; either way the strategy asked for a
+            # guarantee it cannot get, so it hears that rather than a fill.
+            await self.reject(intent, "reduce_only on a spot symbol")
             await self.ack(entry_id)
             return
 
