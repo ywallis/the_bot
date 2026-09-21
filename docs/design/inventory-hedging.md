@@ -611,6 +611,20 @@ symbol the venue does not list, instead of a traceback out of the trade
 check, and sizes its test order to clear the venue's minimum notional at
 the far-off price rather than the minimum amount alone.
 
-Still to run: the same command on the other venue's futures account for
-the candidate's perpetual, and this venue again once the key has the
-permission.
+A second run on the unified venue, for another asset whose perpetual it
+does list, passed the market checks and failed the same three account
+checks. Its funding had flipped hard against a short the day before,
+about -8.4% summed over 24 hours on an hourly interval against roughly
+flat over the two weeks before, which is the episode the week-of-funding
+rule in section 8 exists to keep a build out of.
+
+The run on the other venue's futures account, for the candidate's
+perpetual, found the market listed (contract size 1, no position
+websocket) and every private futures endpoint refused with "no permission
+to access the endpoint": the key's scope does not include futures. Whether
+that venue's futures order endpoint is open to the account at all is still
+unknown; it needs a key with futures permission, and the test order to
+place through it, before the candidate can be counted on.
+
+Still to run: both venues again once their keys carry the permissions
+above.
