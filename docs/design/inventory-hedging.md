@@ -619,12 +619,23 @@ flat over the two weeks before, which is the episode the week-of-funding
 rule in section 8 exists to keep a build out of.
 
 The run on the other venue's futures account, for the candidate's
-perpetual, found the market listed (contract size 1, no position
-websocket) and every private futures endpoint refused with "no permission
-to access the endpoint": the key's scope does not include futures. Whether
-that venue's futures order endpoint is open to the account at all is still
-unknown; it needs a key with futures permission, and the test order to
-place through it, before the candidate can be counted on.
+perpetual, first found every private futures endpoint refused because the
+key's scope did not include futures. With the permission added the same
+day, balance and positions read (the futures wallet is empty), funding
+reads (4 hour interval, small and positive over the last 21 intervals),
+and the test order was refused with the venue's "contract not activated".
+The venue's own API documentation marks its futures order and cancel
+endpoints as closed since 2022, query endpoints open, which is what the
+run saw. Unless the operator obtains API order access from the venue,
+**this venue cannot host the hedge**, and the candidate whose perpetual
+exists there only cannot be hedged at all. The candidate therefore has to
+have a perpetual on the unified venue, which is the screener's job in
+phase 2.
 
-Still to run: both venues again once their keys carry the permissions
-above.
+The same run showed that this venue sets leverage per margin type and
+position side and refuses a call without both. That is expressed as
+`leverage_params` on the venue, a list of parameter sets with one call
+each, so the venue's parameter names stay in config.
+
+Still to run: the unified venue once its key carries the management
+permission.
