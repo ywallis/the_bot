@@ -14,7 +14,7 @@ from typing import Any
 
 from ccxt.base.decimal_to_precision import TICK_SIZE
 
-from apps.shared.src.config import FEE_POLICY_KEYWORDS, VenueConfig
+from apps.shared.src.config import FEE_POLICY_KEYWORDS, VenueConfig, is_contract
 from apps.shared.src.events import FeeScheduleEvent, FeeSource, Side, SymbolFees
 
 logger = logging.getLogger(__name__)
@@ -119,6 +119,33 @@ def _min_cost(market: dict[str, Any]) -> float | None:
     """
     raw = ((market.get("limits") or {}).get("cost") or {}).get("min")
     return None if raw is None else float(raw)
+
+
+def _contract_size(market: dict[str, Any]) -> Decimal | None:
+    """
+    Return how much base one contract of a derivative market stands for.
+
+    Parameters
+    ----------
+    market : dict[str, Any]
+        CCXT unified market.
+
+    Returns
+    -------
+    Decimal | None
+        ``contractSize`` on a market CCXT flags as a contract, None on a
+        spot market or where the venue does not report it. A contract
+        market without a size is a hedge nobody can size, so it is logged.
+    """
+    if not market.get("contract"):
+        return None
+    raw = market.get("contractSize")
+    if raw is None:
+        logger.warning(
+            f"Contract market {market.get('symbol')} reports no contractSize"
+        )
+        return None
+    return Decimal(str(raw))
 
 
 def _amount_precision(client: Any, market: dict[str, Any]) -> int | None:
@@ -254,6 +281,7 @@ async def fee_schedule_from_client(
                 ),
                 min_cost=_min_cost(market),
                 amount_precision=_amount_precision(client, market),
+                contract_size=_contract_size(market),
             )
         )
 
@@ -318,10 +346,14 @@ def base_quote(symbol: str) -> tuple[str, str]:
     """
     Split a CCXT symbol into its base and quote assets.
 
+    A contract symbol's settle suffix is dropped: the fee policy and the
+    hedge arithmetic care about what is bought and what it is paid in, and
+    ``BASE/QUOTE:QUOTE`` buys and pays in the same assets as ``BASE/QUOTE``.
+
     Parameters
     ----------
     symbol : str
-        CCXT symbol, e.g. ``BASE/QUOTE``.
+        CCXT symbol, ``BASE/QUOTE`` or ``BASE/QUOTE:SETTLE``.
 
     Returns
     -------
@@ -331,12 +363,33 @@ def base_quote(symbol: str) -> tuple[str, str]:
     Raises
     ------
     ValueError
-        If the symbol is not of the form ``BASE/QUOTE``.
+        If the symbol is not of either form.
     """
-    base, slash, quote = symbol.partition("/")
-    if not slash or not base or not quote:
-        raise ValueError(f"Symbol {symbol!r} is not of the form BASE/QUOTE")
+    pair, _colon, settle = symbol.partition(":")
+    base, slash, quote = pair.partition("/")
+    if not slash or not base or not quote or (_colon and not settle):
+        raise ValueError(
+            f"Symbol {symbol!r} is not of the form BASE/QUOTE or BASE/QUOTE:SETTLE"
+        )
     return base, quote
+
+
+def settle_of(symbol: str) -> str | None:
+    """
+    Return the settlement currency of a contract symbol.
+
+    Parameters
+    ----------
+    symbol : str
+        CCXT symbol.
+
+    Returns
+    -------
+    str | None
+        The asset after the colon, None for a spot symbol.
+    """
+    _pair, colon, settle = symbol.partition(":")
+    return settle if colon and settle else None
 
 
 __all__ = [
@@ -347,5 +400,7 @@ __all__ = [
     "fee_in_base",
     "fee_schedule_from_client",
     "fees_snapshot_key",
+    "is_contract",
     "schedule_for",
+    "settle_of",
 ]

@@ -362,6 +362,11 @@ class SymbolFees(msgspec.Struct):
         Smallest order notional the venue accepts, None if unreported.
     amount_precision : int | None
         Decimal places an order amount may carry, None if unreported.
+    contract_size : Decimal | None
+        Base units one contract stands for, on a derivative. None on a
+        spot market, where an order amount is already in base units. An
+        order on a contract market is sized in contracts, so a hedge for
+        a fill in base divides by this and quantizes to whole contracts.
     """
 
     symbol: str
@@ -369,6 +374,7 @@ class SymbolFees(msgspec.Struct):
     taker: Decimal | None
     min_cost: float | None
     amount_precision: int | None
+    contract_size: Decimal | None = None
 
 
 class FeeScheduleEvent(Event, tag=EventType.FEE_SCHEDULE.value):
