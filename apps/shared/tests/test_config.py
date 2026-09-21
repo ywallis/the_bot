@@ -328,3 +328,115 @@ def test_fees_settings_default_and_override():
         }
     )
     assert config.fees.refresh_s == 900
+
+
+# Derivatives venues --------------------------------------------------------
+
+
+def test_venue_market_type_and_account_default_to_spot_and_classic():
+    """A venue declared the old way trades spot on its own wallet."""
+    config = parse_app_config({"venues": VENUES, "strategies": [new_strategy()]})
+    venue = config.venue("venue_a")
+    assert venue.market_type == "spot"
+    assert venue.account == "classic"
+    assert venue.exchange == "venue_a"
+    assert venue.env_prefix == "VENUE_A"
+    assert venue.derivatives is False
+    assert venue.accepts("BTC/USDT")
+    assert not venue.accepts("BTC/USDT:USDT")
+
+
+def test_a_swap_venue_shares_its_exchange_and_takes_contracts_only():
+    """A futures wallet is a second entry naming the same CCXT class."""
+    venues = VENUES + [
+        {
+            "id": "venue_a_perp",
+            "ccxt_id": "venue_a",
+            "name": "Venue A perpetuals",
+            "market_type": "swap",
+            "margin_mode": "cross",
+            "leverage": 2,
+            "credentials": "venue_a",
+        }
+    ]
+    strategy = new_strategy(
+        subscriptions=[{"venue": "venue_a_perp", "symbol": "BTC/USDT:USDT"}]
+    )
+    config = parse_app_config({"venues": venues, "strategies": [strategy]})
+    perp = config.venue("venue_a_perp")
+    assert perp.exchange == "venue_a"
+    assert perp.env_prefix == "VENUE_A"
+    assert perp.derivatives is True
+    assert perp.accepts("BTC/USDT:USDT")
+    assert not perp.accepts("BTC/USDT")
+
+
+def test_a_unified_account_takes_both_symbol_kinds():
+    """One margin pool serves spot and contracts on one entry."""
+    venues = [{"id": "venue_a", "name": "Venue A", "account": "unified", "leverage": 2}]
+    strategy = new_strategy(
+        subscriptions=[
+            {"venue": "venue_a", "symbol": "BTC/USDT"},
+            {"venue": "venue_a", "symbol": "BTC/USDT:USDT"},
+        ]
+    )
+    config = parse_app_config({"venues": venues, "strategies": [strategy]})
+    assert config.venue("venue_a").derivatives is True
+
+
+def test_a_contract_symbol_on_a_spot_venue_is_rejected():
+    """A settle suffix on a spot wallet is a config error, not a venue error."""
+    strategy = new_strategy(
+        subscriptions=[{"venue": "venue_a", "symbol": "BTC/USDT:USDT"}]
+    )
+    with pytest.raises(ConfigError, match="contract symbol"):
+        parse_app_config({"venues": VENUES, "strategies": [strategy]})
+
+
+def test_a_spot_symbol_on_a_swap_venue_is_rejected():
+    """The futures wallet has no spot markets."""
+    venues = [{"id": "venue_a", "name": "Venue A", "market_type": "swap"}]
+    with pytest.raises(ConfigError, match="spot symbol"):
+        parse_app_config(
+            {
+                "venues": venues,
+                "strategies": [
+                    new_strategy(
+                        subscriptions=[{"venue": "venue_a", "symbol": "BTC/USDT"}]
+                    )
+                ],
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "venue, match",
+    [
+        ({"market_type": "future"}, "market_type"),
+        ({"account": "portfolio"}, "account"),
+        ({"market_type": "swap", "margin_mode": "hedged"}, "margin_mode"),
+        ({"market_type": "swap", "leverage": 0}, "leverage"),
+        ({"leverage": 2}, "spot only"),
+        ({"margin_mode": "cross"}, "spot only"),
+    ],
+)
+def test_invalid_derivatives_settings_are_rejected(venue, match):
+    """Every derivatives keyword is validated, and none applies to spot."""
+    venues = [{"id": "venue_a", "name": "Venue A", **venue}]
+    strategy = new_strategy(subscriptions=[])
+    with pytest.raises(ConfigError, match=match):
+        parse_app_config({"venues": venues, "strategies": [strategy]})
+
+
+def test_duplicate_venue_id_rejected():
+    """Two entries with one id would share every stream and client."""
+    venues = [{"id": "venue_a", "name": "A"}, {"id": "venue_a", "name": "A again"}]
+    with pytest.raises(ConfigError, match="Duplicate venue"):
+        parse_app_config({"venues": venues, "strategies": [new_strategy()]})
+
+
+def test_unknown_venue_lookup_raises():
+    """Looking up an undeclared venue is a programming error, not None."""
+    config = parse_app_config({"venues": VENUES, "strategies": [new_strategy()]})
+    with pytest.raises(KeyError):
+        config.venue("venue_z")
