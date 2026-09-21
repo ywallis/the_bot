@@ -440,3 +440,27 @@ def test_unknown_venue_lookup_raises():
     config = parse_app_config({"venues": VENUES, "strategies": [new_strategy()]})
     with pytest.raises(KeyError):
         config.venue("venue_z")
+
+
+def test_leverage_params_are_parsed_and_need_a_leverage():
+    """Per-side leverage parameters ride along with the leverage, never alone."""
+    venues = [
+        {
+            "id": "venue_a",
+            "name": "Venue A",
+            "market_type": "swap",
+            "leverage": 2,
+            "leverage_params": [{"openType": 2, "positionType": 1}],
+        }
+    ]
+    config = parse_app_config(
+        {"venues": venues, "strategies": [new_strategy(subscriptions=[])]}
+    )
+    assert config.venue("venue_a").leverage_params == (
+        {"openType": 2, "positionType": 1},
+    )
+    del venues[0]["leverage"]
+    with pytest.raises(ConfigError, match="leverage_params"):
+        parse_app_config(
+            {"venues": venues, "strategies": [new_strategy(subscriptions=[])]}
+        )

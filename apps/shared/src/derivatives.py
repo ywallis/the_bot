@@ -136,15 +136,24 @@ async def configure_derivatives(
                 )
         if venue.leverage is not None:
             if has.get("setLeverage"):
-                result = await _apply(
-                    client,
-                    venue,
-                    symbol,
-                    f"leverage {venue.leverage}",
-                    lambda s=symbol: client.set_leverage(venue.leverage, s),
-                )
-                if result:
-                    applied.append(result)
+                # One call per declared parameter set: a venue that keeps
+                # leverage per margin type and position side needs one for
+                # each side the hedge may hold. No parameters is one call.
+                for extra in venue.leverage_params or ({},):
+                    what = f"leverage {venue.leverage}"
+                    if extra:
+                        what += " " + " ".join(f"{k}={v}" for k, v in extra.items())
+                    result = await _apply(
+                        client,
+                        venue,
+                        symbol,
+                        what,
+                        lambda s=symbol, p=extra: client.set_leverage(
+                            venue.leverage, s, params=dict(p)
+                        ),
+                    )
+                    if result:
+                        applied.append(result)
             else:
                 logger.warning(
                     f"{venue.id} cannot set leverage through CCXT; make sure "

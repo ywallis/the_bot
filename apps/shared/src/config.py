@@ -232,6 +232,12 @@ class VenueConfig(msgspec.Struct, frozen=True):
     leverage : int | None
         Leverage set on every contract symbol at broker start. Only
         meaningful on a derivatives venue.
+    leverage_params : tuple[dict[str, Any], ...]
+        Extra CCXT parameters for the leverage call, one call per entry.
+        Some venues set leverage per margin type and position side and
+        refuse a call without them; declaring the venue's own parameter
+        names here keeps that out of the code. Empty means one call with
+        no parameters.
     credentials : str | None
         Prefix of the ``_KEY``, ``_SECRET`` and ``_PASSWORD`` environment
         variables, uppercased. Defaults to ``id``, so two entries for one
@@ -249,6 +255,7 @@ class VenueConfig(msgspec.Struct, frozen=True):
     account: str = CLASSIC_ACCOUNT
     margin_mode: str | None = None
     leverage: int | None = None
+    leverage_params: tuple[dict[str, Any], ...] = ()
     credentials: str | None = None
 
     @property
@@ -729,6 +736,10 @@ def _validate_markets(venue: VenueConfig) -> None:
         raise ConfigError(
             f"Venue {venue.id!r} has invalid leverage {venue.leverage!r}; "
             "it is a whole multiple of 1"
+        )
+    if venue.leverage_params and venue.leverage is None:
+        raise ConfigError(
+            f"Venue {venue.id!r} declares leverage_params without a leverage"
         )
     if not venue.derivatives and (
         venue.leverage is not None or venue.margin_mode is not None
