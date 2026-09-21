@@ -7,13 +7,22 @@ config or code change to make when a check fails.
 
 Usage
 -----
-    uv run -m apps.maker.src.tools.venue_conformance bitget ALPH/USDT
-    uv run -m apps.maker.src.tools.venue_conformance mexc ALPH/USDT --seconds 120
-    uv run -m apps.maker.src.tools.venue_conformance gate BTC/USDT --no-auth
+    uv run -m apps.maker.src.tools.venue_conformance venue_a BASE/QUOTE
+    uv run -m apps.maker.src.tools.venue_conformance venue_a BASE/QUOTE --seconds 120
+    uv run -m apps.maker.src.tools.venue_conformance venue_a BASE/QUOTE --no-auth
+    uv run -m apps.maker.src.tools.venue_conformance venue_a BASE/QUOTE:QUOTE \
+        --market-type swap --place-orders
 
 Public checks need no keys. The auth check reads ``{VENUE}_KEY``,
 ``{VENUE}_SECRET`` and ``{VENUE}_PASSWORD`` from ``.env`` like the real
 clients do and is skipped when the key is missing.
+
+``--market-type swap`` points every client at the venue's futures account
+and adds the derivatives checks: the position and funding endpoints, the
+contract size, and, with ``--place-orders``, that the account may set its
+leverage and place, read back and cancel a far-from-touch limit order under
+our client order id and a reduce-only order. Nothing is placed without that
+flag, and what is placed cannot fill.
 
 See ``docs/runbooks/new-venue.md`` for how to act on the output.
 """
@@ -31,15 +40,29 @@ import ccxt.pro as ccxt  # pyright: ignore[reportMissingTypeStubs]
 from dotenv import load_dotenv
 
 from apps.maker.src.watcher import RECONNECT_ERRORS, RESUBSCRIBE_ERRORS, trade_key
-from apps.shared.src.config import load_app_config
+from apps.shared.src.config import (
+    SPOT_MARKET,
+    SWAP_MARKET,
+    is_contract,
+    load_app_config,
+)
 from apps.shared.src.events import Side
 from apps.shared.src.fees import base_quote, fee_currency_for
+from apps.shared.src.runtime import time_stamp
 
 load_dotenv()
 
-CONTROL_SYMBOL = "BTC/USDT"
+CONTROL_SYMBOLS = {SPOT_MARKET: "BTC/USDT", SWAP_MARKET: "BTC/USDT:USDT"}
 CONTROL_SECONDS = 20
 FIRST_MESSAGE_TIMEOUT = 45
+
+# How far from the touch the conformance orders are priced, so they rest
+# without any chance of filling while the tool reads them back.
+SAFE_DISTANCE = 0.25
+
+# CCXT ``options`` every client of this run is built with; ``--market-type
+# swap`` sets ``defaultType`` here so the venue's futures endpoints answer.
+_client_options: dict[str, Any] = {}
 
 
 class Report:
@@ -150,15 +173,16 @@ def make_client(venue: str, auth: bool, options: dict[str, Any] | None = None) -
         password = os.getenv(f"{venue.upper()}_PASSWORD")
         if password:
             params["password"] = password
-    if options:
-        params["options"] = options
+    merged = {**_client_options, **(options or {})}
+    if merged:
+        params["options"] = merged
     client = getattr(ccxt, venue)(params)
     if _markets is not None:
         client.set_markets(_markets, _currencies)
     return client
 
 
-async def check_control(venue: str, report: Report) -> None:
+async def check_control(venue: str, market_type: str, report: Report) -> None:
     """
     Confirm the transport works by watching a liquid pair briefly.
 
@@ -166,9 +190,12 @@ async def check_control(venue: str, report: Report) -> None:
     ----------
     venue : str
         CCXT short id.
+    market_type : str
+        ``spot`` or ``swap``, which picks the liquid control symbol.
     report : Report
         Where to record the result.
     """
+    control_symbol = CONTROL_SYMBOLS[market_type]
     client = make_client(venue, auth=False)
     count = 0
     rate_limited = 0
@@ -177,7 +204,7 @@ async def check_control(venue: str, report: Report) -> None:
         while time.time() < end:
             try:
                 await asyncio.wait_for(
-                    client.watch_order_book(CONTROL_SYMBOL), end - time.time() + 0.1
+                    client.watch_order_book(control_symbol), end - time.time() + 0.1
                 )
                 count += 1
             except asyncio.TimeoutError:
@@ -206,7 +233,7 @@ async def check_control(venue: str, report: Report) -> None:
     report.add(
         "control feed",
         count >= 10,
-        f"{count} {CONTROL_SYMBOL} book updates in {CONTROL_SECONDS}s",
+        f"{count} {control_symbol} book updates in {CONTROL_SECONDS}s",
         "fewer than 10 updates on a liquid pair means the transport or venue is down; do not trust a quiet result below",
     )
 
@@ -599,7 +626,274 @@ async def check_fees(venue: str, symbol: str, report: Report) -> None:
         )
 
 
-async def run(venue: str, symbol: str, seconds: int, auth: bool) -> bool:
+def conformance_order_id() -> str:
+    """
+    Return a client order id in the shape the order watcher parses.
+
+    Returns
+    -------
+    str
+        ``t-<stamp>_conf_x``: the real format with a strategy identifier
+        no configured strategy uses, so a leftover is attributable and
+        harmless.
+    """
+    return f"t-{int(time_stamp(time.time_ns())):018d}_conf_x"
+
+
+async def _cancel_quietly(client: Any, order_id: str, symbol: str) -> str | None:
+    """
+    Cancel an order and return the error, if any, rather than raising.
+
+    Parameters
+    ----------
+    client : Any
+        The CCXT client.
+    order_id : str
+        Venue order id.
+    symbol : str
+        Symbol.
+
+    Returns
+    -------
+    str | None
+        The error description, None on success.
+    """
+    try:
+        await asyncio.wait_for(client.cancel_order(order_id, symbol), 30)
+    except Exception as e:  # noqa: BLE001
+        return f"{type(e).__name__}: {str(e)[:80]}"
+    return None
+
+
+async def check_derivatives(
+    venue: str, symbol: str, place_orders: bool, report: Report
+) -> None:
+    """
+    Check what the derivatives account exposes and, opted in, that it trades.
+
+    The read-only part reports the contract's terms, the position and
+    funding endpoints and the account-level setters in the ``has`` map.
+    With ``place_orders`` it also sets the leverage the config declares
+    for the venue (or 1 if none), places a post-only limit buy far below
+    the bid under our client order id, reads it back, cancels it, and then
+    tries a reduce-only sell far above the ask. On a flat account the
+    reduce-only order should be refused; an acceptance is reported so the
+    operator knows the flag is not enforced the way the order manager
+    assumes.
+
+    Parameters
+    ----------
+    venue : str
+        CCXT short id.
+    symbol : str
+        Contract symbol.
+    place_orders : bool
+        Whether to place and cancel the test orders.
+    report : Report
+        Where to record results.
+    """
+    market = (_markets or {}).get(symbol)
+    if market is None or not market.get("contract"):
+        report.add(
+            "swap market",
+            False,
+            f"{symbol} is not a contract market on {venue}",
+            "use the CCXT contract symbol, BASE/QUOTE:SETTLE",
+        )
+        return
+    limits = market.get("limits") or {}
+    min_amount = ((limits.get("amount") or {}).get("min")) or 1
+    report.add(
+        "swap market",
+        market.get("linear") is True,
+        f"contractSize {market.get('contractSize')}, min amount {min_amount}, "
+        f"amount precision {(market.get('precision') or {}).get('amount')}, "
+        f"settle {market.get('settle')}, linear {market.get('linear')}",
+        "only linear perpetuals hedge a spot holding one for one in base",
+    )
+
+    if not os.getenv(f"{venue.upper()}_KEY"):
+        report.add("swap account", None, f"skipped, {venue.upper()}_KEY not set")
+        return
+    client = make_client(venue, auth=True)
+    try:
+        has = getattr(client, "has", {}) or {}
+        setters = {
+            k: bool(has.get(k))
+            for k in (
+                "fetchPositions",
+                "watchPositions",
+                "setLeverage",
+                "setMarginMode",
+                "setPositionMode",
+                "fetchFundingRate",
+                "fetchFundingHistory",
+            )
+        }
+        report.add(
+            "swap has map",
+            setters["fetchPositions"] and setters["fetchFundingRate"],
+            ", ".join(f"{k} {'yes' if v else 'no'}" for k, v in setters.items()),
+            "the position and funding feeds poll these; a venue without them cannot host the hedge",
+        )
+        try:
+            positions = await asyncio.wait_for(client.fetch_positions([symbol]), 30)
+            open_positions = [
+                p for p in positions if p.get("contracts") not in (None, 0, 0.0)
+            ]
+            report.add(
+                "swap fetch_positions",
+                True,
+                f"{len(open_positions)} open on {symbol}"
+                + (
+                    "; "
+                    + ", ".join(
+                        f"{p.get('side')} {p.get('contracts')} @ {p.get('entryPrice')}"
+                        for p in open_positions
+                    )
+                    if open_positions
+                    else ""
+                ),
+            )
+        except Exception as e:  # noqa: BLE001
+            report.add(
+                "swap fetch_positions",
+                False,
+                f"{type(e).__name__}: {str(e)[:100]}",
+                "the futures API may be closed to this account; nothing below can work until it opens",
+            )
+            return
+        try:
+            funding = await asyncio.wait_for(client.fetch_funding_rate(symbol), 30)
+            report.add(
+                "swap funding",
+                None,
+                f"rate {funding.get('fundingRate')}, next {funding.get('fundingDatetime')}, "
+                f"interval {funding.get('interval')}, mark {funding.get('markPrice')}",
+            )
+        except Exception as e:  # noqa: BLE001
+            report.add("swap funding", False, f"{type(e).__name__}: {str(e)[:100]}")
+
+        if not place_orders:
+            report.add(
+                "swap orders", None, "skipped; pass --place-orders to exercise them"
+            )
+            return
+
+        leverage = 1
+        try:
+            config = load_app_config()
+            declared = next((v for v in config.venues if v.exchange == venue), None)
+            if declared is not None and declared.leverage is not None:
+                leverage = declared.leverage
+        except Exception:  # noqa: BLE001, a missing config means leverage 1
+            pass
+        if setters["setLeverage"]:
+            try:
+                await asyncio.wait_for(client.set_leverage(leverage, symbol), 30)
+                report.add("swap set_leverage", True, f"{leverage}x on {symbol}")
+            except Exception as e:  # noqa: BLE001
+                report.add(
+                    "swap set_leverage",
+                    False,
+                    f"{type(e).__name__}: {str(e)[:100]}",
+                    "the broker fails the venue on this at start; set it by hand or fix the config",
+                )
+
+        book = await asyncio.wait_for(client.fetch_order_book(symbol, 5), 30)
+        if not book["bids"] or not book["asks"]:
+            report.add("swap orders", False, "empty book, cannot price a safe order")
+            return
+        bid, ask = book["bids"][0][0], book["asks"][0][0]
+        amount = float(client.amount_to_precision(symbol, min_amount))
+        buy_price = float(client.price_to_precision(symbol, bid * (1 - SAFE_DISTANCE)))
+        sell_price = float(client.price_to_precision(symbol, ask * (1 + SAFE_DISTANCE)))
+
+        client_id = conformance_order_id()
+        try:
+            placed = await asyncio.wait_for(
+                client.create_order(
+                    symbol,
+                    "limit",
+                    "buy",
+                    amount,
+                    buy_price,
+                    {"clientOrderId": client_id, "postOnly": True},
+                ),
+                30,
+            )
+        except Exception as e:  # noqa: BLE001
+            report.add(
+                "swap place order",
+                False,
+                f"{type(e).__name__}: {str(e)[:100]}",
+                "the account cannot place futures orders through the API; check permissions and the venue's futures API status",
+            )
+            return
+        venue_id = placed.get("id")
+        try:
+            fetched = await asyncio.wait_for(client.fetch_order(venue_id, symbol), 30)
+            echoed = fetched.get("clientOrderId")
+            report.add(
+                "swap client order id",
+                echoed == client_id,
+                f"sent {client_id}, venue reports {echoed}",
+                "the order watcher attributes fills by this id; the futures endpoint alters it",
+            )
+        except Exception as e:  # noqa: BLE001
+            report.add(
+                "swap client order id",
+                False,
+                f"fetch_order: {type(e).__name__}: {str(e)[:80]}",
+            )
+        error = await _cancel_quietly(client, venue_id, symbol)
+        report.add(
+            "swap place order",
+            error is None,
+            f"placed {amount} @ {buy_price} post-only, "
+            + ("cancelled" if error is None else f"CANCEL FAILED: {error}"),
+            "cancel the leftover order by hand now",
+        )
+
+        try:
+            placed = await asyncio.wait_for(
+                client.create_order(
+                    symbol,
+                    "limit",
+                    "sell",
+                    amount,
+                    sell_price,
+                    {"clientOrderId": conformance_order_id(), "reduceOnly": True},
+                ),
+                30,
+            )
+        except Exception as e:  # noqa: BLE001
+            report.add(
+                "swap reduce_only",
+                True,
+                f"refused on a flat account as it should be: {type(e).__name__}: {str(e)[:80]}",
+            )
+        else:
+            error = await _cancel_quietly(client, placed.get("id"), symbol)
+            report.add(
+                "swap reduce_only",
+                False,
+                "accepted on a flat account"
+                + ("" if error is None else f"; CANCEL FAILED: {error}"),
+                "the venue does not enforce reduceOnly; the unwinding hedge cannot rely on it here",
+            )
+    finally:
+        await client.close()
+
+
+async def run(
+    venue: str,
+    symbol: str,
+    seconds: int,
+    auth: bool,
+    market_type: str = SPOT_MARKET,
+    place_orders: bool = False,
+) -> bool:
     """
     Run every check and print the report.
 
@@ -613,6 +907,10 @@ async def run(venue: str, symbol: str, seconds: int, auth: bool) -> bool:
         Observation window for the book and shared-client checks.
     auth : bool
         Whether to run the credential check.
+    market_type : str
+        ``spot`` or ``swap``; the latter adds the derivatives checks.
+    place_orders : bool
+        Whether the derivatives check may place and cancel test orders.
 
     Returns
     -------
@@ -622,6 +920,14 @@ async def run(venue: str, symbol: str, seconds: int, auth: bool) -> bool:
     if not hasattr(ccxt, venue):
         print(f"ccxt.pro has no exchange {venue!r}")
         return False
+    if is_contract(symbol) != (market_type == SWAP_MARKET):
+        print(
+            f"{symbol!r} does not match --market-type {market_type}: a contract "
+            "symbol carries a settle suffix (BASE/QUOTE:QUOTE) and a spot one does not"
+        )
+        return False
+    if market_type == SWAP_MARKET:
+        _client_options["defaultType"] = SWAP_MARKET
     report = Report()
     try:
         await preload_markets(venue)
@@ -629,7 +935,7 @@ async def run(venue: str, symbol: str, seconds: int, auth: bool) -> bool:
         print(f"load_markets failed: {type(e).__name__}: {str(e)[:120]}")
         return False
     tasks = [
-        check_control(venue, report),
+        check_control(venue, market_type, report),
         check_book(venue, symbol, seconds, report),
         check_trades(venue, symbol, seconds, report),
         check_shared_client(venue, symbol, seconds, report),
@@ -637,6 +943,8 @@ async def run(venue: str, symbol: str, seconds: int, auth: bool) -> bool:
     if auth:
         tasks.append(check_auth(venue, report))
         tasks.append(check_fees(venue, symbol, report))
+    if market_type == SWAP_MARKET:
+        tasks.append(check_derivatives(venue, symbol, place_orders and auth, report))
     await asyncio.gather(*tasks)
     return report.print(venue, symbol)
 
@@ -646,16 +954,38 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("venue", help="CCXT short id, e.g. bitget")
-    parser.add_argument("symbol", help="CCXT symbol, e.g. ALPH/USDT")
+    parser.add_argument("venue", help="CCXT short id")
+    parser.add_argument(
+        "symbol", help="CCXT symbol, BASE/QUOTE or BASE/QUOTE:SETTLE for a swap"
+    )
     parser.add_argument(
         "--seconds", type=int, default=90, help="observation window (default 90)"
     )
     parser.add_argument(
         "--no-auth", action="store_true", help="skip the credential check"
     )
+    parser.add_argument(
+        "--market-type",
+        choices=sorted((SPOT_MARKET, SWAP_MARKET)),
+        default=SPOT_MARKET,
+        help="which account the clients address; swap adds the derivatives checks",
+    )
+    parser.add_argument(
+        "--place-orders",
+        action="store_true",
+        help="let the swap check place and cancel far-from-touch test orders",
+    )
     args = parser.parse_args()
-    ok = asyncio.run(run(args.venue, args.symbol, args.seconds, not args.no_auth))
+    ok = asyncio.run(
+        run(
+            args.venue,
+            args.symbol,
+            args.seconds,
+            not args.no_auth,
+            args.market_type,
+            args.place_orders,
+        )
+    )
     sys.exit(0 if ok else 1)
 
 
