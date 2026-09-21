@@ -17,6 +17,13 @@ Public checks need no keys. The auth check reads ``{VENUE}_KEY``,
 ``{VENUE}_SECRET`` and ``{VENUE}_PASSWORD`` from ``.env`` like the real
 clients do and is skipped when the key is missing.
 
+Clients are built with the ``options`` of the venue as declared in config,
+when it is declared, so the tool tests the client the system will run;
+``--option key=value`` adds or overrides one. A unified account needs the
+venue's own switch for it, for example ``--option uta=true`` on a venue
+whose CCXT class calls it that, or CCXT keeps calling the classic
+endpoints, which such an account refuses.
+
 ``--market-type swap`` points every client at the venue's futures account
 and adds the derivatives checks: the position and funding endpoints, the
 contract size, and, with ``--place-orders``, that the account may set its
@@ -626,6 +633,73 @@ async def check_fees(venue: str, symbol: str, report: Report) -> None:
         )
 
 
+def configured_options(venue: str, market_type: str) -> dict[str, Any]:
+    """
+    Return the CCXT options of the declared venue this run stands for.
+
+    Parameters
+    ----------
+    venue : str
+        CCXT short id.
+    market_type : str
+        ``spot`` or ``swap``.
+
+    Returns
+    -------
+    dict[str, Any]
+        The ``options`` of the first configured venue built from this CCXT
+        class whose market type matches, or that is a unified account and
+        so serves both; empty when none is declared or config is missing.
+    """
+    try:
+        config = load_app_config()
+    except Exception:  # noqa: BLE001, no config means no declared options
+        return {}
+    for declared in config.venues:
+        if declared.exchange != venue:
+            continue
+        if declared.market_type == market_type or declared.derivatives:
+            return dict(declared.options)
+    return {}
+
+
+def parse_option(text: str) -> tuple[str, Any]:
+    """
+    Parse one ``--option key=value`` argument.
+
+    Parameters
+    ----------
+    text : str
+        ``key=value``; ``true``, ``false`` and numbers are converted.
+
+    Returns
+    -------
+    tuple[str, Any]
+        Key and typed value.
+
+    Raises
+    ------
+    argparse.ArgumentTypeError
+        If there is no ``=``.
+    """
+    key, sep, raw = text.partition("=")
+    if not sep or not key:
+        raise argparse.ArgumentTypeError(f"expected key=value, got {text!r}")
+    lowered = raw.lower()
+    value: Any
+    if lowered in ("true", "false"):
+        value = lowered == "true"
+    else:
+        try:
+            value = int(raw)
+        except ValueError:
+            try:
+                value = float(raw)
+            except ValueError:
+                value = raw
+    return key, value
+
+
 def conformance_order_id() -> str:
     """
     Return a client order id in the shape the order watcher parses.
@@ -805,9 +879,18 @@ async def check_derivatives(
             report.add("swap orders", False, "empty book, cannot price a safe order")
             return
         bid, ask = book["bids"][0][0], book["asks"][0][0]
-        amount = float(client.amount_to_precision(symbol, min_amount))
         buy_price = float(client.price_to_precision(symbol, bid * (1 - SAFE_DISTANCE)))
         sell_price = float(client.price_to_precision(symbol, ask * (1 + SAFE_DISTANCE)))
+        # The smallest order the venue takes is bounded by amount and by
+        # notional, and the notional is measured at our far-off price, so
+        # size to clear both with a margin, as the matcher does for dust.
+        min_cost = (limits.get("cost") or {}).get("min") or 0
+        contract_size = market.get("contractSize") or 1
+        by_cost = min_cost * 1.1 / (buy_price * contract_size)
+        amount = float(client.amount_to_precision(symbol, max(min_amount, by_cost)))
+        if amount < by_cost:
+            step = float(client.amount_to_precision(symbol, min_amount)) or min_amount
+            amount = float(client.amount_to_precision(symbol, amount + step))
 
         client_id = conformance_order_id()
         try:
@@ -893,6 +976,7 @@ async def run(
     auth: bool,
     market_type: str = SPOT_MARKET,
     place_orders: bool = False,
+    options: dict[str, Any] | None = None,
 ) -> bool:
     """
     Run every check and print the report.
@@ -911,6 +995,8 @@ async def run(
         ``spot`` or ``swap``; the latter adds the derivatives checks.
     place_orders : bool
         Whether the derivatives check may place and cancel test orders.
+    options : dict[str, Any] | None
+        CCXT options added to, and overriding, the configured venue's.
 
     Returns
     -------
@@ -928,11 +1014,31 @@ async def run(
         return False
     if market_type == SWAP_MARKET:
         _client_options["defaultType"] = SWAP_MARKET
+    _client_options.update(configured_options(venue, market_type))
+    _client_options.update(options or {})
+    if _client_options:
+        print(f"client options: {_client_options}")
     report = Report()
     try:
         await preload_markets(venue)
     except Exception as e:  # noqa: BLE001
         print(f"load_markets failed: {type(e).__name__}: {str(e)[:120]}")
+        return False
+    if symbol not in (_markets or {}):
+        # Every check would fail on this in its own way, the trade check by
+        # raising out of the whole run; one line up front says it plainly.
+        kind = "perpetual" if market_type == SWAP_MARKET else "spot market"
+        base, _quote = base_quote(symbol)
+        listed = sorted(
+            s
+            for s, m in (_markets or {}).items()
+            if s.startswith(f"{base}/")
+            and bool(m.get("contract")) == is_contract(symbol)
+        )
+        print(
+            f"{venue} does not list {symbol}: no {kind} for {base} on this venue"
+            + (f"; it does list {listed}" if listed else "")
+        )
         return False
     tasks = [
         check_control(venue, market_type, report),
@@ -975,6 +1081,14 @@ def main() -> None:
         action="store_true",
         help="let the swap check place and cancel far-from-touch test orders",
     )
+    parser.add_argument(
+        "--option",
+        action="append",
+        type=parse_option,
+        default=[],
+        metavar="KEY=VALUE",
+        help="CCXT client option, repeatable; overrides the configured venue's",
+    )
     args = parser.parse_args()
     ok = asyncio.run(
         run(
@@ -984,6 +1098,7 @@ def main() -> None:
             not args.no_auth,
             args.market_type,
             args.place_orders,
+            dict(args.option),
         )
     )
     sys.exit(0 if ok else 1)
