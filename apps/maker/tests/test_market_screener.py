@@ -1,5 +1,7 @@
 """Tests for the market screener's pure arithmetic."""
 
+import pytest
+
 from apps.maker.src.tools.market_screener import (
     EDGES_BPS,
     Print,
@@ -265,3 +267,369 @@ def test_a_market_crossed_most_of_the_time_is_marked_suspect():
     score = score_pair("XXX/USDT", "a", "b", maker, taker, 12.0)
     assert score is not None and score.suspect
     assert format_table([score], 5).splitlines()[2].startswith("!XXX/USDT")
+
+
+def test_perpetual_markets_keeps_active_linear_swaps_settled_in_the_quote():
+    """A perpetual is a linear swap settled in the quote; the rest is ignored."""
+    from apps.maker.src.tools.market_screener import perpetual_markets
+
+    markets = {
+        "AAA/USDT": {"spot": True, "base": "AAA", "quote": "USDT"},
+        "AAA/USDT:USDT": {
+            "swap": True,
+            "linear": True,
+            "active": True,
+            "base": "AAA",
+            "quote": "USDT",
+            "settle": "USDT",
+            "contractSize": 10,
+        },
+        "BBB/USDT:USDT": {
+            "swap": True,
+            "linear": True,
+            "active": False,
+            "base": "BBB",
+            "quote": "USDT",
+            "settle": "USDT",
+        },
+        "CCC/USD:CCC": {
+            "swap": True,
+            "linear": False,
+            "inverse": True,
+            "base": "CCC",
+            "quote": "USD",
+            "settle": "CCC",
+        },
+        "DDD/USDT:USDT": {
+            "swap": True,
+            "linear": True,
+            "base": "DDD",
+            "quote": "USDT",
+            "settle": "USDT",
+            "contractSize": None,
+        },
+    }
+    assert perpetual_markets(markets, "USDT") == {
+        "AAA": ("AAA/USDT:USDT", 10.0),
+        "DDD": ("DDD/USDT:USDT", None),
+    }
+    assert perpetual_markets(markets, "USDC") == {}
+
+
+def hedge_sample(venue: str, unified: bool, depth: float = 100.0):
+    """Build a perpetual with one snapshot at parity and the given depth."""
+    from apps.maker.src.tools.market_screener import HedgeSample
+
+    return HedgeSample(
+        venue=venue,
+        symbol="AAA/USDT:USDT",
+        unified=unified,
+        taker_fee_bps=5.0,
+        contract_size=1.0,
+        snapshots=[
+            Snapshot(ts_ms=0, bid=1.0, ask=1.0, bid_depth=depth, ask_depth=depth)
+        ],
+    )
+
+
+def test_choose_hedge_prefers_a_unified_account_then_depth():
+    """A unified account needs no transfer, so it wins over a deeper split wallet."""
+    from apps.maker.src.tools.market_screener import choose_hedge
+
+    split_deep = hedge_sample("split", unified=False, depth=1_000.0)
+    unified_thin = hedge_sample("unified", unified=True, depth=10.0)
+    unified_deep = hedge_sample("unified2", unified=True, depth=50.0)
+    assert choose_hedge([split_deep, unified_thin]) is unified_thin
+    assert choose_hedge([unified_thin, unified_deep]) is unified_deep
+    assert choose_hedge([split_deep]) is split_deep
+    assert choose_hedge([]) is None
+
+
+def test_score_hedge_prices_basis_funding_and_the_round_trip():
+    """Basis is the perp bid over the spot bid; funding sums the trailing week."""
+    from apps.maker.src.tools.market_screener import HedgeSample, score_hedge
+    from apps.shared.src.funding import HOUR_MS, WEEK_MS, FundingRate
+
+    now = 10 * WEEK_MS
+    # Spot bid 1.0000 throughout; the perp bids 1.0020: a 20 bps premium.
+    spot = Sample(
+        snapshots=[
+            Snapshot(ts_ms=now - 2000 + k, bid=1.0, ask=1.001, bid_depth=1, ask_depth=1)
+            for k in (0, 1000)
+        ]
+    )
+    hedge = HedgeSample(
+        venue="perp",
+        symbol="AAA/USDT:USDT",
+        unified=True,
+        taker_fee_bps=5.0,
+        contract_size=1.0,
+        snapshots=[
+            Snapshot(
+                ts_ms=now - 2000 + k, bid=1.002, ask=1.003, bid_depth=200, ask_depth=400
+            )
+            for k in (0, 1000)
+        ],
+        funding=FundingRate(
+            rate=0.0001,
+            interval_s=28_800,
+            mark_price=1.0,
+            index_price=1.0,
+            next_funding_ms=now,
+        ),
+        # Three payments inside the week and one just before it.
+        history=[
+            (now - WEEK_MS - HOUR_MS, 0.5),
+            (now - 3 * 8 * HOUR_MS, 0.0002),
+            (now - 2 * 8 * HOUR_MS, 0.0003),
+            (now - 8 * HOUR_MS, -0.0001),
+        ],
+    )
+    score = score_hedge(spot, hedge, spot_maker_fee_bps=2.0, now_ms=now)
+    assert score is not None
+    assert score.venue == "perp" and score.unified
+    assert round(score.basis_bps, 6) == 20.0
+    assert round(score.perp_spread_bps, 3) == round((1.003 / 1.002 - 1) * 1e4, 3)
+    assert score.perp_depth == 300.0
+    assert score.funding_rate_bps == 1.0
+    assert score.interval_s == 28_800
+    assert score.funding_day_bps == pytest.approx(3.0)
+    assert round(score.funding_week_bps, 6) == 4.0
+    assert score.funding_hours == 7 * 24 - 7.0  # the pre-week entry is in the span
+    assert round(score.entry_bps, 6) == 20.0 - 7.0
+    assert round(score.round_trip_bps, 6) == 4.0 - 14.0
+
+
+def test_score_hedge_infers_the_interval_and_needs_overlapping_books():
+    """Without a reported interval the history's spacing is used; no overlap is None."""
+    from apps.maker.src.tools.market_screener import HedgeSample, score_hedge
+    from apps.shared.src.funding import HOUR_MS, FundingRate
+
+    now = 100 * HOUR_MS
+    spot = Sample(snapshots=snapshots([(1.0, 1.001), (1.0, 1.001)]))
+    hedge = HedgeSample(
+        venue="perp",
+        symbol="AAA/USDT:USDT",
+        unified=False,
+        taker_fee_bps=5.0,
+        contract_size=None,
+        snapshots=snapshots([(1.0, 1.001)]),
+        funding=FundingRate(
+            rate=0.0001,
+            interval_s=None,
+            mark_price=None,
+            index_price=None,
+            next_funding_ms=None,
+        ),
+        history=[(now - 8 * HOUR_MS, 0.0), (now - 4 * HOUR_MS, 0.0), (now, 0.0)],
+    )
+    score = score_hedge(spot, hedge, 0.0, now)
+    assert score is not None
+    assert score.interval_s == 4 * 3600
+    assert score.funding_day_bps == pytest.approx(6.0)
+    far = HedgeSample(
+        venue="perp",
+        symbol="AAA/USDT:USDT",
+        unified=False,
+        taker_fee_bps=5.0,
+        contract_size=None,
+        snapshots=[Snapshot(ts_ms=10**9, bid=1.0, ask=1.0, bid_depth=1, ask_depth=1)],
+    )
+    assert score_hedge(spot, far, 0.0, now) is None
+    assert score_hedge(spot, hedge_sample("x", False), 0.0, now) is not None
+    empty = hedge_sample("x", False)
+    empty.snapshots = []
+    assert score_hedge(spot, empty, 0.0, now) is None
+
+
+def test_format_table_renders_the_perpetual_columns():
+    """A hedged row shows the perp venue, starred on a unified account; others a dash."""
+    from dataclasses import replace
+
+    from apps.maker.src.tools.market_screener import HedgeScore, format_table
+
+    maker = Sample(snapshots=snapshots([(1.0, 1.1), (1.0, 1.1)]))
+    taker = Sample(snapshots=snapshots([(1.0, 1.1), (1.0, 1.1)]))
+    bare = score_pair("AAA/USDT", "a", "b", maker, taker, 12.0)
+    assert bare is not None
+    hedged = replace(
+        bare,
+        symbol="BBB/USDT",
+        hedge=HedgeScore(
+            venue="unified",
+            symbol="BBB/USDT:USDT",
+            unified=True,
+            contract_size=1.0,
+            basis_bps=12.5,
+            perp_spread_bps=3.0,
+            perp_depth=1000.0,
+            funding_rate_bps=1.0,
+            interval_s=28_800,
+            funding_day_bps=3.0,
+            funding_week_bps=21.0,
+            funding_hours=168.0,
+            entry_bps=5.5,
+            round_trip_bps=7.0,
+        ),
+    )
+    lines = format_table([hedged, bare], 5).splitlines()
+    assert lines[0].rstrip().endswith("perp  basis    f/d   f/wk  rt/wk")
+    assert lines[2].rstrip().endswith("*unified   12.5    3.0   21.0    7.0")
+    assert lines[3].rstrip().endswith("-")
+
+
+class FakeClient:
+    """A CCXT stand-in serving fixed books, funding and history."""
+
+    def __init__(self, has: dict[str, bool], funding=None, history=None):
+        """Remember what to serve."""
+        self.has = has
+        self.funding = funding or {}
+        self.history = history or []
+        self.calls: list[tuple] = []
+
+    async def fetch_order_book(self, symbol, limit=None):
+        """Serve a one-level book at parity."""
+        self.calls.append(("book", symbol))
+        return {"bids": [[1.0, 10.0]], "asks": [[1.001, 10.0]]}
+
+    async def fetch_trades(self, symbol, limit=None):
+        """Serve no trades."""
+        self.calls.append(("trades", symbol))
+        return []
+
+    async def fetch_funding_rate(self, symbol):
+        """Serve the funding rate."""
+        self.calls.append(("funding", symbol))
+        return self.funding
+
+    async def fetch_funding_rate_history(self, symbol, since=None, limit=None):
+        """Serve the history."""
+        self.calls.append(("history", symbol, since, limit))
+        return self.history
+
+
+@pytest.mark.asyncio
+async def test_screener_samples_hedges_reads_funding_and_attaches_the_score():
+    """The perp's book is sampled each round, funding read once, score attached."""
+    from apps.maker.src.tools.market_screener import HedgeSample, Screener
+    from apps.shared.src.funding import HOUR_MS
+
+    spot_a, spot_b = FakeClient({}), FakeClient({})
+    perp = FakeClient(
+        {"fetchFundingRate": True, "fetchFundingRateHistory": True},
+        funding={"fundingRate": 0.0001, "interval": "8h"},
+        history=[{"timestamp": 8 * HOUR_MS, "fundingRate": 0.0002}],
+    )
+    screener = Screener({"a": spot_a, "b": spot_b, "p": perp}, spot_venues=["a", "b"])
+    screener.add_hedge(
+        "AAA",
+        HedgeSample(
+            "p", "AAA/USDT:USDT", unified=True, taker_fee_bps=5.0, contract_size=1.0
+        ),
+    )
+    screener.add_hedge(
+        "ZZZ",
+        HedgeSample(
+            "p", "ZZZ/USDT:USDT", unified=False, taker_fee_bps=5.0, contract_size=1.0
+        ),
+    )
+    assert screener.hedged("AAA/USDT") and screener.hedged(
+        "AAA/USDT", unified_only=True
+    )
+    assert screener.hedged("ZZZ/USDT") and not screener.hedged(
+        "ZZZ/USDT", unified_only=True
+    )
+    assert not screener.hedged("BBB/USDT")
+    screener.keep_hedges_for(["AAA/USDT"])
+    assert list(screener.hedges) == ["AAA"]
+
+    now = 24 * HOUR_MS
+    await screener.prime_hedges(now)
+    await screener.collect(["AAA/USDT"], seconds=0.0, interval=0.0)
+    await screener.collect(["AAA/USDT"], seconds=0.0, interval=0.0)
+    hedge = screener.hedges["AAA"][0]
+    assert hedge.funding is not None and hedge.funding.interval_s == 28_800
+    assert hedge.history == [(8 * HOUR_MS, 0.0002)]
+    assert len(hedge.snapshots) == 2
+    assert [c[0] for c in perp.calls] == ["funding", "history", "book", "book"]
+    assert ("trades", "AAA/USDT:USDT") not in perp.calls
+    assert perp.calls[1][2] == now - 7 * 24 * HOUR_MS
+
+    scores = screener.scores(
+        ["AAA/USDT"], {("a", "b"): 12.0, ("b", "a"): 12.0}, {"a": 2.0, "b": 2.0}, now
+    )
+    assert len(scores) == 2
+    for score in scores:
+        assert score.hedge is not None
+        assert score.hedge.venue == "p" and score.hedge.unified
+        assert round(score.hedge.basis_bps, 6) == 0.0
+        assert score.hedge.funding_week_bps == 2.0
+        assert round(score.hedge.round_trip_bps, 6) == 2.0 - 14.0
+    # Without maker fees no hedge is scored; without candidates none either.
+    assert (
+        screener.scores(["AAA/USDT"], {("a", "b"): 12.0, ("b", "a"): 12.0})[0].hedge
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_prime_hedge_respects_the_has_map_and_survives_a_failure():
+    """A venue without the endpoint is not asked; one that fails leaves the field empty."""
+    from apps.maker.src.tools.market_screener import HedgeSample, Screener
+
+    class Failing(FakeClient):
+        async def fetch_funding_rate(self, symbol):
+            raise RuntimeError("down")
+
+    quiet = FakeClient({"fetchFundingRate": False, "fetchFundingRateHistory": False})
+    failing = Failing(
+        {"fetchFundingRate": True, "fetchFundingRateHistory": True},
+        history=[{"timestamp": 1, "fundingRate": 0.1}],
+    )
+    screener = Screener({"q": quiet, "f": failing}, spot_venues=[])
+    q = HedgeSample("q", "AAA/USDT:USDT", False, 5.0, None)
+    f = HedgeSample("f", "AAA/USDT:USDT", False, 5.0, None)
+    screener.add_hedge("AAA", q)
+    screener.add_hedge("AAA", f)
+    await screener.prime_hedges(0)
+    assert quiet.calls == []
+    assert q.funding is None and q.history == []
+    assert f.funding is None and f.history == [(1, 0.1)]
+
+
+def test_public_clients_build_from_the_exchange_class_with_client_options(
+    monkeypatch,
+):
+    """A futures wallet entry builds its exchange class addressed at the swap endpoints."""
+    from types import SimpleNamespace
+
+    from apps.maker.src.tools.market_screener import public_clients
+
+    class Recorder:
+        def __init__(self, params):
+            self.params = params
+
+    import apps.maker.src.tools.market_screener as module
+
+    class FakeCcxt:
+        gate = Recorder
+
+    monkeypatch.setattr(module, "ccxt", FakeCcxt)
+    config = SimpleNamespace(
+        venues=(
+            VenueConfig(id="gate", name="spot", options={"x": 1}),
+            VenueConfig(id="gateperp", name="perp", ccxt_id="gate", market_type="swap"),
+        )
+    )
+    clients = public_clients(config, ["gate", "gateperp"], rate_limit_ms=50)
+    assert clients["gate"].params == {
+        "enableRateLimit": True,
+        "rateLimit": 50,
+        "options": {"x": 1},
+    }
+    assert clients["gateperp"].params == {
+        "enableRateLimit": True,
+        "rateLimit": 50,
+        "options": {"defaultType": "swap"},
+    }

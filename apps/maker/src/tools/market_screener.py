@@ -22,11 +22,25 @@ Venues default to the ones in ``config.toml``. Fees default to the static
 rates configured per venue and fall back to ``--fee-bps`` when a venue has
 none. No keys are needed.
 
+For every symbol whose asset has a linear perpetual on a configured
+derivatives venue (a ``swap`` venue or a ``unified`` account), the screen
+also samples that perpetual's book and reads its funding rate and a week of
+its funding history, so the inventory a maker strategy would hold can be
+priced as the cash-and-carry it is: the basis of the perpetual over the
+spot bid, the funding a short earned over the trailing week, and the round
+trip net of the spot maker fee and the perpetual's taker fee twice over.
+``--perp unified`` keeps only the symbols whose perpetual sits on a unified
+account, which is where a hedge needs no transfer; ``--perp any`` keeps
+those with a perpetual anywhere; ``--perp off`` skips the lookup. Until a
+venue declares ``account = "unified"`` or a ``swap`` entry exists, the
+perpetuals the spot venues themselves list are priced, none marked unified.
+
 With ``--recorded`` the same arithmetic runs over the recorder's files
 instead of live REST: every book update and every trade, which is what the
 live sample approximates. That is how a shortlisted market, recorded through
 the ``observe`` strategy, is measured before a quoting strategy is pointed
-at it.
+at it. The recorded mode carries no perpetual columns yet: the position and
+funding feeds that would record them are the next step of the same phase.
 
 What the numbers mean: ``harvest`` is the quote notional per hour of maker
 venue prints that landed at least an edge past the prevailing taker touch,
@@ -46,20 +60,36 @@ import logging
 import statistics
 import sys
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import ccxt.async_support as ccxt  # pyright: ignore[reportMissingTypeStubs]
 
-from apps.shared.src.config import AppConfig, VenueConfig, load_app_config
+from apps.shared.src.config import (
+    SPOT_MARKET,
+    UNIFIED_ACCOUNT,
+    AppConfig,
+    VenueConfig,
+    load_app_config,
+)
 from apps.shared.src.events import (
     BookEvent,
     TradeEvent,
     book_stream,
     from_stream_fields,
     trade_stream,
+)
+from apps.shared.src.funding import (
+    WEEK_MS,
+    FundingRate,
+    coverage_hours,
+    infer_interval_s,
+    parse_funding_history,
+    parse_funding_rate,
+    per_day,
+    sum_rates,
 )
 from apps.shared.src.streams import recording_files, stream_path
 
@@ -84,6 +114,10 @@ DEFAULT_FEE_BPS = 12.0
 # venues list different assets under one ticker, or one book is halted. A
 # real cross that persistent would be taken by someone within seconds.
 SUSPECT_CROSSED_SHARE = 0.5
+
+# Funding history asked for at most this many entries back: a week of hourly
+# payments is 168, and venues cap a page at a few hundred.
+FUNDING_HISTORY_LIMIT = 200
 
 
 @dataclass(frozen=True)
@@ -155,6 +189,121 @@ class Sample:
     keys: set[tuple[Any, ...]] = field(default_factory=set)
 
 
+@dataclass
+class HedgeSample:
+    """
+    A linear perpetual that could hedge the inventory of one asset.
+
+    Attributes
+    ----------
+    venue : str
+        Venue id the perpetual trades on.
+    symbol : str
+        CCXT contract symbol, ``BASE/QUOTE:QUOTE``.
+    unified : bool
+        Whether the venue is a unified account, where the spot inventory
+        collateralises the short and no transfer is needed.
+    taker_fee_bps : float
+        Taker fee of the venue in basis points, what a hedge leg pays.
+    contract_size : float | None
+        Base units per contract, None when the venue does not say.
+    snapshots : list[Snapshot]
+        Book tops of the perpetual in fetch order.
+    funding : FundingRate | None
+        The current funding rate, once read.
+    history : list[tuple[int, float]]
+        Funding payments over the trailing week, oldest first.
+    """
+
+    venue: str
+    symbol: str
+    unified: bool
+    taker_fee_bps: float
+    contract_size: float | None
+    snapshots: list[Snapshot] = field(default_factory=list)
+    funding: FundingRate | None = None
+    history: list[tuple[int, float]] = field(default_factory=list)
+
+    @property
+    def depth(self) -> float:
+        """
+        Return the median near depth of the perpetual's book.
+
+        Returns
+        -------
+        float
+            Quote notional, both sides averaged; 0 without snapshots.
+        """
+        if not self.snapshots:
+            return 0.0
+        return statistics.median(
+            (s.bid_depth + s.ask_depth) / 2 for s in self.snapshots
+        )
+
+
+@dataclass(frozen=True)
+class HedgeScore:
+    """
+    What hedging one spot market's inventory with a perpetual would cost.
+
+    The inventory build is a cash-and-carry: buy spot at the maker venue's
+    bid, sell the perpetual at its bid, hold, and unwind the same way. All
+    figures are in basis points of the spot price.
+
+    Attributes
+    ----------
+    venue : str
+        Venue id the perpetual trades on.
+    symbol : str
+        CCXT contract symbol.
+    unified : bool
+        Whether the perpetual sits on a unified account.
+    contract_size : float | None
+        Base units per contract.
+    basis_bps : float
+        Median of the perpetual's bid over the spot maker bid, minus one.
+        Positive means the perpetual trades at a premium, which the build
+        collects at entry and pays back at exit.
+    perp_spread_bps : float
+        Median spread of the perpetual's own book.
+    perp_depth : float
+        Median quote notional on the perpetual's first ``DEPTH_LEVELS``
+        levels, both sides averaged: what a hedge eats into.
+    funding_rate_bps : float | None
+        The current rate per interval; positive pays the short.
+    interval_s : int | None
+        Seconds between funding payments, reported or inferred.
+    funding_day_bps : float | None
+        The current rate scaled to a day.
+    funding_week_bps : float
+        Funding paid over the trailing week, summed from the history. What
+        a short held all week earned, positive, or paid.
+    funding_hours : float
+        Hours the history covers, so a short week is visible.
+    entry_bps : float
+        ``basis_bps`` less the spot maker fee and the perpetual taker fee:
+        what today's basis pays, or costs, to enter.
+    round_trip_bps : float
+        ``funding_week_bps`` less both legs' fees twice: a week's hold
+        entered and exited at the same basis.
+    """
+
+    venue: str
+    symbol: str
+    unified: bool
+    contract_size: float | None
+    basis_bps: float
+    perp_spread_bps: float
+    perp_depth: float
+    funding_rate_bps: float | None
+    interval_s: int | None
+    funding_day_bps: float | None
+    funding_week_bps: float
+    funding_hours: float
+    entry_bps: float
+    round_trip_bps: float
+
+
 @dataclass(frozen=True)
 class PairScore:
     """
@@ -193,6 +342,10 @@ class PairScore:
         ``harvest_per_h`` times the edge net of fees, quote units per hour.
     hours : float
         Length of the sample in hours.
+    hedge : HedgeScore | None
+        The perpetual chosen to hedge this asset's inventory, scored
+        against the maker venue's bid; None when no configured venue
+        lists one or it was not sampled.
     """
 
     symbol: str
@@ -208,6 +361,7 @@ class PairScore:
     harvest_per_h: dict[int, float]
     net_per_h: dict[int, float]
     hours: float
+    hedge: HedgeScore | None = None
 
     @property
     def suspect(self) -> bool:
@@ -546,6 +700,144 @@ def fee_budget_bps(
     return fallback
 
 
+def leg_fee_bps(rate: float | None, fallback: float) -> float:
+    """
+    Return one leg's fee in basis points.
+
+    Parameters
+    ----------
+    rate : float | None
+        The venue's static rate as a fraction, if configured.
+    fallback : float
+        Round-trip budget to halve when the venue has no static rate.
+
+    Returns
+    -------
+    float
+        The rate in basis points, or half the fallback.
+    """
+    if rate is not None:
+        return rate * 10_000.0
+    return fallback / 2.0
+
+
+def perpetual_markets(
+    markets: dict[str, dict[str, Any]], quote: str
+) -> dict[str, tuple[str, float | None]]:
+    """
+    Find the active linear perpetuals one venue lists, settled in a quote asset.
+
+    Parameters
+    ----------
+    markets : dict[str, dict[str, Any]]
+        CCXT ``markets`` of the venue.
+    quote : str
+        Quote and settlement asset, e.g. ``USDT``.
+
+    Returns
+    -------
+    dict[str, tuple[str, float | None]]
+        Per base asset, the contract symbol and its contract size.
+    """
+    out: dict[str, tuple[str, float | None]] = {}
+    for symbol, market in markets.items():
+        if not (market.get("swap") and market.get("linear")):
+            continue
+        if not market.get("active", True):
+            continue
+        if market.get("quote") != quote or market.get("settle") != quote:
+            continue
+        base = market.get("base")
+        if not base:
+            continue
+        size = market.get("contractSize")
+        out[str(base)] = (symbol, float(size) if size is not None else None)
+    return out
+
+
+def choose_hedge(candidates: list[HedgeSample]) -> HedgeSample | None:
+    """
+    Pick the perpetual to hedge one asset on.
+
+    A unified account wins, since there the spot inventory is the short's
+    collateral and nothing has to be transferred; among equals the deeper
+    book wins.
+
+    Parameters
+    ----------
+    candidates : list[HedgeSample]
+        The perpetuals configured venues list for the asset.
+
+    Returns
+    -------
+    HedgeSample | None
+        The choice, or None without candidates.
+    """
+    if not candidates:
+        return None
+    return max(candidates, key=lambda h: (h.unified, h.depth))
+
+
+def score_hedge(
+    spot: Sample, hedge: HedgeSample, spot_maker_fee_bps: float, now_ms: int
+) -> HedgeScore | None:
+    """
+    Price the cash-and-carry of one spot market against one perpetual.
+
+    Parameters
+    ----------
+    spot : Sample
+        Books of the spot market on the maker venue.
+    hedge : HedgeSample
+        The perpetual's books, funding and history.
+    spot_maker_fee_bps : float
+        Maker fee of the spot venue, basis points.
+    now_ms : int
+        The moment the trailing windows end, milliseconds.
+
+    Returns
+    -------
+    HedgeScore | None
+        The score, or None when the two books never overlapped in time.
+    """
+    if not hedge.snapshots:
+        return None
+    perp_times = [s.ts_ms for s in hedge.snapshots]
+    basis: list[float] = []
+    for snap in spot.snapshots:
+        other = nearest_snapshot(hedge.snapshots, snap.ts_ms, perp_times)
+        if other is None:
+            continue
+        basis.append(bps(other.bid / snap.bid))
+    if not basis:
+        return None
+
+    interval_s = hedge.funding.interval_s if hedge.funding else None
+    if interval_s is None:
+        interval_s = infer_interval_s(hedge.history)
+    rate = hedge.funding.rate if hedge.funding else None
+    day = per_day(rate, interval_s) if rate is not None else None
+    week = sum_rates(hedge.history, now_ms - WEEK_MS, now_ms + 1)
+    fees = spot_maker_fee_bps + hedge.taker_fee_bps
+    basis_bps = statistics.median(basis)
+    return HedgeScore(
+        venue=hedge.venue,
+        symbol=hedge.symbol,
+        unified=hedge.unified,
+        contract_size=hedge.contract_size,
+        basis_bps=basis_bps,
+        perp_spread_bps=statistics.median(bps(s.ask / s.bid) for s in hedge.snapshots),
+        perp_depth=hedge.depth,
+        funding_rate_bps=rate * 10_000.0 if rate is not None else None,
+        interval_s=interval_s,
+        funding_day_bps=day * 10_000.0 if day is not None else None,
+        funding_week_bps=week * 10_000.0,
+        funding_hours=coverage_hours(hedge.history),
+        entry_bps=basis_bps - fees,
+        round_trip_bps=week * 10_000.0 - 2.0 * fees,
+    )
+
+
 def format_table(scores: list[PairScore], limit: int) -> str:
     """
     Render the top scores as a fixed-width table.
@@ -568,6 +860,7 @@ def format_table(scores: list[PairScore], limit: int) -> str:
         f"{'depth':>9}{'vol/h':>10}{'cross':>6}"
         + "".join(f"{'h+' + str(e):>9}" for e in edges)
         + f"{'net/h':>8}"
+        + f"{'perp':>10}{'basis':>7}{'f/d':>7}{'f/wk':>7}{'rt/wk':>7}"
     )
     lines = [head, "-" * len(head)]
     for s in scores[:limit]:
@@ -578,14 +871,47 @@ def format_table(scores: list[PairScore], limit: int) -> str:
             f"{s.maker_volume_per_h:>10.0f}{s.crossed_share * 100:>5.0f}%"
             + "".join(f"{s.harvest_per_h[e]:>9.1f}" for e in edges)
             + f"{s.best_net_per_h:>8.3f}"
+            + format_hedge(s.hedge)
         )
     lines.append(
         "offsets and spread in bps (medians); depth and vol/h in quote units; "
         "h+N is harvestable quote/h at fee+N bps; net/h is the best of those "
         "times its edge; ! marks books crossed more than half the time, which "
-        "is two assets under one ticker or a halted book, not an edge"
+        "is two assets under one ticker or a halted book, not an edge; perp is "
+        "the venue of the perpetual that would hedge the inventory, * on a "
+        "unified account; basis is its bid over the spot bid in bps; f/d the "
+        "current funding a day and f/wk the trailing week's sum, bps, positive "
+        "pays the short; rt/wk is a week's carry net of both legs' fees twice"
     )
     return "\n".join(lines)
+
+
+def format_hedge(hedge: HedgeScore | None) -> str:
+    """
+    Render the perpetual columns of one row.
+
+    Parameters
+    ----------
+    hedge : HedgeScore | None
+        The row's hedge, or None for a dash.
+
+    Returns
+    -------
+    str
+        The columns, fixed width.
+    """
+    if hedge is None:
+        return f"{'-':>10}{'':>7}{'':>7}{'':>7}{'':>7}"
+    venue = ("*" if hedge.unified else "") + hedge.venue[:9]
+    day = (
+        f"{hedge.funding_day_bps:>7.1f}"
+        if hedge.funding_day_bps is not None
+        else f"{'?':>7}"
+    )
+    return (
+        f"{venue:>10}{hedge.basis_bps:>7.1f}{day}"
+        f"{hedge.funding_week_bps:>7.1f}{hedge.round_trip_bps:>7.1f}"
+    )
 
 
 class Screener:
@@ -595,12 +921,18 @@ class Screener:
     Attributes
     ----------
     clients : dict[str, Any]
-        Public CCXT clients per venue id.
+        Public CCXT clients per venue id, spot and derivatives venues alike.
+    spot_venues : list[str]
+        The venues whose spot markets are screened against each other.
     samples : dict[tuple[str, str], Sample]
         Collected data per venue and symbol.
+    hedges : dict[str, list[HedgeSample]]
+        The perpetuals that could hedge each base asset's inventory.
     """
 
-    def __init__(self, clients: dict[str, Any]) -> None:
+    def __init__(
+        self, clients: dict[str, Any], spot_venues: list[str] | None = None
+    ) -> None:
         """
         Initialize with ready clients.
 
@@ -608,9 +940,61 @@ class Screener:
         ----------
         clients : dict[str, Any]
             Public CCXT clients per venue id, markets not yet loaded.
+        spot_venues : list[str] | None
+            The venues screened as spot markets; every client by default.
         """
         self.clients = clients
+        self.spot_venues = (
+            list(spot_venues) if spot_venues is not None else list(clients)
+        )
         self.samples: dict[tuple[str, str], Sample] = {}
+        self.hedges: dict[str, list[HedgeSample]] = {}
+
+    def add_hedge(self, base: str, hedge: HedgeSample) -> None:
+        """
+        Register a perpetual as a hedge candidate for one base asset.
+
+        Parameters
+        ----------
+        base : str
+            The base asset.
+        hedge : HedgeSample
+            The perpetual, unsampled.
+        """
+        self.hedges.setdefault(base, []).append(hedge)
+
+    def keep_hedges_for(self, symbols: list[str]) -> None:
+        """
+        Drop the hedge candidates of assets that are not going to be sampled.
+
+        Parameters
+        ----------
+        symbols : list[str]
+            The spot symbols that will be sampled.
+        """
+        bases = {symbol.split("/")[0] for symbol in symbols}
+        self.hedges = {b: h for b, h in self.hedges.items() if b in bases}
+
+    def hedged(self, symbol: str, unified_only: bool = False) -> bool:
+        """
+        Return whether a spot symbol's asset has a hedge candidate.
+
+        Parameters
+        ----------
+        symbol : str
+            The spot symbol.
+        unified_only : bool
+            Count only perpetuals on a unified account.
+
+        Returns
+        -------
+        bool
+            Whether one is registered.
+        """
+        candidates = self.hedges.get(symbol.split("/")[0], [])
+        if unified_only:
+            return any(h.unified for h in candidates)
+        return bool(candidates)
 
     async def load_markets(self) -> dict[str, dict[str, Any]]:
         """
@@ -656,6 +1040,27 @@ class Screener:
                 out[venue][symbol] = float(volume or 0.0)
         return out
 
+    async def fetch_book(self, venue: str, symbol: str) -> Snapshot | None:
+        """
+        Fetch the top of one book.
+
+        Parameters
+        ----------
+        venue : str
+            Venue id.
+        symbol : str
+            CCXT symbol, spot or contract.
+
+        Returns
+        -------
+        Snapshot | None
+            The snapshot, or None for a one-sided book.
+        """
+        book = await self.clients[venue].fetch_order_book(
+            symbol, limit=DEPTH_LEVELS * 4
+        )
+        return snapshot_from_book(book, int(time.time() * 1000))
+
     async def fetch_one(self, venue: str, symbol: str) -> None:
         """
         Fetch one book and the recent trades of one symbol on one venue.
@@ -670,14 +1075,77 @@ class Screener:
         client = self.clients[venue]
         sample = self.samples.setdefault((venue, symbol), Sample())
         try:
-            book = await client.fetch_order_book(symbol, limit=DEPTH_LEVELS * 4)
-            snapshot = snapshot_from_book(book, int(time.time() * 1000))
+            snapshot = await self.fetch_book(venue, symbol)
             if snapshot is not None:
                 sample.snapshots.append(snapshot)
             trades = await client.fetch_trades(symbol, limit=100)
             add_prints(sample, trades)
         except Exception as error:  # noqa: BLE001, one venue's hiccup is not fatal
             logger.warning(f"{venue} {symbol}: {error}")
+
+    async def fetch_hedge(self, hedge: HedgeSample) -> None:
+        """
+        Fetch the top of one perpetual's book.
+
+        Parameters
+        ----------
+        hedge : HedgeSample
+            The perpetual, updated in place.
+        """
+        try:
+            snapshot = await self.fetch_book(hedge.venue, hedge.symbol)
+            if snapshot is not None:
+                hedge.snapshots.append(snapshot)
+        except Exception as error:  # noqa: BLE001, one venue's hiccup is not fatal
+            logger.warning(f"{hedge.venue} {hedge.symbol}: {error}")
+
+    async def prime_hedges(self, now_ms: int) -> None:
+        """
+        Read every hedge candidate's funding rate and a week of its history.
+
+        Both are read once: the rate changes once per interval and the
+        history not at all. A venue without one of the two endpoints in
+        its ``has`` map leaves that part empty rather than failing.
+
+        Parameters
+        ----------
+        now_ms : int
+            The moment the trailing week ends, milliseconds.
+        """
+        candidates = [h for group in self.hedges.values() for h in group]
+        await asyncio.gather(*(self.prime_hedge(h, now_ms) for h in candidates))
+
+    async def prime_hedge(self, hedge: HedgeSample, now_ms: int) -> None:
+        """
+        Read one perpetual's funding rate and history.
+
+        Parameters
+        ----------
+        hedge : HedgeSample
+            The perpetual, updated in place.
+        now_ms : int
+            The moment the trailing week ends, milliseconds.
+        """
+        client = self.clients[hedge.venue]
+        has = getattr(client, "has", {})
+        if has.get("fetchFundingRate"):
+            try:
+                hedge.funding = parse_funding_rate(
+                    await client.fetch_funding_rate(hedge.symbol)
+                )
+            except Exception as error:  # noqa: BLE001, one venue's hiccup is not fatal
+                logger.warning(f"{hedge.venue} {hedge.symbol} funding: {error}")
+        if has.get("fetchFundingRateHistory"):
+            try:
+                hedge.history = parse_funding_history(
+                    await client.fetch_funding_rate_history(
+                        hedge.symbol,
+                        since=now_ms - WEEK_MS,
+                        limit=FUNDING_HISTORY_LIMIT,
+                    )
+                )
+            except Exception as error:  # noqa: BLE001, one venue's hiccup is not fatal
+                logger.warning(f"{hedge.venue} {hedge.symbol} history: {error}")
 
     async def collect(
         self, symbols: list[str], seconds: float, interval: float
@@ -700,14 +1168,16 @@ class Screener:
         """
         deadline = time.monotonic() + seconds
         rounds = 0
+        hedges = [h for group in self.hedges.values() for h in group]
         while True:
             started = time.monotonic()
             await asyncio.gather(
                 *(
                     self.fetch_one(venue, symbol)
-                    for venue in self.clients
+                    for venue in self.spot_venues
                     for symbol in symbols
-                )
+                ),
+                *(self.fetch_hedge(h) for h in hedges),
             )
             rounds += 1
             logger.info(
@@ -719,7 +1189,11 @@ class Screener:
             await asyncio.sleep(max(0.0, interval - (time.monotonic() - started)))
 
     def scores(
-        self, symbols: list[str], fees: dict[tuple[str, str], float]
+        self,
+        symbols: list[str],
+        fees: dict[tuple[str, str], float],
+        maker_fees: dict[str, float] | None = None,
+        now_ms: int | None = None,
     ) -> list[PairScore]:
         """
         Score every symbol in both maker and taker directions.
@@ -730,6 +1204,11 @@ class Screener:
             Symbols sampled.
         fees : dict[tuple[str, str], float]
             Fee budget in basis points per (maker, taker) venue pair.
+        maker_fees : dict[str, float] | None
+            Maker fee in basis points per spot venue, for the hedge
+            columns; a venue missing here gets no hedge score.
+        now_ms : int | None
+            The moment the trailing funding week ends; now by default.
 
         Returns
         -------
@@ -737,22 +1216,34 @@ class Screener:
             Ranked scores.
         """
         out: list[PairScore] = []
-        venues = list(self.clients)
+        venues = self.spot_venues
+        maker_fees = maker_fees or {}
+        now_ms = int(time.time() * 1000) if now_ms is None else now_ms
         for symbol in symbols:
+            hedge = choose_hedge(self.hedges.get(symbol.split("/")[0], []))
             for maker in venues:
                 for taker in venues:
                     if maker == taker:
                         continue
+                    maker_sample = self.samples.get((maker, symbol), Sample())
                     score = score_pair(
                         symbol,
                         maker,
                         taker,
-                        self.samples.get((maker, symbol), Sample()),
+                        maker_sample,
                         self.samples.get((taker, symbol), Sample()),
                         fees[(maker, taker)],
                     )
-                    if score is not None:
-                        out.append(score)
+                    if score is None:
+                        continue
+                    if hedge is not None and maker in maker_fees:
+                        score = replace(
+                            score,
+                            hedge=score_hedge(
+                                maker_sample, hedge, maker_fees[maker], now_ms
+                            ),
+                        )
+                    out.append(score)
         return rank(out)
 
     async def close(self) -> None:
@@ -940,7 +1431,10 @@ def public_clients(
     config : AppConfig
         The application configuration, for per-venue CCXT options.
     venue_ids : list[str]
-        CCXT ids. A venue absent from the config gets default options.
+        Venue ids. A configured venue is built from its ``exchange`` class
+        with its ``client_options``, so a futures wallet addresses the
+        futures endpoints; a venue absent from the config is taken as a
+        CCXT id with default options.
     rate_limit_ms : int | None
         Milliseconds between requests per client, overriding CCXT's default
         for the venue. A 20 minute screen of 150 symbols drew 429s from one
@@ -958,9 +1452,12 @@ def public_clients(
         if rate_limit_ms is not None:
             params["rateLimit"] = rate_limit_ms
         venue = configured.get(venue_id)
-        if venue is not None and venue.options:
-            params["options"] = dict(venue.options)
-        clients[venue_id] = getattr(ccxt, venue_id)(params)
+        exchange = venue_id
+        if venue is not None:
+            exchange = venue.exchange
+            if venue.client_options:
+                params["options"] = venue.client_options
+        clients[venue_id] = getattr(ccxt, exchange)(params)
     return clients
 
 
@@ -1013,10 +1510,28 @@ async def run(args: argparse.Namespace) -> list[PairScore]:
         Ranked scores.
     """
     config = load_app_config()
-    venue_ids = args.venues or [venue.id for venue in config.venues]
-    if len(venue_ids) < 2:
-        raise SystemExit("need at least two venues")
     configured = {venue.id: venue for venue in config.venues}
+    requested = args.venues or [venue.id for venue in config.venues]
+    # A futures wallet lists no spot markets: it is a place to hedge, not a
+    # venue to screen.
+    venue_ids = [
+        v
+        for v in requested
+        if v not in configured or configured[v].market_type == SPOT_MARKET
+    ]
+    if len(venue_ids) < 2:
+        raise SystemExit("need at least two spot venues")
+    hedge_venues = (
+        [v for v in config.venues if v.derivatives] if args.perp != "off" else []
+    )
+    if args.perp != "off" and not hedge_venues:
+        # Nothing declares an account type yet: the perpetuals a spot venue
+        # lists are still worth pricing, but none can be marked unified.
+        hedge_venues = [configured[v] for v in venue_ids if v in configured]
+        logger.info(
+            "no venue declares derivatives; looking up perpetuals on the spot "
+            "venues' own listings, none marked unified"
+        )
     fees = {
         (maker, taker): fee_budget_bps(
             configured.get(maker), configured.get(taker), args.fee_bps
@@ -1041,19 +1556,52 @@ async def run(args: argparse.Namespace) -> list[PairScore]:
             with open(args.json, "w") as fh:
                 json.dump([asdict(s) for s in scores], fh, indent=1)
         return scores
-    screener = Screener(public_clients(config, venue_ids, args.rate_limit_ms))
+    client_ids = venue_ids + [v.id for v in hedge_venues if v.id not in venue_ids]
+    screener = Screener(
+        public_clients(config, client_ids, args.rate_limit_ms), spot_venues=venue_ids
+    )
+    maker_fees = {
+        v: leg_fee_bps(
+            configured[v].maker_fee if v in configured else None, args.fee_bps
+        )
+        for v in venue_ids
+    }
     try:
         markets = await screener.load_markets()
-        symbols = common_symbols(markets, args.quote)
+        symbols = common_symbols({v: markets[v] for v in venue_ids}, args.quote)
         logger.info(f"{len(symbols)} {args.quote} spot symbols in common")
+        for venue in hedge_venues:
+            perps = perpetual_markets(markets[venue.id], args.quote)
+            for base, (symbol, size) in perps.items():
+                screener.add_hedge(
+                    base,
+                    HedgeSample(
+                        venue=venue.id,
+                        symbol=symbol,
+                        unified=venue.account == UNIFIED_ACCOUNT,
+                        taker_fee_bps=leg_fee_bps(venue.taker_fee, args.fee_bps),
+                        contract_size=size,
+                    ),
+                )
+            logger.info(f"{len(perps)} {args.quote} perpetuals on {venue.id}")
+        if args.perp in ("any", "unified"):
+            symbols = [
+                s
+                for s in symbols
+                if screener.hedged(s, unified_only=args.perp == "unified")
+            ]
+            logger.info(f"{len(symbols)} of them with a perpetual ({args.perp})")
         if args.symbols:
             symbols = [s for s in args.symbols if s in symbols]
         else:
             volumes = await screener.volumes(symbols)
             symbols = select_symbols(symbols, volumes, args.min_volume, args.top)
+        screener.keep_hedges_for(symbols)
+        now_ms = int(time.time() * 1000)
+        await screener.prime_hedges(now_ms)
         logger.info(f"sampling {len(symbols)} symbols for {args.minutes} min")
         await screener.collect(symbols, args.minutes * 60, args.interval)
-        scores = screener.scores(symbols, fees)
+        scores = screener.scores(symbols, fees, maker_fees, now_ms)
     finally:
         await screener.close()
     print(format_table(scores, args.rows))
@@ -1079,7 +1627,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         Parsed arguments.
     """
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--venues", nargs="*", help="CCXT ids; default: config")
+    parser.add_argument("--venues", nargs="*", help="venue ids; default: config")
     parser.add_argument("--quote", default="USDT")
     parser.add_argument("--symbols", nargs="*", help="sample only these symbols")
     parser.add_argument("--top", type=int, default=30, help="symbols to sample")
@@ -1089,6 +1637,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--fee-bps", type=float, default=DEFAULT_FEE_BPS)
     parser.add_argument("--rows", type=int, default=40, help="rows to print")
     parser.add_argument("--rate-limit-ms", type=int, help="per-client request gap")
+    parser.add_argument(
+        "--perp",
+        choices=("show", "any", "unified", "off"),
+        default="show",
+        help="perpetual columns: show them, keep only symbols with a "
+        "perpetual anywhere or on a unified account, or skip the lookup",
+    )
     parser.add_argument("--json", help="write every score here")
     parser.add_argument("--recorded", help="score this recording root instead")
     parser.add_argument("--start", help="--recorded: ISO 8601, inclusive")
