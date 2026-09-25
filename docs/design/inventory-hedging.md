@@ -639,3 +639,51 @@ each, so the venue's parameter names stay in config.
 
 Still to run: the unified venue once its key carries the management
 permission.
+
+## 14. Phase 2, 2026-09-25: the screener's hedge columns
+
+Built on `feat/inventory-hedging-phase-2`, before the position and funding
+feeds, because the feeds need a candidate to record and the candidate is
+chosen here.
+
+- For every spot symbol it samples, `market_screener` now finds the linear
+  perpetual of the same asset, settled in the quote, on every configured
+  derivatives venue: a `swap` entry or a `unified` account, each built as
+  a public client from its `exchange` class and `client_options`, so a
+  futures wallet is addressed at its futures endpoints and a unified
+  account carries the option CCXT needs. Until the private config declares
+  either, the perpetuals the spot venues themselves list are priced and
+  none is marked unified, which is the state of 2026-09-25.
+- The perpetual's book is sampled every round beside the spot books; its
+  funding rate and a week of its funding history are read once at the
+  start, through the `has` map, so a venue without one of the endpoints
+  leaves that part empty. `apps/shared/src/funding.py` holds the parsing,
+  the interval (reported, or inferred from the history's spacing where a
+  venue does not say) and the window sums, and is what the funding feed
+  of this phase reuses, so a candidate is selected and later monitored on
+  one arithmetic.
+- Per symbol one perpetual is chosen: a unified account first, then the
+  deeper book. It is scored against the maker venue's bid as the
+  cash-and-carry of section 8: `basis` is the median of the perpetual's
+  bid over the spot bid; `f/d` the current rate a day and `f/wk` the
+  trailing week's sum, positive paying the short; `entry` the basis less
+  the spot maker fee and the perpetual's taker fee; `rt/wk` a week's carry
+  less both fees twice, entered and exited at the same basis. Static fees
+  come from the venue config, half of `--fee-bps` per leg otherwise. The
+  JSON output carries the whole score, including the funding coverage in
+  hours, so a short history is visible.
+- `--perp unified` keeps only the symbols with a perpetual on a unified
+  account, which is what section 13.1 made the criterion for the next
+  candidate; `--perp any` keeps those with a perpetual anywhere; `--perp
+  off` skips the lookup. The ranking itself is unchanged: the spot edge
+  still orders the table, and the hedge columns say what holding the
+  inventory for it costs.
+
+A fifteen second run on 2026-09-25 against the two configured venues found
+some 1000 and 800 perpetuals listed, 383 of the 456 common spot symbols
+with one, funding history covering 160 hours at an 8 hour interval on the
+first venue asked, and the round trip on the busiest symbols between -8
+and -29 bps a week: on a large market the basis is a few bps against the
+build and the carry does not pay two taker fees, which is what section 8
+expects there. The recorded mode carries no hedge columns yet; the feeds
+that would record them come next in this phase.

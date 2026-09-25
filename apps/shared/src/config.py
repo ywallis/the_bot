@@ -283,6 +283,28 @@ class VenueConfig(msgspec.Struct, frozen=True):
         return (self.credentials or self.id).upper()
 
     @property
+    def client_options(self) -> dict[str, Any]:
+        """
+        Return the CCXT ``options`` a client of this venue is built with.
+
+        A ``swap`` venue sets ``defaultType`` so that every call on the
+        client addresses the futures account; an explicit ``defaultType``
+        in the venue's own options wins over that. Authenticated clients
+        and the public clients of the tools build from the same options,
+        so a tool tests the client the system runs.
+
+        Returns
+        -------
+        dict[str, Any]
+            A copy of ``options``, with ``defaultType`` added for a swap
+            venue.
+        """
+        options = dict(self.options)
+        if self.market_type == SWAP_MARKET:
+            options.setdefault("defaultType", SWAP_MARKET)
+        return options
+
+    @property
     def derivatives(self) -> bool:
         """
         Return whether contract symbols may be traded on this venue.
