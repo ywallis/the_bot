@@ -15,7 +15,9 @@ from apps.shared.src.fees import (
     fee_currency_for,
     fee_in_base,
     fee_schedule_from_client,
+    is_contract,
     schedule_for,
+    settle_of,
 )
 
 SYMBOL = "BTC/USDT"
@@ -272,3 +274,53 @@ def test_base_quote_rejects_malformed_symbols():
     for bad in ("BTCUSDT", "/USDT", "BTC/"):
         with pytest.raises(ValueError, match="BASE/QUOTE"):
             base_quote(bad)
+
+
+# Contracts -----------------------------------------------------------------
+
+
+def test_base_quote_drops_the_settle_suffix():
+    """A perpetual buys and pays in the same assets as its spot pair."""
+    assert base_quote("BTC/USDT:USDT") == ("BTC", "USDT")
+    assert settle_of("BTC/USDT:USDT") == "USDT"
+    assert settle_of("BTC/USDT") is None
+    assert is_contract("BTC/USDT:USDT")
+    assert not is_contract("BTC/USDT")
+
+
+def test_base_quote_rejects_an_empty_settle():
+    """A trailing colon is neither form."""
+    with pytest.raises(ValueError):
+        base_quote("BTC/USDT:")
+
+
+@pytest.mark.asyncio
+async def test_contract_size_is_read_on_contract_markets_only():
+    """A derivative carries its contract size; a spot market carries None."""
+    perp = "BTC/USDT:USDT"
+    client = fake_client(
+        markets={
+            SYMBOL: market(),
+            perp: market(symbol=perp, contract=True, contractSize=0.001),
+        },
+        has_fees=False,
+    )
+    event = await fee_schedule_from_client(
+        client, VenueConfig(id="venue_a", name="Venue A"), {SYMBOL, perp}, ts_recv=1
+    )
+    by_symbol = {e.symbol: e for e in event.symbols}
+    assert by_symbol[SYMBOL].contract_size is None
+    assert by_symbol[perp].contract_size == Decimal("0.001")
+
+
+@pytest.mark.asyncio
+async def test_a_contract_without_a_size_is_none_not_a_guess():
+    """A venue that hides the contract size gets no size invented for it."""
+    perp = "BTC/USDT:USDT"
+    client = fake_client(
+        markets={perp: market(symbol=perp, contract=True)}, has_fees=False
+    )
+    event = await fee_schedule_from_client(
+        client, VenueConfig(id="venue_a", name="Venue A"), {perp}, ts_recv=1
+    )
+    assert event.symbols[0].contract_size is None

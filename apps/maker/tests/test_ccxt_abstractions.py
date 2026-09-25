@@ -73,3 +73,27 @@ async def test_create_and_return_order_passes_post_only_through():
     await create_and_return_order(order, mock_client)
     params = mock_client.create_order.call_args.kwargs["params"]
     assert params == {"clientOrderId": "t-prefix_fmb_es"}
+
+
+@pytest.mark.asyncio
+async def test_create_and_return_order_passes_reduce_only_through():
+    """A reduce-only order reaches CCXT with its unified flag."""
+    order = OrderMessage(
+        kind=MessageType.ORDER,
+        strategy="dh_h",
+        exchange="venue_a_perp",
+        id="t-prefix_dh_h",
+        exchange_id="_",
+        pair="BASE/QUOTE:QUOTE",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        price=Decimal("1.5"),
+        amount=Decimal("10"),
+        reduce_only=True,
+    )
+    mock_client = AsyncMock()
+    mock_client.create_order.return_value = {"id": "1"}
+
+    await create_and_return_order(order, mock_client)
+    params = mock_client.create_order.call_args.kwargs["params"]
+    assert params == {"clientOrderId": "t-prefix_dh_h", "reduceOnly": True}

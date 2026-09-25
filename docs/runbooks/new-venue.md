@@ -117,6 +117,83 @@ and `TESTING=True` in `.env`:
    (`timeout -s TERM 480 ...`), and afterwards confirm on the venue that no
    order is left resting and reconcile fills against balances.
 
+## 7. Futures accounts
+
+A linear perpetual on a venue is a second `[[venues]]` entry when the
+exchange keeps spot and futures in separate wallets, and the same entry
+with `account = "unified"` when it offers one margin pool. Either way, run
+the tool against the contract symbol first:
+
+```bash
+uv run -m apps.maker.src.tools.venue_conformance <venue> <BASE/QUOTE:QUOTE> \
+    --market-type swap --place-orders
+```
+
+`--market-type swap` points every client at the futures endpoints and adds
+these checks:
+
+| Check | What it verifies | If it fails |
+|---|---|---|
+| swap market | The symbol is a linear contract; reports contract size, minimum amount and precision | Use the CCXT contract symbol. Inverse contracts are out of scope. |
+| swap has map | `fetchPositions`, `fetchFundingRate` and the account setters exist in CCXT | Without positions and funding the hedge cannot be reconciled on this venue. |
+| swap fetch_positions | The account may read its futures positions at all | Usually the futures API is closed to the account or the key lacks futures permission. Nothing else works until this passes. |
+| swap set_leverage | The leverage declared for the venue in config can be set | The broker fails the venue on this at start. Lower the leverage or set it by hand and remove it from config. |
+| swap place order / client order id | A post-only limit far below the bid is accepted under our `t-<stamp>_<strategy>_<slot>` id, read back with that id, and cancelled | If the venue alters the id the order watcher cannot attribute fills. If the cancel fails, cancel by hand now. |
+| swap reduce_only | A reduce-only order on a flat account is refused | An acceptance means the venue ignores the flag; an unwinding hedge cannot rely on it there. |
+
+Without `--place-orders` the tool reads and never writes. Clients are
+built with the `options` of the venue as declared in config, so the tool
+tests what the system will run; `--option key=value` adds or overrides
+one for the run. Three things a first run is likely to hit:
+
+- **Unified account, classic endpoints refused.** Every private call
+  fails with the venue's "unified account mode" error until CCXT is told
+  the account type through the venue's own option (`--option uta=true` on
+  a venue whose CCXT class calls it that). Put the same option under the
+  venue's `options` in config and set `account = "unified"`.
+- **Permission on the key.** Reading account settings and setting
+  leverage or position mode can need a separate permission from trading
+  ("manage" on one venue). Grant it, and check what else it covers, before
+  the broker's start-up setup can run.
+- **Closed order endpoints.** A venue can serve every query endpoint and
+  still refuse to place: one configured venue documents its futures order
+  and cancel endpoints as closed to API users, and the test order comes
+  back "contract not activated". Such a venue cannot host a hedge.
+- **Position mode.** An order refused with a "position mode" error while
+  the same order with CCXT's `hedged` param is accepted means the account
+  is in hedge mode. The broker sets one-way mode at start once the key
+  may; until then set it by hand in the venue's interface.
+
+Then declare the venue:
+
+```toml
+[[venues]]
+id = "venueaperp"          # keys every stream and order
+ccxt_id = "venuea"         # the CCXT class, shared with the spot entry
+name = "Venue A linear perpetuals"
+market_type = "swap"
+credentials = "venuea"     # only if it shares the spot entry's key
+fee_currency = "quote"
+margin_mode = "cross"
+leverage = 2
+# Only for a venue that keeps leverage per margin type and position side
+# and refuses a call without them; one leverage call per entry, with the
+# venue's own parameter names.
+# leverage_params = [{ openType = 2, positionType = 1 }, { openType = 2, positionType = 2 }]
+```
+
+Subscriptions on it must use contract symbols. At start the broker sets
+the margin mode, leverage and one-way position mode on every contract
+symbol the venue trades and exits if the venue refuses, which the
+orchestrator turns into a full wind-down. A unified account is one entry
+with `account = "unified"`, takes both symbol kinds, and needs no
+`market_type`; put the venue's own account-type switch, if CCXT has one,
+under `options`.
+
+Keys for a futures account carry trade permission on the futures wallet
+and nothing else: no withdrawal, and no transfer unless the design is
+changed to want one (`docs/design/inventory-hedging.md`, section 4).
+
 ## Known venue quirks
 
 - **Bitget**: full-depth book checksum failed on every ALPH/USDT update with

@@ -119,6 +119,10 @@ async def create_and_return_order(
     params: dict[str, object] = {"clientOrderId": order["id"]}
     if order.get("post_only"):
         params["postOnly"] = True
+    # CCXT's unified reduce-only flag for contract markets: the venue
+    # shrinks the position and refuses to open one the other way.
+    if order.get("reduce_only"):
+        params["reduceOnly"] = True
 
     for attempt in range(5):
         try:

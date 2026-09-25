@@ -38,6 +38,45 @@ KNOWN_FEEDS: frozenset[str] = frozenset({BOOK_FEED, TRADE_FEED})
 # token regardless of side.
 FEE_POLICY_KEYWORDS: frozenset[str] = frozenset({"quote", "received", "base"})
 
+# What a venue entry trades. ``spot`` is the default and what every venue
+# was until derivatives arrived. ``swap`` is a linear perpetual account:
+# CCXT's ``defaultType`` is set accordingly and every symbol on the venue
+# must carry a settle suffix (``BASE/QUOTE:QUOTE``). See
+# ``docs/design/inventory-hedging.md`` section 3.
+SPOT_MARKET = "spot"
+SWAP_MARKET = "swap"
+MARKET_TYPES: frozenset[str] = frozenset({SPOT_MARKET, SWAP_MARKET})
+
+# How a venue's wallets are arranged. ``classic`` keeps spot and derivatives
+# in separate wallets, so a perpetual is a second venue entry with
+# ``market_type = "swap"``. ``unified`` is one margin pool where spot
+# holdings collateralise a short, so one entry serves both symbol kinds.
+CLASSIC_ACCOUNT = "classic"
+UNIFIED_ACCOUNT = "unified"
+ACCOUNT_TYPES: frozenset[str] = frozenset({CLASSIC_ACCOUNT, UNIFIED_ACCOUNT})
+
+MARGIN_MODES: frozenset[str] = frozenset({"cross", "isolated"})
+
+
+def is_contract(symbol: str) -> bool:
+    """
+    Return whether a CCXT symbol names a derivative rather than a spot market.
+
+    CCXT spells a linear perpetual ``BASE/QUOTE:SETTLE``; the colon and the
+    settlement currency after it are what distinguish it from ``BASE/QUOTE``.
+
+    Parameters
+    ----------
+    symbol : str
+        CCXT symbol.
+
+    Returns
+    -------
+    bool
+        True for a contract symbol.
+    """
+    return ":" in symbol
+
 
 class ConfigError(Exception):
     """Raised when the configuration is missing or inconsistent."""
@@ -155,7 +194,10 @@ class VenueConfig(msgspec.Struct, frozen=True):
     Attributes
     ----------
     id : str
-        CCXT short id, e.g. ``gate``.
+        Venue id, unique in the config. It keys every stream, client and
+        order, and prefixes the credential variables in the environment.
+        It is the CCXT short id (e.g. ``gate``) unless ``ccxt_id`` says
+        otherwise.
     name : str
         Human readable name.
     options : dict[str, Any]
@@ -172,6 +214,34 @@ class VenueConfig(msgspec.Struct, frozen=True):
     taker_fee : float | None
         Static taker fee rate as a fraction of traded value, see
         ``maker_fee``.
+    ccxt_id : str | None
+        CCXT exchange class to build the client from, when it differs from
+        ``id``. This is how one exchange appears twice in the config: once
+        as its spot wallet and once as its futures wallet.
+    market_type : str
+        One of ``MARKET_TYPES``. ``swap`` sets CCXT's ``defaultType`` and
+        requires every symbol subscribed on the venue to be a contract.
+    account : str
+        One of ``ACCOUNT_TYPES``. ``unified`` declares one margin pool for
+        spot and derivatives, on which both symbol kinds may be subscribed.
+        CCXT's own switch for the account type, where the venue has one,
+        goes in ``options`` like any other client option.
+    margin_mode : str | None
+        One of ``MARGIN_MODES``, set on every contract symbol at broker
+        start. Only meaningful on a derivatives venue.
+    leverage : int | None
+        Leverage set on every contract symbol at broker start. Only
+        meaningful on a derivatives venue.
+    leverage_params : tuple[dict[str, Any], ...]
+        Extra CCXT parameters for the leverage call, one call per entry.
+        Some venues set leverage per margin type and position side and
+        refuse a call without them; declaring the venue's own parameter
+        names here keeps that out of the code. Empty means one call with
+        no parameters.
+    credentials : str | None
+        Prefix of the ``_KEY``, ``_SECRET`` and ``_PASSWORD`` environment
+        variables, uppercased. Defaults to ``id``, so two entries for one
+        exchange each read their own key unless told to share one.
     """
 
     id: str
@@ -180,6 +250,68 @@ class VenueConfig(msgspec.Struct, frozen=True):
     fee_currency: str = "quote"
     maker_fee: float | None = None
     taker_fee: float | None = None
+    ccxt_id: str | None = None
+    market_type: str = SPOT_MARKET
+    account: str = CLASSIC_ACCOUNT
+    margin_mode: str | None = None
+    leverage: int | None = None
+    leverage_params: tuple[dict[str, Any], ...] = ()
+    credentials: str | None = None
+
+    @property
+    def exchange(self) -> str:
+        """
+        Return the CCXT exchange class name the client is built from.
+
+        Returns
+        -------
+        str
+            ``ccxt_id`` if set, else ``id``.
+        """
+        return self.ccxt_id or self.id
+
+    @property
+    def env_prefix(self) -> str:
+        """
+        Return the uppercased prefix of this venue's credential variables.
+
+        Returns
+        -------
+        str
+            ``credentials`` if set, else ``id``, uppercased.
+        """
+        return (self.credentials or self.id).upper()
+
+    @property
+    def derivatives(self) -> bool:
+        """
+        Return whether contract symbols may be traded on this venue.
+
+        Returns
+        -------
+        bool
+            True for a ``swap`` venue or a ``unified`` account.
+        """
+        return self.market_type == SWAP_MARKET or self.account == UNIFIED_ACCOUNT
+
+    def accepts(self, symbol: str) -> bool:
+        """
+        Return whether a symbol belongs on this venue.
+
+        Parameters
+        ----------
+        symbol : str
+            CCXT symbol.
+
+        Returns
+        -------
+        bool
+            A unified account takes both kinds; a spot venue takes spot
+            symbols only and a swap venue contract symbols only.
+        """
+        if self.account == UNIFIED_ACCOUNT:
+            return True
+        return is_contract(symbol) == (self.market_type == SWAP_MARKET)
 
 
 class Subscription(msgspec.Struct, frozen=True):
@@ -320,6 +452,30 @@ class AppConfig(msgspec.Struct, frozen=True):
             Venue ids.
         """
         return {v.id for v in self.venues}
+
+    def venue(self, venue_id: str) -> VenueConfig:
+        """
+        Return a declared venue by id.
+
+        Parameters
+        ----------
+        venue_id : str
+            The venue id.
+
+        Returns
+        -------
+        VenueConfig
+            The venue.
+
+        Raises
+        ------
+        KeyError
+            If no venue has that id.
+        """
+        for venue in self.venues:
+            if venue.id == venue_id:
+                return venue
+        raise KeyError(venue_id)
 
     def active_strategies(self, production: bool | None = None) -> list[StrategyConfig]:
         """
@@ -546,6 +702,54 @@ def _validate_fee_policy(venue: VenueConfig) -> None:
             )
 
 
+def _validate_markets(venue: VenueConfig) -> None:
+    """
+    Check a venue's market type, account type and derivatives settings.
+
+    Parameters
+    ----------
+    venue : VenueConfig
+        The venue.
+
+    Raises
+    ------
+    ConfigError
+        If a keyword is unknown, or leverage or a margin mode is declared
+        on a venue that cannot trade contracts.
+    """
+    if venue.market_type not in MARKET_TYPES:
+        raise ConfigError(
+            f"Venue {venue.id!r} has invalid market_type {venue.market_type!r}; "
+            f"use one of {sorted(MARKET_TYPES)}"
+        )
+    if venue.account not in ACCOUNT_TYPES:
+        raise ConfigError(
+            f"Venue {venue.id!r} has invalid account {venue.account!r}; "
+            f"use one of {sorted(ACCOUNT_TYPES)}"
+        )
+    if venue.margin_mode is not None and venue.margin_mode not in MARGIN_MODES:
+        raise ConfigError(
+            f"Venue {venue.id!r} has invalid margin_mode {venue.margin_mode!r}; "
+            f"use one of {sorted(MARGIN_MODES)}"
+        )
+    if venue.leverage is not None and venue.leverage < 1:
+        raise ConfigError(
+            f"Venue {venue.id!r} has invalid leverage {venue.leverage!r}; "
+            "it is a whole multiple of 1"
+        )
+    if venue.leverage_params and venue.leverage is None:
+        raise ConfigError(
+            f"Venue {venue.id!r} declares leverage_params without a leverage"
+        )
+    if not venue.derivatives and (
+        venue.leverage is not None or venue.margin_mode is not None
+    ):
+        raise ConfigError(
+            f"Venue {venue.id!r} declares leverage or margin_mode but trades "
+            "spot only; set market_type = 'swap' or account = 'unified'"
+        )
+
+
 def _validate(config: AppConfig) -> None:
     """
     Check cross-field invariants.
@@ -558,12 +762,16 @@ def _validate(config: AppConfig) -> None:
     Raises
     ------
     ConfigError
-        On duplicate identifiers within a production group, references to
-        undeclared venues or unknown feed names.
+        On duplicate venue or strategy identifiers, references to
+        undeclared venues, unknown feed names, or a symbol subscribed on a
+        venue whose market type cannot trade it.
     """
     venue_ids = config.venue_ids
+    if len(venue_ids) != len(config.venues):
+        raise ConfigError("Duplicate venue id")
     for venue in config.venues:
         _validate_fee_policy(venue)
+        _validate_markets(venue)
     for production in (True, False):
         seen: set[str] = set()
         for strategy in config.active_strategies(production):
@@ -580,6 +788,16 @@ def _validate(config: AppConfig) -> None:
                 raise ConfigError(
                     f"Strategy {strategy.identifier!r} subscribes to undeclared "
                     f"venue {sub.venue!r}"
+                )
+            venue = config.venue(sub.venue)
+            if not venue.accepts(sub.symbol):
+                kind = "a contract" if is_contract(sub.symbol) else "a spot"
+                raise ConfigError(
+                    f"Strategy {strategy.identifier!r} subscribes to {kind} symbol "
+                    f"{sub.symbol!r} on venue {sub.venue!r}, whose market_type is "
+                    f"{venue.market_type!r}; contract symbols carry a settle suffix "
+                    "(BASE/QUOTE:QUOTE) and belong on a swap venue or a unified "
+                    "account"
                 )
             unknown = set(sub.feeds) - KNOWN_FEEDS
             if unknown:
