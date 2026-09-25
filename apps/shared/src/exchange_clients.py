@@ -14,7 +14,7 @@ import ccxt.pro as ccxt  # pyright: ignore[reportMissingTypeStubs]
 from dotenv import load_dotenv
 
 import apps.shared.src.logging_config as logging_config
-from apps.shared.src.config import SWAP_MARKET, VenueConfig, load_app_config
+from apps.shared.src.config import VenueConfig, load_app_config
 from apps.shared.src.errors import RequestTimeout
 from apps.shared.src.structs import CustomExchange
 
@@ -78,9 +78,7 @@ def ccxt_params(
     params: dict[str, object] = {"apiKey": key, "secret": secret}
     if requires_password:
         params["password"] = password
-    options = dict(venue.options)
-    if venue.market_type == SWAP_MARKET:
-        options.setdefault("defaultType", SWAP_MARKET)
+    options = venue.client_options
     if options:
         params["options"] = options
     return params
