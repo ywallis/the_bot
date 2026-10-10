@@ -179,6 +179,22 @@ class CustomExchange(Protocol):
         """
         ...
 
+    async def un_watch_order_book(self, symbol: str) -> Any:
+        """
+        Drop the order book subscription and its local book.
+
+        Parameters
+        ----------
+        symbol : str
+            The trading pair symbol.
+
+        Returns
+        -------
+        Any
+            Whatever the venue's unsubscribe resolves with.
+        """
+        ...
+
     async def watch_trades(self, symbol: str) -> list[dict[str, Any]]:
         """
         Watch public trades for a symbol.
