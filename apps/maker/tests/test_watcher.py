@@ -89,6 +89,48 @@ async def test_watch_ob_resubscribes_without_closing(monkeypatch):
     assert await redis.xlen("md:book:bitget:ALPH/USDT") == 1
 
 
+def crossed_book() -> dict:
+    """Return a book whose stale best ask sits below its best bid."""
+    book = order_book(1.10)
+    book["asks"] = [[1.05, 1.0], *book["asks"]]
+    return book
+
+
+@pytest.mark.asyncio
+async def test_watch_ob_never_publishes_a_crossed_book(monkeypatch):
+    """A crossed book is skipped, and the loop goes on with the next update."""
+    monkeypatch.setattr(watcher, "CROSSED_RESYNC_S", 60.0)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+    client = FakeClient("mexc", [order_book(1.0), crossed_book(), order_book(1.2)])
+
+    with pytest.raises(StopWatching):
+        await watcher.watch_ob(client, "ALPH/USDT", redis, publisher, depth=2)
+
+    entries = await redis.xrange("md:book:mexc:ALPH/USDT")
+    bids = [events.from_stream_fields(e[1]).bids[0][0] for e in entries]
+    assert bids == [1.0, 1.2]
+    assert client.unwatched == []
+
+
+@pytest.mark.asyncio
+async def test_watch_ob_resyncs_a_book_that_stays_crossed(monkeypatch):
+    """A book crossed for longer than the window is dropped and resubscribed."""
+    monkeypatch.setattr(watcher, "CROSSED_RESYNC_S", 0.0)
+    monkeypatch.setattr(watcher, "RETRY_DELAY_S", 0)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+    client = FakeClient("mexc", [crossed_book(), order_book(1.0)])
+    client.orderbooks["ALPH/USDT"] = object()
+
+    with pytest.raises(StopWatching):
+        await watcher.watch_ob(client, "ALPH/USDT", redis, publisher, depth=2)
+
+    assert client.unwatched == ["ALPH/USDT"]
+    assert "ALPH/USDT" not in client.orderbooks
+    assert await redis.xlen("md:book:mexc:ALPH/USDT") == 1
+
+
 @pytest.mark.asyncio
 async def test_watch_trades_drops_replayed_cache(monkeypatch):
     """Trades replayed after a resubscription are published only once."""
@@ -185,3 +227,40 @@ def test_build_tasks_follows_subscriptions():
     for t in tasks:
         t.close()
     assert names == ["watch_ob", "watch_ob", "watch_trades"]
+
+
+@pytest.mark.asyncio
+async def test_publish_trades_skips_a_trade_without_price():
+    """A trade CCXT parsed without a price or size is dropped, not fatal."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+    good = {"id": "1", "timestamp": 1, "side": "buy", "price": 1.0, "amount": 2.0}
+    bad = {"id": "2", "timestamp": 2, "side": "buy", "price": None, "amount": 2.0}
+    published = await watcher.publish_trades(
+        redis, publisher, "mexc", "ALPH/USDT", [bad, good], 1, None
+    )
+    assert published == 1
+    assert await redis.xlen("md:trade:mexc:ALPH/USDT") == 1
+
+
+@pytest.mark.asyncio
+async def test_publish_trades_reads_the_raw_price_ccxt_missed():
+    """A unified-account trade whose price CCXT left empty takes it from info."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+    trade = {
+        "id": "1",
+        "timestamp": 1,
+        "side": "sell",
+        "price": None,
+        "amount": 4.0,
+        "info": {"i": "1", "p": "1.5", "v": "4", "S": "sell", "T": "1"},
+    }
+    assert (
+        await watcher.publish_trades(
+            redis, publisher, "mexc", "ALPH/USDT", [trade], 1, None
+        )
+        == 1
+    )
+    entries = await redis.xrange("md:trade:mexc:ALPH/USDT")
+    assert events.from_stream_fields(entries[0][1]).price == 1.5

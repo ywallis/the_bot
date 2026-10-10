@@ -50,6 +50,13 @@ RECONNECT_ERRORS: tuple[type[BaseException], ...] = (NetworkError,)
 RETRY_DELAY_S = 0.5
 # Trades remembered per stream to drop the cache CCXT replays on resubscribe.
 TRADE_DEDUPE_SIZE = 2000
+# Seconds a venue's local book may stay crossed before it is dropped and
+# resubscribed. A book whose best bid is above its best ask has missed
+# the delta that removed a level: a recording of 2026-09-21 held a stale ask
+# for three hours while the price rose 15% through it, and every strategy
+# priced off it. A crossed book is never published; one that stays crossed
+# this long is rebuilt from a fresh snapshot.
+CROSSED_RESYNC_S = 2.0
 
 
 async def publish_book(
@@ -155,6 +162,17 @@ async def publish_trades(
     """
     fresh: list[dict[str, Any]] = []
     for trade in trades:
+        if trade.get("price") is None:
+            # CCXT 4.5.77 to 4.5.85 parse the unified-account public trade
+            # message's size from "v" but look for its price under "P" while
+            # the message carries "p", so every trade came without a price
+            # and the whole feed was lost on 2026-10-10.
+            raw_price = (trade.get("info") or {}).get("p")
+            if raw_price is not None:
+                trade = {**trade, "price": float(raw_price)}
+        if trade.get("price") is None or trade.get("amount") is None:
+            logger.warning(f"Skipping a {venue} {symbol} trade without price or size")
+            continue
         if seen is not None:
             key = trade_key(trade)
             if key in seen:
@@ -172,6 +190,45 @@ async def publish_trades(
             publisher.xadd(pipe, event)
         await pipe.execute()
     return len(fresh)
+
+
+def is_crossed(order_book: dict[str, Any]) -> bool:
+    """
+    Tell whether a venue's own book has its best bid above its best ask.
+
+    Parameters
+    ----------
+    order_book : dict[str, Any]
+        CCXT unified order book.
+
+    Returns
+    -------
+    bool
+        True if both sides are present and the best bid is above the best ask.
+    """
+    bids = order_book.get("bids") or []
+    asks = order_book.get("asks") or []
+    return bool(bids and asks) and bids[0][0] > asks[0][0]
+
+
+async def resync_book(client: CustomExchange, ticker: str) -> None:
+    """
+    Drop the local book of a ticker so the next watch starts from a snapshot.
+
+    Parameters
+    ----------
+    client : CustomExchange
+        The exchange client.
+    ticker : str
+        The trading pair symbol.
+    """
+    try:
+        await client.un_watch_order_book(ticker)
+    except Exception as e:  # noqa: BLE001, the pop below is what matters
+        logger.warning(f"un_watch_order_book failed for {client.id} {ticker}: {e}")
+    orderbooks = getattr(client, "orderbooks", None)
+    if isinstance(orderbooks, dict):
+        orderbooks.pop(ticker, None)
 
 
 async def handle_feed_error(
@@ -235,10 +292,23 @@ async def watch_ob(
     depth : int
         Levels per side to publish.
     """
+    crossed_since: int | None = None
     while True:
         try:
             order_book = await client.watch_order_book(ticker)
             ts_recv = now_ns()
+            if is_crossed(order_book):
+                crossed_since = crossed_since or ts_recv
+                if ts_recv - crossed_since >= CROSSED_RESYNC_S * 1e9:
+                    logger.error(
+                        f"{client.id} {ticker} book crossed for "
+                        f"{CROSSED_RESYNC_S}s, resubscribing"
+                    )
+                    crossed_since = None
+                    await resync_book(client, ticker)
+                    await asyncio.sleep(RETRY_DELAY_S)
+                continue
+            crossed_since = None
             logger.debug(
                 f"Bid {order_book['bids'][0][0]} and ask {order_book['asks'][0][0]} "
                 f"on {client.name}"

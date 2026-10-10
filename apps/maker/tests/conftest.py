@@ -54,6 +54,8 @@ class FakeClient:
         self.has = {"fetchOrders": True} if has is None else has
         self.rest_calls: list[tuple[str, Any]] = []
         self.closed = 0
+        self.orderbooks: dict[str, Any] = {}
+        self.unwatched: list[str] = []
 
     async def _next(self):
         if not self._results:
@@ -66,6 +68,10 @@ class FakeClient:
     async def watch_order_book(self, symbol: str):
         """Return the next scripted order book."""
         return await self._next()
+
+    async def un_watch_order_book(self, symbol: str):
+        """Record that the book subscription was dropped."""
+        self.unwatched.append(symbol)
 
     async def watch_trades(self, symbol: str):
         """Return the next scripted trade batch."""
