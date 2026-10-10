@@ -89,7 +89,7 @@ class CustomExchange(Protocol):
         type: str,
         side: str,
         amount: float,
-        price: float,
+        price: float | None,
         params: dict[str, Any] | None = None,
     ) -> dict[str, str]:
         """
@@ -105,8 +105,8 @@ class CustomExchange(Protocol):
             The side of the order ('buy' or 'sell').
         amount : float
             The amount to trade.
-        price : float
-            The price for limit orders.
+        price : float | None
+            The price for limit orders; None for a market order sized by quantity.
         params : dict[str, str] | None, optional
             Additional parameters for the order.
 

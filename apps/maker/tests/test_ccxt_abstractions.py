@@ -75,6 +75,45 @@ async def test_create_and_return_order_passes_post_only_through():
     assert params == {"clientOrderId": "t-prefix_fmb_es"}
 
 
+def market_order(side: OrderSide) -> OrderMessage:
+    """Return a market hedge priced at the fill it offsets."""
+    return OrderMessage(
+        kind=MessageType.ORDER,
+        strategy="matching",
+        exchange="venue_a",
+        id="t-prefix_matching",
+        exchange_id="_",
+        pair="BASE/QUOTE",
+        side=side,
+        order_type=OrderType.MARKET,
+        price=Decimal("0.5"),
+        amount=Decimal("10"),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("side", "options", "price"),
+    [
+        (OrderSide.SELL, {}, None),
+        (OrderSide.BUY, {}, 0.5),
+        (OrderSide.BUY, {"createMarketBuyOrderRequiresPrice": False}, None),
+        (
+            OrderSide.BUY,
+            {"createOrder": {"createMarketBuyOrderRequiresPrice": False}},
+            None,
+        ),
+    ],
+)
+async def test_market_orders_carry_a_price_only_where_required(side, options, price):
+    """A price would turn the order into a cost order, so it goes only where needed."""
+    mock_client = AsyncMock()
+    mock_client.options = options
+    mock_client.create_order.return_value = {"id": "1"}
+    await create_and_return_order(market_order(side), mock_client)
+    assert mock_client.create_order.call_args.kwargs["price"] == price
+
+
 @pytest.mark.asyncio
 async def test_create_and_return_order_passes_reduce_only_through():
     """A reduce-only order reaches CCXT with its unified flag."""
