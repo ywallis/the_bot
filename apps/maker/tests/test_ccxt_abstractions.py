@@ -115,6 +115,23 @@ async def test_market_orders_carry_a_price_only_where_required(side, options, pr
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("side", "price"), [(OrderSide.BUY, 0.51), (OrderSide.SELL, 0.49)]
+)
+async def test_market_orders_go_as_ioc_limits_where_configured(side, price):
+    """A venue with marketAsLimitBps gets an IOC limit that far through the price."""
+    mock_client = AsyncMock()
+    mock_client.options = {"marketAsLimitBps": 200}
+    mock_client.create_order.return_value = {"id": "1"}
+    await create_and_return_order(market_order(side), mock_client)
+    kwargs = mock_client.create_order.call_args.kwargs
+    assert kwargs["type"] == "limit"
+    assert kwargs["price"] == pytest.approx(price)
+    assert kwargs["amount"] == 10.0
+    assert kwargs["params"]["timeInForce"] == "IOC"
+
+
+@pytest.mark.asyncio
 async def test_create_and_return_order_passes_reduce_only_through():
     """A reduce-only order reaches CCXT with its unified flag."""
     order = OrderMessage(

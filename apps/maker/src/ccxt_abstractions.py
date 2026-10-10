@@ -85,6 +85,33 @@ async def cancel_order_return_confirmation(
     )
 
 
+def market_as_limit_bps(client: CustomExchange) -> float | None:
+    """
+    Return how far through its price a market order goes as a limit, if so.
+
+    Some accounts take a market order's size in the quote currency on one
+    side only, and CCXT passes the base amount unchanged: a 7 quote unit
+    hedge went out as 328 and was refused for insufficient balance. A venue
+    whose options set ``marketAsLimitBps`` gets every market order as an
+    immediate-or-cancel limit that many basis points through its price.
+
+    Parameters
+    ----------
+    client : CustomExchange
+        The CCXT exchange client.
+
+    Returns
+    -------
+    float | None
+        The distance in basis points, or None to send market orders as such.
+    """
+    options = getattr(client, "options", None)
+    if not isinstance(options, dict):
+        return None
+    value = options.get("marketAsLimitBps")
+    return None if value is None else float(value)
+
+
 def market_order_needs_price(client: CustomExchange, order: OrderMessage) -> bool:
     """
     Tell whether a market order must reach CCXT with a price.
@@ -160,7 +187,16 @@ async def create_and_return_order(
         params["reduceOnly"] = True
 
     price: float | None = float(order["price"])
-    if order_type == "market" and not market_order_needs_price(client, order):
+    limit_bps = market_as_limit_bps(client)
+    if order_type == "market" and limit_bps is not None:
+        # The venue cannot take a market order in base units, so the order
+        # goes as a limit through the book that cannot rest: it fills what
+        # the book holds within limit_bps of its price and no further.
+        order_type = "limit"
+        through = limit_bps / 10_000
+        price *= 1 + through if order["side"] == OrderSide.BUY else 1 - through
+        params["timeInForce"] = "IOC"
+    elif order_type == "market" and not market_order_needs_price(client, order):
         # Given a price, some venues' CCXT classes turn a market order into
         # a quote-cost order of amount times price. A hedge carries the
         # maker fill's price, and when the market had run away from it the
