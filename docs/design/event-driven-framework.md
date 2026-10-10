@@ -1008,3 +1008,59 @@ harvestable at fee+30, so that offset was not as persistent as it looked;
 the second candidate held at 58k an hour with an 18 bps offset and a 53 bps
 maker spread, and a third held at 15k. A candidate wants a day of recording
 before it is quoted, not an hour.
+
+## 15. Sweeps are informed, 2026-10-10
+
+The screener measures how much volume prints past a quote. It cannot say
+what a fill caught that way is worth once the taker venue has moved, and
+that is the whole question for a hedged maker. `apps/maker/src/tools/fill_sim.py`
+answers it from a recording: a quote an edge past the taker touch, priced
+off the taker book as it stood 300 ms earlier, fills only on a maker print
+strictly through it and is hedged 600 ms later against the taker book,
+walking depth, net of both fees. Run with `--hourly` it shows whether a
+result holds hour by hour or rests on one episode.
+
+What it found:
+
+- Over twelve clean hours of 2026-09-20/21 and over the recordings of
+  2026-10-10, fills within 20 to 40 bps of the taker touch lose 15 to 45
+  bps a fill on almost every market and in both directions. The median
+  sweep is benign; the mean is not, because a tail of fills meets a taker
+  venue that has moved 50 to 900 bps by the time the hedge lands.
+- The taker venue does not move after the sweep, it moves with it. Signed
+  with the sweep, its mid has moved 25 to 40 bps within 300 ms of the
+  maker print and barely more over the next 30 seconds. One actor sweeps
+  both venues within tens of milliseconds, so there is neither a warning
+  to pull a quote on nor a lag to take at a 300 ms round trip.
+- One market and direction paid: the far venue as maker, its sell side 70
+  to 90 bps past the taker ask, +35 to +59 bps a fill after fees and
+  positive in 8 of 9 active hours, because aggressive buying there
+  overshoots and comes back. Its buy side is informed and rests wider.
+
+The 2026-09-21 recording also held a stale ask for three hours on both
+venues of one market while the price rose 15% through it, books crossed
+throughout. Every result before the crossing guard counted those hours as
+fills of 60 to 80 bps at 100% win; `fill_sim` ignores crossed books.
+
+### 15.1 Defects the live run surfaced, all fixed on the branch
+
+- The far venue's account now speaks the unified API, whose public trade
+  message carries its price under `p`; CCXT up to 4.5.85 reads `P`. Every
+  trade came without a price, the converter raised and the watcher took
+  down every feed of the venue. The watcher now reads the raw price when
+  CCXT leaves it empty and skips a trade it still cannot price.
+- The watcher published crossed books. It now drops them, and resubscribes
+  a book that stays crossed for `CROSSED_RESYNC_S`. It fired twice on the
+  first afternoon, after a socket drop, and both books came back clean.
+- Market orders always reached CCXT with a price, which some venue classes
+  turn into a quote-cost order. A hedge priced at a fill the market had
+  left bought 13.35 for a 14.5 fill. A market order now carries a price
+  only for a buy on a venue whose options do not set
+  `createMarketBuyOrderRequiresPrice = false`.
+- The strategy requoted a filled side into the sweep that filled it and
+  was filled again 600 ms later at the same price. The quoting engine now
+  has `refill_cooldown_s`, `price_tolerance_pct` (a 1 bp tolerance was
+  replacing nearly four quotes a second against a ten-a-second order
+  limit), per-side spreads, an inventory skew toward a target share,
+  `solvency_factor` and `max_book_age_s`.
+- The far venue charges 8 bps where its schedule says 10.
