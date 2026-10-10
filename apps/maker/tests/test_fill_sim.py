@@ -12,6 +12,7 @@ from apps.maker.src.tools.fill_sim import (
     bucket_bounds,
     fill_base,
     fill_decision,
+    min_tick,
     format_hourly,
     format_table,
     main,
@@ -304,3 +305,30 @@ def test_main_prints_tables(recording: Path, capsys: pytest.CaptureFixture[str])
     out = capsys.readouterr().out
     assert "maker_fee=10bps taker_fee=5bps" in out
     assert "2026-09-20T14" in out
+
+
+@pytest.mark.parametrize(
+    ("side", "print_price", "at_price", "expected"),
+    [
+        ("buy", 9.9, False, False),
+        ("buy", 9.9, True, True),
+        ("sell", 10.3, False, False),
+        ("sell", 10.3, True, True),
+    ],
+)
+def test_fill_decision_at_price(side, print_price, at_price, expected):
+    """A print at the quote's own price fills it only when asked to."""
+    quote = 9.9 if side == "buy" else 10.3
+    assert (
+        fill_decision(side, quote, print_price, 10.0, 10.2, False, 5.0, 1.0, at_price)
+        is expected
+    )
+
+
+def test_min_tick_takes_the_smallest_level_gap():
+    """The tick estimate narrows to the smallest gap between adjacent levels."""
+    tick = min_tick(None, [(1.0, 1.0), (0.98, 1.0)], [(1.01, 1.0), (1.03, 1.0)])
+    assert tick == pytest.approx(0.02)
+    tick = min_tick(tick, [(1.0, 1.0), (0.995, 1.0)], [])
+    assert tick == pytest.approx(0.005)
+    assert min_tick(None, [(1.0, 1.0)], []) is None
