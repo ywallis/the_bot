@@ -255,6 +255,12 @@ async def handle_feed_error(
         The same error, if it is not recoverable.
     """
     name = type(error).__name__
+    task = asyncio.current_task()
+    if isinstance(error, CancelledError) and task is not None and task.cancelling():
+        # The loop itself is being cancelled, not a future CCXT dropped. A
+        # loop that resubscribed here kept a watcher whose feeds had died
+        # alive on 2026-10-10: asyncio.run could never finish cancelling it.
+        raise error
     if isinstance(error, RESUBSCRIBE_ERRORS):
         logger.warning(
             f"{name} in {feed} for {client.id} {ticker}, resubscribing: {error}"
