@@ -276,3 +276,23 @@ async def test_close_within_gives_up_on_a_hung_close(monkeypatch):
         await asyncio.sleep(3600)
 
     await watcher.close_within(hang(), "hung client")
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_loop_ends_instead_of_resubscribing():
+    """Cancelling a watch loop ends it; only CCXT's own CancelledError resubscribes."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+
+    class Blocking(FakeClient):
+        async def watch_order_book(self, symbol: str):
+            await asyncio.sleep(3600)
+
+    client = Blocking("mexc", [])
+    task = asyncio.create_task(
+        watcher.watch_ob(client, "ALPH/USDT", redis, publisher, depth=2)
+    )
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, 1)
