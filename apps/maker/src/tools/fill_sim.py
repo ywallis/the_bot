@@ -156,6 +156,10 @@ class Params:
         Minimum time between two fills of one side at one edge, seconds.
     inside : bool
         Also quote when the price is inside the maker venue's best.
+    at_price : bool
+        Also fill on a print at the quote's own price. Live, those are most
+        fills: on a market whose tick is several bps the price trades down
+        to a quote and keeps going, and those are the fills that lose.
     """
 
     edges_bps: tuple[float, ...]
@@ -166,6 +170,7 @@ class Params:
     size: float = 13.0
     cool_s: float = 1.0
     inside: bool = False
+    at_price: bool = False
 
 
 @dataclass
@@ -304,6 +309,7 @@ def fill_decision(
     inside: bool,
     since_last_s: float,
     cool_s: float,
+    at_price: bool = False,
 ) -> bool:
     """
     Decide whether a print fills a resting quote.
@@ -326,20 +332,51 @@ def fill_decision(
         Seconds since this side at this edge last filled.
     cool_s : float
         Minimum seconds between two fills.
+    at_price : bool
+        Whether a print at the quote's price fills it too.
 
     Returns
     -------
     bool
-        True if the quote is placed, the print goes strictly through it and
-        the side is not cooling down.
+        True if the quote is placed, the print goes strictly through it (or
+        reaches it, with ``at_price``) and the side is not cooling down.
     """
     if since_last_s < cool_s:
         return False
     if side == "sell":
         placed = inside or quote > maker_ask
-        return placed and print_price > quote
+        return placed and (print_price > quote or (at_price and print_price == quote))
     placed = inside or quote < maker_bid
-    return placed and print_price < quote
+    return placed and (print_price < quote or (at_price and print_price == quote))
+
+
+def min_tick(
+    tick: float | None, bids: list[tuple[float, float]], asks: list[tuple[float, float]]
+) -> float | None:
+    """
+    Narrow an estimate of a venue's price tick with one more book.
+
+    Parameters
+    ----------
+    tick : float | None
+        The estimate so far.
+    bids : list[tuple[float, float]]
+        Bid levels.
+    asks : list[tuple[float, float]]
+        Ask levels.
+
+    Returns
+    -------
+    float | None
+        The smallest gap between adjacent levels seen, rounded to remove
+        float noise; None until a side has two levels.
+    """
+    for levels in (bids, asks):
+        for (a, _), (b, _) in zip(levels, levels[1:], strict=False):
+            gap = round(abs(a - b), 12)
+            if gap > 0 and (tick is None or gap < tick):
+                tick = gap
+    return tick
 
 
 def fill_base(size: float, quote: float, print_amount: float) -> float:
@@ -531,6 +568,12 @@ def simulate(
     # Taker books from the newest one at least qlat old up to now. Prints come
     # in time order, so a book older than that is never looked up again.
     taker_books: deque[BookEvent] = deque()
+    # Maker books over the same span: whether a quote rests behind the maker's
+    # best is decided when it is placed, not when a print reaches it. By then
+    # a falling market has made the quote the best bid, which is exactly the
+    # fill that loses.
+    maker_books: deque[BookEvent] = deque()
+    tick: float | None = None
     maker_book: BookEvent | None = None
     # Hedges due: (time due, edge bps, side, fill price, base, print time).
     pending: list[tuple[int, float, str, float, float, int]] = []
@@ -554,6 +597,8 @@ def simulate(
             result.fills.append(Fill(ts_fill, edge_bps, side, price, base, hedge, bps))
         while len(taker_books) > 1 and taker_books[1].ts_recv <= now - qlat_ns:
             taker_books.popleft()
+        while len(maker_books) > 1 and maker_books[1].ts_recv <= now - qlat_ns:
+            maker_books.popleft()
         if isinstance(event, BookEvent):
             if not book_valid(event.bids, event.asks):
                 continue
@@ -561,6 +606,8 @@ def simulate(
                 taker_books.append(event)
             elif event.venue == maker:
                 maker_book = event
+                maker_books.append(event)
+                tick = min_tick(tick, event.bids, event.asks)
             continue
         if event.venue != maker or event.side is None or maker_book is None:
             continue
@@ -575,17 +622,20 @@ def simulate(
                 priced_from.asks[0][0],
                 edge_bps / BPS,
             )
+            if params.at_price and tick is not None:
+                quote = round(quote / tick) * tick
             key = (edge_bps, side)
             since = now - last_fill.get(key, -(2**62))
             if not fill_decision(
                 side,
                 quote,
                 event.price,
-                maker_book.bids[0][0],
-                maker_book.asks[0][0],
+                maker_books[0].bids[0][0],
+                maker_books[0].asks[0][0],
                 params.inside,
                 since / NS,
                 cool_ns / NS,
+                params.at_price,
             ):
                 continue
             last_fill[key] = now
@@ -848,6 +898,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--inside", action="store_true", help="also quote inside the maker best"
     )
+    parser.add_argument(
+        "--at-price", action="store_true", help="also fill on a print at the quote"
+    )
     parser.add_argument("--hourly", action="store_true", help="add a per-hour table")
     parser.add_argument("--maker-fee-bps", type=float)
     parser.add_argument("--taker-fee-bps", type=float)
@@ -883,6 +936,7 @@ def main(argv: list[str]) -> None:
         size=args.size,
         cool_s=args.cool,
         inside=args.inside,
+        at_price=args.at_price,
     )
     events = merged_events(
         Path(args.root),
