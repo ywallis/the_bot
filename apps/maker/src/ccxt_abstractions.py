@@ -4,7 +4,7 @@ import asyncio
 import logging
 
 import apps.shared.src.logging_config as logging_config
-from apps.maker.src.enums import OrderType
+from apps.maker.src.enums import OrderSide, OrderType
 from apps.maker.src.errors import BrokerError
 from apps.maker.src.structs import CancellationMessage, OrderMessage
 from apps.shared.src.errors import (
@@ -85,6 +85,41 @@ async def cancel_order_return_confirmation(
     )
 
 
+def market_order_needs_price(client: CustomExchange, order: OrderMessage) -> bool:
+    """
+    Tell whether a market order must reach CCXT with a price.
+
+    A market sell never does. A market buy does unless the venue's options
+    say ``createMarketBuyOrderRequiresPrice = false``, at the top level or
+    under ``createOrder``: some CCXT classes refuse a market buy without a
+    price and only their code knows it, so the safe default is to pass one,
+    and a venue that sizes market buys by quantity says so in config.
+
+    Parameters
+    ----------
+    client : CustomExchange
+        The CCXT exchange client.
+    order : OrderMessage
+        The order.
+
+    Returns
+    -------
+    bool
+        True if the price has to be passed.
+    """
+    if order["side"] != OrderSide.BUY:
+        return False
+    options = getattr(client, "options", None)
+    if not isinstance(options, dict):
+        return True
+    key = "createMarketBuyOrderRequiresPrice"
+    nested = options.get("createOrder")
+    for scope in (options, nested if isinstance(nested, dict) else {}):
+        if scope.get(key) is False:
+            return False
+    return True
+
+
 async def create_and_return_order(
     order: OrderMessage, client: CustomExchange
 ) -> dict[str, str]:
@@ -124,6 +159,14 @@ async def create_and_return_order(
     if order.get("reduce_only"):
         params["reduceOnly"] = True
 
+    price: float | None = float(order["price"])
+    if order_type == "market" and not market_order_needs_price(client, order):
+        # Given a price, some venues' CCXT classes turn a market order into
+        # a quote-cost order of amount times price. A hedge carries the
+        # maker fill's price, and when the market had run away from it the
+        # hedge came out short: 13.35 bought for a 14.5 fill on 2026-10-10.
+        price = None
+
     for attempt in range(5):
         try:
             order_confirmation = await client.create_order(
@@ -131,7 +174,7 @@ async def create_and_return_order(
                 type=order_type,
                 side=order["side"].value,
                 amount=float(order["amount"]),
-                price=float(order["price"]),
+                price=price,
                 params=params,
             )
 
