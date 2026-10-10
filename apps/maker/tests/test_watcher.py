@@ -1,5 +1,6 @@
 """Tests for the market data feed handlers."""
 
+import asyncio
 import json
 
 import pytest
@@ -264,3 +265,14 @@ async def test_publish_trades_reads_the_raw_price_ccxt_missed():
     )
     entries = await redis.xrange("md:trade:mexc:ALPH/USDT")
     assert events.from_stream_fields(entries[0][1]).price == 1.5
+
+
+@pytest.mark.asyncio
+async def test_close_within_gives_up_on_a_hung_close(monkeypatch):
+    """A close that never returns is abandoned so the process can exit."""
+    monkeypatch.setattr(watcher, "CLOSE_TIMEOUT_S", 0.01)
+
+    async def hang() -> None:
+        await asyncio.sleep(3600)
+
+    await watcher.close_within(hang(), "hung client")

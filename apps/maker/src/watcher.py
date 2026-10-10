@@ -10,6 +10,7 @@ the migration.
 import asyncio
 import json
 import logging
+from collections.abc import Awaitable
 from typing import Any
 
 from redis.asyncio import ConnectionPool, Redis
@@ -397,6 +398,28 @@ def build_tasks(
     return tasks
 
 
+# Seconds a client or Redis close may take on the way out before the
+# process exits without it.
+CLOSE_TIMEOUT_S = 5.0
+
+
+async def close_within(closing: Awaitable[Any], what: str) -> None:
+    """
+    Await a close for at most ``CLOSE_TIMEOUT_S`` and swallow its failure.
+
+    Parameters
+    ----------
+    closing : Awaitable[Any]
+        The close to await.
+    what : str
+        What is being closed, for the log line.
+    """
+    try:
+        await asyncio.wait_for(closing, CLOSE_TIMEOUT_S)
+    except Exception as e:  # noqa: BLE001, the process is exiting either way
+        logger.error(f"Closing {what} failed or hung, exiting anyway: {e!r}")
+
+
 async def main(config: AppConfig, clients: dict[str, CustomExchange]) -> None:
     """
     Run all configured feed handlers until one fails.
@@ -419,9 +442,12 @@ async def main(config: AppConfig, clients: dict[str, CustomExchange]) -> None:
     try:
         await asyncio.gather(*tasks)
     finally:
+        # A close that never returns kept a watcher whose feeds had died
+        # alive on 2026-10-10, so the orchestrator never learned it should
+        # wind down and quotes rested on books nobody updated.
         for client in clients.values():
-            await client.close()
-        await redis.aclose()
+            await close_within(client.close(), f"{client.id} client")
+        await close_within(redis.aclose(), "redis")
 
 
 if __name__ == "__main__":
