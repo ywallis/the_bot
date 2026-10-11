@@ -1064,3 +1064,47 @@ fills of 60 to 80 bps at 100% win; `fill_sim` ignores crossed books.
   limit), per-side spreads, an inventory skew toward a target share,
   `solvency_factor` and `max_book_age_s`.
 - The far venue charges 8 bps where its schedule says 10.
+
+### 15.2 The live session of 2026-10-10 and 11
+
+The session ran from 09:00 UTC on 2026-10-10 to 06:07 UTC on 2026-10-11 on
+two sub-accounts worth 177.0 quote units at the start. It ended at 173.4,
+which is -3.6 or -2.0%.
+
+- The hedged maker strategies realized -0.91 over 25 fills, by the PnL
+  report. One fill on the first market lost 0.79: one actor swept both
+  venues within 40 ms in an 8% move. The fills on the second market lost
+  0.14. One fill at 100 bps after the edges were widened made +0.08.
+- The remainder, about -2.7, is not trading edge. It is the price move of
+  the base inventory held, up to 134 base units of one market, and the
+  spread and fees paid to set up and unwind inventory in three markets.
+
+What the live fills showed, and what changed `fill_sim` to match them:
+
+- A replace is a cancel then a place, serialised per slot in the order
+  manager, about one second each. In a fast market a quote therefore rests
+  up to two seconds after it was priced, not 300 ms. Run `fill_sim` with
+  `--qlat 2.0 --hlat 1.0`.
+- Most live fills print at the quote's own price. On a market whose tick
+  is several bps, the price trades down to the quote and keeps going.
+  Run `fill_sim` with `--at-price`.
+- The simulator judged whether a quote rests behind the maker's best at
+  the moment of the print. A falling market had by then made the quote the
+  best bid, so the simulator rejected the fills that lose. It now judges
+  placement when the quote is priced.
+
+With these three changes the simulator reproduces the live results. It
+then finds no market among the seventeen recorded, in either direction,
+with a positive expectancy at 60 bps or less. The only result that holds in
+both September and October is the first market's far-venue sell side at 100
+bps or more: about one fill an hour, with a fat tail.
+
+The lever is latency, not parameters. Two actions are open:
+
+1. Amend orders in one round trip where the venue supports it. The far
+   venue has `editOrder`; the near venue does not. The order manager must
+   then handle a fill that races the amend.
+2. Move the trading host closer to the venues, as section 14 plans.
+
+Measure the replace latency after either change. Then run `fill_sim` at
+that `--qlat` before quoting narrower edges.
