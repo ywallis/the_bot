@@ -103,12 +103,12 @@ async def test_watch_ob_never_publishes_a_crossed_book(monkeypatch):
     monkeypatch.setattr(watcher, "CROSSED_RESYNC_S", 60.0)
     redis = fakeredis.FakeRedis(decode_responses=True)
     publisher = StreamPublisher(maxlen=100)
-    client = FakeClient("mexc", [order_book(1.0), crossed_book(), order_book(1.2)])
+    client = FakeClient("venue_a", [order_book(1.0), crossed_book(), order_book(1.2)])
 
     with pytest.raises(StopWatching):
-        await watcher.watch_ob(client, "ALPH/USDT", redis, publisher, depth=2)
+        await watcher.watch_ob(client, "BASE/QUOTE", redis, publisher, depth=2)
 
-    entries = await redis.xrange("md:book:mexc:ALPH/USDT")
+    entries = await redis.xrange("md:book:venue_a:BASE/QUOTE")
     bids = [events.from_stream_fields(e[1]).bids[0][0] for e in entries]
     assert bids == [1.0, 1.2]
     assert client.unwatched == []
@@ -121,15 +121,15 @@ async def test_watch_ob_resyncs_a_book_that_stays_crossed(monkeypatch):
     monkeypatch.setattr(watcher, "RETRY_DELAY_S", 0)
     redis = fakeredis.FakeRedis(decode_responses=True)
     publisher = StreamPublisher(maxlen=100)
-    client = FakeClient("mexc", [crossed_book(), order_book(1.0)])
-    client.orderbooks["ALPH/USDT"] = object()
+    client = FakeClient("venue_a", [crossed_book(), order_book(1.0)])
+    client.orderbooks["BASE/QUOTE"] = object()
 
     with pytest.raises(StopWatching):
-        await watcher.watch_ob(client, "ALPH/USDT", redis, publisher, depth=2)
+        await watcher.watch_ob(client, "BASE/QUOTE", redis, publisher, depth=2)
 
-    assert client.unwatched == ["ALPH/USDT"]
-    assert "ALPH/USDT" not in client.orderbooks
-    assert await redis.xlen("md:book:mexc:ALPH/USDT") == 1
+    assert client.unwatched == ["BASE/QUOTE"]
+    assert "BASE/QUOTE" not in client.orderbooks
+    assert await redis.xlen("md:book:venue_a:BASE/QUOTE") == 1
 
 
 @pytest.mark.asyncio
@@ -238,10 +238,10 @@ async def test_publish_trades_skips_a_trade_without_price():
     good = {"id": "1", "timestamp": 1, "side": "buy", "price": 1.0, "amount": 2.0}
     bad = {"id": "2", "timestamp": 2, "side": "buy", "price": None, "amount": 2.0}
     published = await watcher.publish_trades(
-        redis, publisher, "mexc", "ALPH/USDT", [bad, good], 1, None
+        redis, publisher, "venue_a", "BASE/QUOTE", [bad, good], 1, None
     )
     assert published == 1
-    assert await redis.xlen("md:trade:mexc:ALPH/USDT") == 1
+    assert await redis.xlen("md:trade:venue_a:BASE/QUOTE") == 1
 
 
 @pytest.mark.asyncio
@@ -259,11 +259,11 @@ async def test_publish_trades_reads_the_raw_price_ccxt_missed():
     }
     assert (
         await watcher.publish_trades(
-            redis, publisher, "mexc", "ALPH/USDT", [trade], 1, None
+            redis, publisher, "venue_a", "BASE/QUOTE", [trade], 1, None
         )
         == 1
     )
-    entries = await redis.xrange("md:trade:mexc:ALPH/USDT")
+    entries = await redis.xrange("md:trade:venue_a:BASE/QUOTE")
     assert events.from_stream_fields(entries[0][1]).price == 1.5
 
 
@@ -288,9 +288,9 @@ async def test_a_cancelled_loop_ends_instead_of_resubscribing():
         async def watch_order_book(self, symbol: str):
             await asyncio.sleep(3600)
 
-    client = Blocking("mexc", [])
+    client = Blocking("venue_a", [])
     task = asyncio.create_task(
-        watcher.watch_ob(client, "ALPH/USDT", redis, publisher, depth=2)
+        watcher.watch_ob(client, "BASE/QUOTE", redis, publisher, depth=2)
     )
     await asyncio.sleep(0)
     task.cancel()
