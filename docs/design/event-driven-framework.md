@@ -1108,3 +1108,68 @@ The lever is latency, not parameters. Two actions are open:
 
 Measure the replace latency after either change. Then run `fill_sim` at
 that `--qlat` before quoting narrower edges.
+
+## 16. How to improve significantly, 2026-10-11
+
+### 16.1 What limits the result
+
+`fill_sim` ran with `--at-price` over 20 hours of seven recorded markets,
+both directions, 2026-10-10 09:40 to 2026-10-11 06:00 UTC, size 13. The
+table gives quote units per hour, summed over every market, direction and
+side. "Positive cells" sums only the cells with a positive mean.
+
+| quote staleness s | all cells, 30 bps | all cells, 60 bps | all cells, 100 bps | positive cells, 60 bps |
+| --- | --- | --- | --- | --- |
+| 2.0 (measured live) | -9.02 | -3.34 | -1.56 | 0.038 |
+| 1.0 | -6.89 | -2.62 | -1.25 | 0.033 |
+| 0.6 | -5.76 | -2.24 | -1.14 | 0.031 |
+| 0.3 | -4.41 | -1.73 | -0.86 | 0.032 |
+| 0.1 (colocated) | -2.87 | -0.98 | -0.39 | 0.076 |
+
+- Lower latency halves the losses. It does not make the strategy profitable.
+- A quote at the top of the maker book (`--inside`) does not change the
+  total. One cell holds at every latency tested: the near venue as maker,
+  buys 20 bps under the far venue's bid, 15 fills an hour, +8 bps a fill.
+- The flow caps each cell. On that cell, earnings are 0.12, 0.23, 0.28 and
+  0.26 quote units an hour at sizes 13, 50, 200 and 1000. Prints are small,
+  so a larger quote does not fill for more.
+- Holding the base cost about three times the trading result on 2026-10-10.
+
+A good cell earns cents an hour, and capital does not change that. A
+significant result needs many good cells at the same time, a lower cost of
+inventory, and enough latency to keep the cells that are almost good.
+
+### 16.2 Plan, in order of expected value
+
+1. Run the candidate pipeline every day without an operator.
+   - Run `market_screener` on every symbol the venues share.
+   - Record the top candidates on full feed. Give each client at most 15
+     symbols: the near venue refuses more than 30 subscriptions on one
+     connection.
+   - Score every cell with `fill_sim` at the measured `--qlat`.
+   - Quote a cell only if it is positive in two windows that do not
+     overlap.
+   - Stop a strategy when its live mean over 20 fills falls below the
+     simulated p10.
+2. Add venues. Each new venue adds a pair with every venue in config, and
+   a venue that discovers prices slowly is where a pegged quote is not
+   picked off. Follow `docs/runbooks/new-venue.md` for each one.
+3. Add top-of-book quoting to the strategy. When the maker's own spread
+   pays both fees and the edge, quote at the maker's best instead of behind
+   it. The only robust cell found uses this mode.
+4. Quote on the venue with no maker fee where the cell allows it. The far
+   venue charges 8 bps a fill as maker, the near venue nothing.
+5. Cut the replace latency.
+   - Give cancels their own lane in the order manager, so a cancel on an
+     adverse taker move does not wait behind a queued placement.
+   - Amend in one round trip where the venue has `editOrder`.
+   - Move the host near the venues, as section 14 plans.
+   - Measure the replace latency after each step and score again at it.
+6. Hedge the inventory. Short the perpetual on the unified venue where one
+   is listed (`docs/design/inventory-hedging.md`). The key needs the
+   management permission first. Where no perpetual exists, hold only
+   `solvency_factor` times the quote size.
+7. Make the system run unattended.
+   - Restart a crashed process, and alert the operator.
+   - Account inventory across strategies in the order manager, so two
+     strategies cannot spend one balance.
