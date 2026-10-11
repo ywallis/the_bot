@@ -7,6 +7,7 @@ import pytest
 
 from apps.maker.src.tools.fill_sim import (
     NS,
+    Fill,
     Params,
     book_valid,
     bucket_bounds,
@@ -22,6 +23,7 @@ from apps.maker.src.tools.fill_sim import (
     quote_side_hit,
     resolve_fees,
     simulate,
+    summarize,
     walk_depth,
 )
 from apps.shared.src.config import VenueConfig
@@ -332,3 +334,12 @@ def test_min_tick_takes_the_smallest_level_gap():
     tick = min_tick(tick, [(1.0, 1.0), (0.995, 1.0)], [])
     assert tick == pytest.approx(0.005)
     assert min_tick(None, [(1.0, 1.0)], []) is None
+
+
+def test_summarize_earns_on_the_base_each_fill_took():
+    """A fill a small print only partly took earns on that part, not the size."""
+    full = Fill(0, 30.0, "sell", 1.0, 10.0, 0.99, 100.0)
+    partial = Fill(1, 30.0, "sell", 1.0, 1.0, 0.99, 100.0)
+    summary = summarize([full, partial], hours=1.0, size=10.0)
+    assert summary is not None
+    assert summary.quote_per_h == pytest.approx(0.11)
