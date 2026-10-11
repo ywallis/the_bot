@@ -694,7 +694,8 @@ def summarize(fills: list[Fill], hours: float, size: float) -> Summary | None:
     hours : float
         Time covered, hours.
     size : float
-        Quote size in quote units.
+        Quote size in quote units. Kept for the callers; what a fill made is
+        computed from the base it took.
 
     Returns
     -------
@@ -706,6 +707,9 @@ def summarize(fills: list[Fill], hours: float, size: float) -> Summary | None:
         return None
     mean = statistics.fmean(results)
     per_h = len(results) / hours if hours > 0 else 0.0
+    # What the fills made, at the base each one took: a print smaller than
+    # the quote fills only part of it, so size times the mean overstates.
+    earned = sum(f.bps / BPS * f.price * f.base for f in fills if f.bps is not None)
     return Summary(
         fills=len(results),
         thin=len(fills) - len(results),
@@ -714,7 +718,7 @@ def summarize(fills: list[Fill], hours: float, size: float) -> Summary | None:
         mean_bps=mean,
         p10_bps=results[len(results) // 10],
         win_pct=100 * sum(r > 0 for r in results) / len(results),
-        quote_per_h=per_h * mean / BPS * size,
+        quote_per_h=earned / hours if hours > 0 else 0.0,
     )
 
 
