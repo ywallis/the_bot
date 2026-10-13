@@ -25,10 +25,17 @@ from apps.shared.src.config import (
 )
 from apps.shared.src.events import (
     ORDER_EVENTS_STREAM,
+    FeeScheduleEvent,
+    FeeSource,
     Fill,
+    FundingEvent,
     OrderEvent,
     OrderState,
+    PositionEvent,
+    PositionSide,
     Side,
+    SymbolFees,
+    fees_stream,
     to_stream_fields,
 )
 from apps.shared.src.streams import stream_path
@@ -300,3 +307,161 @@ def test_several_hedges_of_one_fill_are_merged_through_the_hedge_of_tag():
     )
     # And the follow-up hedge is not mistaken for a maker fill of its own.
     assert [m.intent_id for m, _ in pairs] == ["t-1_fmb_es"]
+
+
+def write_stream(root: Path, stream: str, events: list) -> None:
+    """Write any events to a stream's recording directory."""
+    directory = stream_path(root, stream)
+    directory.mkdir(parents=True, exist_ok=True)
+    with open(directory / "2026-09-08T14.jsonl", "a") as fh:
+        for i, ev in enumerate(events):
+            fields = to_stream_fields(ev)
+            data = fields["data"]
+            fh.write(
+                json.dumps(
+                    {
+                        "id": f"{ev.ts_recv // 1_000_000}-{i}",
+                        "type": fields["type"],
+                        "data": json.loads(
+                            data if isinstance(data, str) else data.decode()
+                        ),
+                    }
+                )
+                + "\n"
+            )
+
+
+PERP = "BASE/QUOTE:QUOTE"
+
+
+def inventory_config() -> AppConfig:
+    """Return a config with an inventory strategy hedged on a perpetual."""
+    return AppConfig(
+        redis=RedisConfig(host="localhost", port=6379),
+        market_data=MarketDataConfig(book_depth=20, stream_maxlen=1000),
+        oms=OmsConfig(),
+        venues=(
+            VenueConfig(id="venue_a", name="A", maker_fee=0.0, taker_fee=0.0),
+            VenueConfig(
+                id="venue_p",
+                name="P",
+                market_type="swap",
+                maker_fee=0.0,
+                taker_fee=0.0,
+            ),
+        ),
+        strategies=(
+            StrategyConfig(
+                identifier="inv",
+                type="inventory",
+                production=False,
+                subscriptions=(
+                    Subscription(venue="venue_a", symbol="BASE/QUOTE"),
+                    Subscription(
+                        venue="venue_p", symbol=PERP, feeds=("position", "funding")
+                    ),
+                ),
+                params={
+                    "should_match": True,
+                    "spot": {"venue": "venue_a", "symbol": "BASE/QUOTE"},
+                    "hedge": {"venue": "venue_p", "symbol": PERP},
+                },
+            ),
+        ),
+    )
+
+
+def test_a_hedge_table_names_the_venue_pair():
+    """The inventory strategy quotes on its spot venue and hedges on its perp."""
+    assert pnl.maker_venues(inventory_config()) == {"inv": ("venue_a", "venue_p")}
+
+
+def test_a_perpetual_hedge_is_valued_in_base(tmp_path: Path):
+    """Ten contracts of 0.1 hedge one base unit bought on spot."""
+    buy = event("venue_a", "t-1_inv_iq", Side.BUY, "1", "100", strategy_id="inv")
+    short = event(
+        "venue_p",
+        "t-1_inv_iq",
+        Side.SELL,
+        "10",
+        "101",
+        ts=TS + 10**9,
+        strategy_id="inv",
+    )
+    short = OrderEvent(
+        **{**{f: getattr(short, f) for f in short.__struct_fields__}, "symbol": PERP}
+    )
+    write_recording(tmp_path, [buy, short])
+    write_stream(
+        tmp_path,
+        fees_stream("venue_p"),
+        [
+            FeeScheduleEvent(
+                ts_recv=TS - 1,
+                venue="venue_p",
+                fee_currency="quote",
+                symbols=[
+                    SymbolFees(
+                        symbol=PERP,
+                        maker=Decimal(0),
+                        taker=Decimal(0),
+                        min_cost=None,
+                        amount_precision=0,
+                        contract_size=Decimal("0.1"),
+                    )
+                ],
+                source=FeeSource.MARKETS,
+            )
+        ],
+    )
+    pairs, _ = pnl.realized_pnl(
+        inventory_config(), tmp_path, TS, TS + 10**11, None, None
+    )
+    (pair,) = pairs
+    assert pair.hedge_filled == 1.0
+    assert pair.base_residual == 0.0
+    assert round(pair.pnl_quote, 9) == 1.0
+
+
+def test_funding_is_paid_on_the_position_held_when_it_falls_due():
+    """A short receives a positive rate on its notional at the mark."""
+    due = TS // 1_000_000 + 3_600_000
+
+    def rate(ts_ns: int, value: float, next_ms: int) -> FundingEvent:
+        return FundingEvent(
+            ts_recv=ts_ns,
+            venue="venue_p",
+            symbol=PERP,
+            seq=1,
+            funding_rate=value,
+            next_funding_ts=next_ms,
+            mark_price=2.0,
+        )
+
+    def held(ts_ns: int, base: str) -> PositionEvent:
+        return PositionEvent(
+            ts_recv=ts_ns,
+            venue="venue_p",
+            symbol=PERP,
+            seq=1,
+            ts_exch=None,
+            side=PositionSide.SHORT,
+            contracts=-Decimal(base),
+            contract_size=Decimal(1),
+            base_amount=Decimal(base),
+        )
+
+    payments = pnl.funding_payments(
+        [
+            rate(TS, 0.0001, due),
+            rate(TS + 10**9, 0.0002, due),
+            rate(TS + 3_700 * 10**9, -0.0001, due + 28_800_000),
+        ],
+        [held(TS, "-50"), held(TS + 10**12 * 4, "-80")],
+    )
+    (payment,) = payments
+    assert payment.ts_ms == due
+    assert payment.rate == 0.0002
+    assert payment.base == -50.0
+    assert round(payment.amount_quote, 9) == round(0.0002 * 50 * 2.0, 9)
+    assert "carry +0.0200" in pnl.format_carry(payments)
