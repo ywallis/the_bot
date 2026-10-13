@@ -176,6 +176,7 @@ async def test_refresh_balance_fetches_on_its_interval(monkeypatch):
 
     monkeypatch.setattr(balance, "fetch_balance", fake_fetch)
     monkeypatch.setattr(balance.asyncio, "sleep", fake_sleep)
+
     class Client:
         id = "venue_a"
 
