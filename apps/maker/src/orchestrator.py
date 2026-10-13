@@ -39,6 +39,7 @@ PROCESS_LIST = [
     ["uv", "run", "-m", "apps.maker.src.fees"],
     ["uv", "run", "-m", "apps.maker.src.derivatives_feed"],
     ["uv", "run", "-m", "apps.maker.src.recorder"],
+    ["uv", "run", "-m", "apps.maker.src.notifier"],
 ]
 
 # Seconds between starting two processes, and the wait before strategies
@@ -68,7 +69,8 @@ SHUTDOWN_PHASES: tuple[tuple[str, frozenset[str], float], ...] = (
         ),
         10.0,
     ),
-    ("recorder", frozenset({"recorder"}), 10.0),
+    # The notifier stops last too, so an alert raised on the way down goes out.
+    ("recorder", frozenset({"recorder", "notifier"}), 10.0),
 )
 DEFAULT_PHASE = "feeds and broker"
 

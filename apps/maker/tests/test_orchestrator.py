@@ -98,7 +98,7 @@ def test_shutdown_phases_order_strategies_oms_feeds_recorder():
         "unknown_tool",
         "watcher",
     ]
-    assert by_name["recorder"] == ["recorder"]
+    assert by_name["recorder"] == ["notifier", "recorder"]
 
 
 def test_the_order_manager_gets_the_longest_grace():
@@ -145,8 +145,8 @@ def test_shutdown_stops_phases_in_order(monkeypatch):
 
     assert order[0] == "launcher"
     assert order[1] == "message_processor"
-    assert order[-1] == "recorder"
-    assert set(order[2:-1]) == {
+    assert set(order[-2:]) == {"recorder", "notifier"}
+    assert set(order[2:-2]) == {
         "broker",
         "watcher",
         "order_watcher",

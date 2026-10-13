@@ -265,6 +265,28 @@ class DerivativesConfig(msgspec.Struct, frozen=True):
     funding_poll_s: float = 60.0
 
 
+class NotifierConfig(msgspec.Struct, frozen=True):
+    """
+    Settings for the notifier.
+
+    Attributes
+    ----------
+    cooldown_s : float
+        Seconds during which a second alert with the same key is dropped, so
+        a persisting condition is one message rather than one a minute.
+    min_funding_bps : float
+        Funding rate per interval, in basis points, under which a short
+        pays to be held. Crossing it alerts, and so does recovering.
+    stale_after_s : float
+        Seconds without a position or funding event after which the feed is
+        reported stale.
+    """
+
+    cooldown_s: float = 900.0
+    min_funding_bps: float = 0.0
+    stale_after_s: float = 300.0
+
+
 class VenueConfig(msgspec.Struct, frozen=True):
     """
     A trading venue.
@@ -534,6 +556,8 @@ class AppConfig(msgspec.Struct, frozen=True):
         Fee schedule feed settings.
     derivatives : DerivativesConfig
         Position and funding feed settings.
+    notifier : NotifierConfig
+        Notifier settings.
     """
 
     redis: RedisConfig
@@ -546,6 +570,7 @@ class AppConfig(msgspec.Struct, frozen=True):
     oms: OmsConfig = OmsConfig()
     fees: FeesConfig = FeesConfig()
     derivatives: DerivativesConfig = DerivativesConfig()
+    notifier: NotifierConfig = NotifierConfig()
 
     @property
     def venue_ids(self) -> set[str]:
@@ -978,6 +1003,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
         oms = msgspec.convert(raw.get("oms", {}), OmsConfig)
         fees = msgspec.convert(raw.get("fees", {}), FeesConfig)
         derivatives = msgspec.convert(raw.get("derivatives", {}), DerivativesConfig)
+        notifier = msgspec.convert(raw.get("notifier", {}), NotifierConfig)
         venues = msgspec.convert(raw.get("venues", []), tuple[VenueConfig, ...])
     except msgspec.ValidationError as e:
         raise ConfigError(str(e)) from e
@@ -1000,6 +1026,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
         oms=oms,
         fees=fees,
         derivatives=derivatives,
+        notifier=notifier,
     )
     _validate(config)
     return config
