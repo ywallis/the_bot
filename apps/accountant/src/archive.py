@@ -19,7 +19,10 @@ reads an archived source with ``--root <archive root>/<source>``.
 
 Run it from cron or a systemd timer on the archive host::
 
-    uv run -m apps.accountant.src.archive
+    uv run -m apps.accountant.src.archive [--config archive.toml]
+
+The archive host needs no venues or strategies, so ``--config`` can name a
+file that holds only the ``[archive]`` table.
 """
 
 import argparse
@@ -50,7 +53,7 @@ from apps.maker.src.shipper import (
     PruneResult,
     ShippedFile,
 )
-from apps.shared.src.config import ArchiveConfig, ArchiveSource, load_app_config
+from apps.shared.src.config import ArchiveConfig, ArchiveSource, load_archive_config
 from apps.shared.src.streams import COMPRESSED_SUFFIX
 
 logging_config.setup_logging()
@@ -615,10 +618,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--no-prune", action="store_true", help="Keep archived files on the source."
     )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        help="TOML file with an [archive] table. Defaults to config.toml.",
+    )
     args = parser.parse_args(argv)
-    settings = load_app_config().archive
+    settings = load_archive_config(args.config)
     if not settings.sources:
-        logger.error("No [[archive.sources]] in config.toml")
+        logger.error("No [[archive.sources]] in the configuration")
         return 1
     reports = run(settings, args.source, settings.prune and not args.no_prune)
     for report in reports:

@@ -13,6 +13,7 @@ from apps.shared.src.config import (
     ArchiveConfig,
     ArchiveSource,
     ConfigError,
+    load_archive_config,
     parse_app_config,
 )
 from apps.shared.src.streams import open_recording, recording_files
@@ -186,3 +187,27 @@ def test_archive_source_names_must_be_plain_and_unique(sources):
 
     with pytest.raises(ConfigError):
         parse_app_config(raw)
+
+
+def test_the_archive_reads_its_table_alone(tmp_path: Path):
+    """An archive host needs no venues or strategies in its config file."""
+    path = tmp_path / "archive.toml"
+    path.write_text(
+        '[archive]\nroot = "/srv/archive"\nprune = false\n\n'
+        '[[archive.sources]]\nname = "host_a"\nssh = "host-alias"\n'
+    )
+
+    settings = load_archive_config(path)
+
+    assert settings.root == "/srv/archive"
+    assert settings.prune is False
+    assert settings.sources[0].ssh == "host-alias"
+
+
+def test_a_bad_archive_table_is_a_config_error(tmp_path: Path):
+    """Validation applies when the table is read alone."""
+    path = tmp_path / "archive.toml"
+    path.write_text('[[archive.sources]]\nname = "../escape"\n')
+
+    with pytest.raises(ConfigError):
+        load_archive_config(path)
