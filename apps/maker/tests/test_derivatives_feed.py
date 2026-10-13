@@ -223,3 +223,27 @@ def test_feed_targets_follow_the_subscriptions():
     assert feed_targets(config, "position", True) == {"venueperp": {PERP, OTHER}}
     assert feed_targets(config, "funding", True) == {"venueperp": {PERP}}
     assert feed_targets(config, "funding", False) == {}
+
+
+@pytest.mark.asyncio
+async def test_main_idles_when_nothing_subscribes():
+    """An exit would read as a crash to the orchestrator, so main stays up."""
+    config = parse_app_config(
+        {
+            "venues": [{"id": "venuea", "name": "A"}],
+            "strategies": [
+                {
+                    "identifier": "mk",
+                    "type": "maker",
+                    "production": True,
+                    "subscriptions": [{"venue": "venuea", "symbol": "BASE/USDT"}],
+                }
+            ],
+        }
+    )
+    task = asyncio.create_task(derivatives_feed.main(config, {}))
+    await asyncio.sleep(0.05)
+    assert not task.done()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task

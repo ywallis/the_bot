@@ -406,7 +406,10 @@ async def main(config: AppConfig, clients: dict[str, Any]) -> None:
     funding = feed_targets(config, FUNDING_FEED, production)
     venues = sorted(set(positions) | set(funding))
     if not venues:
-        logger.info("No position or funding subscriptions; nothing to do")
+        # The orchestrator winds the whole system down when any process
+        # exits, so a feed with nothing to serve idles until it is stopped.
+        logger.info("No position or funding subscriptions; idle")
+        await asyncio.Event().wait()
         return
     pool = ConnectionPool(
         host=config.redis.host, port=config.redis.port, db=0, max_connections=10
