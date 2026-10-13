@@ -196,7 +196,7 @@ class VenueConfig(msgspec.Struct, frozen=True):
     id : str
         Venue id, unique in the config. It keys every stream, client and
         order, and prefixes the credential variables in the environment.
-        It is the CCXT short id (e.g. ``gate``) unless ``ccxt_id`` says
+        It is the CCXT short id (e.g. ``binance``) unless ``ccxt_id`` says
         otherwise.
     name : str
         Human readable name.

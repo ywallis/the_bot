@@ -127,11 +127,11 @@ def order_raw_item():
     """Return a raw dictionary representation of an order."""
     order_raw_item: dict[str, str] = {
         "kind": "order",
-        "strategy": "ALPH_gate",
-        "exchange": "gate",
-        "id": "gate_test_1",
+        "strategy": "BASE_venue_z",
+        "exchange": "venue_z",
+        "id": "venue_z_test_1",
         "exchange_id": "_",
-        "pair": "ALPH/USDT",
+        "pair": "BASE/USDT",
         "side": "sell",
         "order_type": "replace",
         "price": "100",
@@ -159,10 +159,10 @@ def order_1():
     order_1: OrderMessage = OrderMessage(
         kind=MessageType.ORDER,
         strategy="lab_eb",
-        exchange="gate",
+        exchange="venue_z",
         id="t-2025_lab_eb",
         exchange_id="_",
-        pair="ALPH/USDT",
+        pair="BASE/USDT",
         side=OrderSide.SELL,
         order_type=OrderType.REPLACE,
         price=Decimal(100),
@@ -177,10 +177,10 @@ def order_2():
     order_2: OrderMessage = OrderMessage(
         kind=MessageType.ORDER,
         strategy="lab_eb",
-        exchange="gate",
+        exchange="venue_z",
         id="t-2026_lab_eb",
         exchange_id="_",
-        pair="ALPH/USDT",
+        pair="BASE/USDT",
         side=OrderSide.SELL,
         order_type=OrderType.REPLACE,
         price=Decimal(100),
@@ -194,11 +194,11 @@ def order_unique_1():
     """Return a deepcopy of a unique OrderMessage."""
     order_unique_1: OrderMessage = OrderMessage(
         kind=MessageType.ORDER,
-        strategy="ALPH_gate",
-        exchange="gate",
-        id="gate_test_3-ALPH_gate",
+        strategy="BASE_venue_z",
+        exchange="venue_z",
+        id="venue_z_test_3-BASE_venue_z",
         exchange_id="_",
-        pair="ALPH/USDT",
+        pair="BASE/USDT",
         side=OrderSide.SELL,
         order_type=OrderType.UNIQUE,
         price=Decimal(100),
@@ -212,8 +212,8 @@ def order_batch_1(order_1: OrderMessage, order_2: OrderMessage):
     """Return a deepcopy of an OrderBatchMessage."""
     order_batch_1: OrderBatchMessage = OrderBatchMessage(
         kind=MessageType.ORDERBATCH,
-        strategy="ALPH_gate",
-        id="gate_test_batch-ALPH_gate",
+        strategy="BASE_venue_z",
+        id="venue_z_test_batch-BASE_venue_z",
         orders=[order_1, order_2],
     )
     return deepcopy(order_batch_1)
@@ -236,8 +236,8 @@ def order_batch_raw(order_raw_string: str):
     """Return a raw dictionary representation of an order batch."""
     order_batch_1 = {
         "kind": "orderbatch",
-        "strategy": "ALPH_gate",
-        "id": "gate_test_batch-ALPH_gate",
+        "strategy": "BASE_venue_z",
+        "id": "venue_z_test_batch-BASE_venue_z",
         "orders": [order_raw_string, order_raw_string],
     }
     return deepcopy(order_batch_1)
@@ -249,9 +249,9 @@ def cancellation_1():
     cancellation_1: CancellationMessage = CancellationMessage(
         kind=MessageType.CANCELLATION,
         strategy="lab_eb",
-        exchange="gate",
-        id="gate_test_2-ALPH_gate",
-        pair="ALPH/USDT",
+        exchange="venue_z",
+        id="venue_z_test_2-BASE_venue_z",
+        pair="BASE/USDT",
     )
     return deepcopy(cancellation_1)
 

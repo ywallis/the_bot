@@ -18,7 +18,7 @@ three places:
 
 The next strategy family is cross-pair, cross-venue latency arbitrage: a move
 on a fast, liquid source (for example BTC on Binance) predicts a move on a
-slower pair and venue (for example SOL on MEXC) some hundreds of milliseconds
+slower pair and venue (for example SOL on venue X) some hundreds of milliseconds
 later. That family needs:
 
 - Event delivery instead of polling. The edge is measured in the time between
@@ -234,8 +234,8 @@ max_intent_age_s = 5.0
 refresh_s = 3600
 
 [[venues]]
-id = "gate"
-name = "Gate.io"
+id = "venue_z"
+name = "Venue Z"
 # Which currency fees are charged in: "quote", "base", "received" (base on
 # buys, quote on sells) or an asset code. Verified against what fills
 # actually report; the matcher sizes hedges with it.
@@ -246,8 +246,8 @@ identifier = "lam"
 type = "single_edge_liquidity"
 production = true
 subscriptions = [
-  { venue = "gate", symbol = "ALPH/USDT", feeds = ["book"] },
-  { venue = "mexc", symbol = "ALPH/USDT", feeds = ["book"] },
+  { venue = "venue_z", symbol = "BASE/QUOTE", feeds = ["book"] },
+  { venue = "venue_x", symbol = "BASE/QUOTE", feeds = ["book"] },
 ]
 
 [strategies.params]
@@ -340,8 +340,8 @@ venue's replay after a resubscription only covers open orders, so an order
 placed and finished inside the gap, a fill included, never comes back over
 the socket. The overnight run of 2026-09-08 saw two such orders in one
 four-second reconnect. Venues differ in what they expose, so the fetch is
-`fetch_orders` where the venue has it (MEXC) and open plus cancelled-and-
-closed orders otherwise (Bitget). A failed reconciliation is logged and the
+`fetch_orders` where the venue has it (venue X) and open plus cancelled-and-
+closed orders otherwise (venue Y). A failed reconciliation is logged and the
 socket loop carries on; the next drop reconciles again.
 
 ### 6.1 The legacy bridge
@@ -364,7 +364,7 @@ trading host is never the long-term store.
 
 A single process (`apps/maker/src/recorder.py`) that `XREAD`s every
 configured stream and appends entries to files partitioned by stream and UTC
-hour, for example `data/md/book/gate/ALPH-USDT/2026-09-06T14.jsonl`. Each
+hour, for example `data/md/book/venue_z/BASE-QUOTE/2026-09-06T14.jsonl`. Each
 line is `{"id": <redis stream id>, "type": <tag>, "data": <payload>}`; the
 payload is copied verbatim without decoding, so the recorder never rejects an
 event and stays cheap. The bucket comes from the stream id's millisecond
@@ -619,7 +619,7 @@ version, and `XADD` intents. No shared code is required. The Python
    deferred, since it is one hop behind the order manager and changing it
    buys nothing until the strategies move.
 
-   Live-tested against MEXC and Bitget on 2026-09-06 and 07: intents, the
+   Live-tested against venue X and venue Y on 2026-09-06 and 07: intents, the
    bridge, placement, supersede, cancel-by-strategy, the order watcher, a
    forced fill hedged by the matcher, book pruning on fill, the staleness
    guard rejecting replayed intents, shutdown cancelling resting orders, and
@@ -630,7 +630,7 @@ version, and `XADD` intents. No shared code is required. The Python
    unacknowledged.
 
    First measured order round trip, which section 9's latency model needs:
-   **MEXC limit order, 326 to 492 ms** from the order manager publishing to
+   **Venue X limit order, 326 to 492 ms** from the order manager publishing to
    the broker until the broker's reply, over four samples. That is the whole
    REST leg plus one local pubsub hop. It sits at the top of the range the
    motivation in section 1 assumes, so the round trip is worth measuring per
@@ -652,21 +652,21 @@ version, and `XADD` intents. No shared code is required. The Python
    the intents stream; the legacy cases were translated one for one and
    produce the same orders.
 
-   Live-tested on 2026-09-07 through the orchestrator against MEXC and
-   Bitget, in two runs. The first stood still for eight minutes: the
+   Live-tested on 2026-09-07 through the orchestrator against venue X and
+   venue Y, in two runs. The first stood still for eight minutes: the
    balance watcher publishes one snapshot at its own start and then only on
    change, the strategies start sixty seconds later at the stream tail, and
    a strategy with no balance judges every quote insolvent. Nothing in the
    unit suite could see this, because every test funded the strategy after
    it started. The runtime now primes snapshot streams at start (section
    8). The second run went end to end: both strategies primed with four
-   snapshots, `fake_maker` quoted a 273 ALPH sell on MEXC, the order
+   snapshots, `fake_maker` quoted a 273 BASE sell on venue X, the order
    manager placed it, the order watcher confirmed it independently, and
    shutdown cancelled it. No tracebacks, balances unchanged, nothing left
    open at either venue, and every phase 3 invariant held (one placement,
    one latency record, nothing in limbo, one resting order per slot,
    nothing resting after shutdown). The quote rested unchanged for four
-   minutes because the Bitget ask it was priced from did not move. Nothing
+   minutes because the venue Y ask it was priced from did not move. Nothing
    filled, so the strategies' slot-freeing on a fill and the matcher's hedge
    remain tested only against `fakeredis`.
 
@@ -686,13 +686,13 @@ version, and `XADD` intents. No shared code is required. The Python
    10 superseded in the queue, no duplicate placements, nothing in limbo,
    one resting order per slot throughout, venue snapshots at three
    checkpoints matching the order manager's book exactly, nothing open at
-   shutdown, no errors, balances unchanged. Still no fill: ALPH fell from
+   shutdown, no errors, balances unchanged. Still no fill: BASE fell from
    0.0510 to 0.0493 through the afternoon and a sell quote 0.5% above the
-   Bitget ask sat 0.66% above MEXC's own ask. On the basis of that run's
+   venue Y ask sat 0.66% above venue X's own ask. On the basis of that run's
    books the `fmb` spread was lowered to 1.003 with `min_spread` 1.002: the
-   hedge costs 0.10% Bitget taker fee plus up to 0.02% slippage, and the
-   Bitget ask moved less than 0.3% over the one second hedge latency in
-   97% of moments, 95th percentile 0.28% even after a MEXC ask jump.
+   hedge costs 0.10% venue Y taker fee plus up to 0.02% slippage, and the
+   venue Y ask moved less than 0.3% over the one second hedge latency in
+   97% of moments, 95th percentile 0.28% even after a venue X ask jump.
 
    The run also quantified the event-by-event churn described in section
    8: 136 cancels on request against 45 replacements, so three quotes in
@@ -718,18 +718,18 @@ version, and `XADD` intents. No shared code is required. The Python
    nothing in limbo, one resting order per slot at all 27 checkpoints and
    the venue agreeing every time, balances unchanged, no traceback in
    15,600 log lines. Broker round trip over 2159 placements: median 305
-   ms, range 285 to 1261 ms. Still no fill: the nearest a MEXC trade came
+   ms, range 285 to 1261 ms. Still no fill: the nearest a venue X trade came
    to a resting quote was 0.04% below it, and the median gap was 0.40%,
-   because the quote is repriced off the Bitget ask on every update and
+   because the quote is repriced off the venue Y ask on every update and
    moves with the market. It fills on an aggressive sweep, and there was
-   none in 500-odd MEXC trades.
+   none in 500-odd venue X trades.
 
    Findings from that run, none of them in the unit suite's reach:
 
    - **The order watcher was blind while it reconnected.** Venues closed
      websockets 26 times in fourteen hours, in clusters at roughly ten past
      the hour, and every loop reconnected. But two quotes placed and
-     cancelled inside the seconds of a MEXC order-feed reconnect at 07:20
+     cancelled inside the seconds of a venue X order-feed reconnect at 07:20
      never appeared on the watcher's side of `oms:events`: the venue's
      cache replay after resubscription does not include orders already
      closed. The order manager's book was right, because it works over

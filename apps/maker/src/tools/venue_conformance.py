@@ -312,7 +312,7 @@ async def check_book(venue: str, symbol: str, seconds: int, report: Report) -> N
         "book checksum",
         checksum_errors == 0,
         f"{updates} updates, {checksum_errors} checksum/unsubscribe errors",
-        "upgrade ccxt first (Bitget was fixed in 4.5.77); otherwise set options = { watchOrderBook = { checksum = false } } on the venue in config",
+        "upgrade ccxt first (one venue was fixed in 4.5.77); otherwise set options = { watchOrderBook = { checksum = false } } on the venue in config",
     )
     report.add(
         "book other errors",

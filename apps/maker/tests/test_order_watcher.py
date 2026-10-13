@@ -52,7 +52,7 @@ def ccxt_order(**overrides: Any) -> dict[str, Any]:
     order = {
         "id": "venue-99",
         "clientOrderId": OID,
-        "symbol": "ALPH/USDT",
+        "symbol": "BASE/USDT",
         "status": "open",
         "side": "sell",
         "price": 0.35,
@@ -127,11 +127,11 @@ def test_bounded_dict_refreshes_a_key_it_already_holds():
 
 def test_event_from_order_reports_an_open_order():
     """An untouched order is open and carries no fill."""
-    event = event_from_order("mexc", ccxt_order(), 1, BoundedDict(10))
+    event = event_from_order("venue_x", ccxt_order(), 1, BoundedDict(10))
 
     assert event.state is OrderState.OPEN
     assert event.side is Side.SELL
-    assert event.venue == "mexc"
+    assert event.venue == "venue_x"
     assert event.intent_id == OID
     assert event.venue_order_id == "venue-99"
     assert event.strategy == "lmb_eb"
@@ -143,7 +143,10 @@ def test_event_from_order_reports_an_open_order():
 def test_event_from_order_reports_a_partial_fill():
     """A CCXT order still called open is partially filled once anything trades."""
     event = event_from_order(
-        "mexc", ccxt_order(filled=10, remaining=30, average=0.351), 1, BoundedDict(10)
+        "venue_x",
+        ccxt_order(filled=10, remaining=30, average=0.351),
+        1,
+        BoundedDict(10),
     )
 
     assert event.state is OrderState.PARTIALLY_FILLED
@@ -157,9 +160,9 @@ def test_event_from_order_reports_a_partial_fill():
 def test_successive_updates_report_the_fill_between_them():
     """CCXT reports cumulative fills, so the delta is what actually traded."""
     memory = BoundedDict(10)
-    event_from_order("mexc", ccxt_order(filled=10, average=0.351), 1, memory)
+    event_from_order("venue_x", ccxt_order(filled=10, average=0.351), 1, memory)
     second = event_from_order(
-        "mexc",
+        "venue_x",
         ccxt_order(status="closed", filled=40, remaining=0, average=0.352),
         2,
         memory,
@@ -173,14 +176,16 @@ def test_successive_updates_report_the_fill_between_them():
 def test_a_cancelled_order_is_reported_as_cancelled():
     """Both CCXT spellings of cancelled map to the same state."""
     for status in ("canceled", "cancelled"):
-        event = event_from_order("mexc", ccxt_order(status=status), 1, BoundedDict(10))
+        event = event_from_order(
+            "venue_x", ccxt_order(status=status), 1, BoundedDict(10)
+        )
         assert event.state is OrderState.CANCELLED
 
 
 def test_amounts_avoid_binary_float_noise():
     """Money-touching figures go through Decimal by way of the string form."""
     event = event_from_order(
-        "mexc", ccxt_order(filled=0.1, remaining=0.2), 1, BoundedDict(10)
+        "venue_x", ccxt_order(filled=0.1, remaining=0.2), 1, BoundedDict(10)
     )
 
     assert event.filled == Decimal("0.1")
@@ -196,11 +201,12 @@ async def test_watch_orders_publishes_every_transition():
     redis = fakeredis.FakeRedis(decode_responses=True)
     publisher = StreamPublisher(maxlen=100)
     client = FakeClient(
-        "mexc", [[ccxt_order()], [ccxt_order(status="closed", filled=40, remaining=0)]]
+        "venue_x",
+        [[ccxt_order()], [ccxt_order(status="closed", filled=40, remaining=0)]],
     )
 
     with pytest.raises(StopWatching):
-        await watch_orders(client, "ALPH/USDT", redis, publisher)
+        await watch_orders(client, "BASE/USDT", redis, publisher)
 
     events = [
         from_stream_fields(fields)
@@ -215,7 +221,7 @@ async def test_watch_orders_drops_a_replayed_update():
     redis = fakeredis.FakeRedis(decode_responses=True)
     publisher = StreamPublisher(maxlen=100)
     client = FakeClient(
-        "mexc",
+        "venue_x",
         [
             [ccxt_order()],
             [ccxt_order()],
@@ -224,7 +230,7 @@ async def test_watch_orders_drops_a_replayed_update():
     )
 
     with pytest.raises(StopWatching):
-        await watch_orders(client, "ALPH/USDT", redis, publisher)
+        await watch_orders(client, "BASE/USDT", redis, publisher)
 
     events = [
         from_stream_fields(fields)
@@ -239,10 +245,10 @@ async def test_watch_orders_recovers_from_a_network_error(monkeypatch):
     monkeypatch.setattr(watcher, "RETRY_DELAY_S", 0)
     redis = fakeredis.FakeRedis(decode_responses=True)
     publisher = StreamPublisher(maxlen=100)
-    client = FakeClient("mexc", [NetworkError("gone"), [ccxt_order()]])
+    client = FakeClient("venue_x", [NetworkError("gone"), [ccxt_order()]])
 
     with pytest.raises(StopWatching):
-        await watch_orders(client, "ALPH/USDT", redis, publisher)
+        await watch_orders(client, "BASE/USDT", redis, publisher)
 
     assert client.closed == 1
     assert await redis.xlen(ORDER_EVENTS_STREAM) == 1
@@ -254,10 +260,10 @@ async def test_watch_orders_publishes_an_unattributed_order(monkeypatch):
     monkeypatch.setattr(watcher, "RETRY_DELAY_S", 0)
     redis = fakeredis.FakeRedis(decode_responses=True)
     publisher = StreamPublisher(maxlen=100)
-    client = FakeClient("mexc", [[ccxt_order(clientOrderId="placed by hand")]])
+    client = FakeClient("venue_x", [[ccxt_order(clientOrderId="placed by hand")]])
 
     with pytest.raises(StopWatching):
-        await watch_orders(client, "ALPH/USDT", redis, publisher)
+        await watch_orders(client, "BASE/USDT", redis, publisher)
 
     entries = await redis.xrange(ORDER_EVENTS_STREAM)
     event = from_stream_fields(entries[0][1])
@@ -280,8 +286,8 @@ def watching_config() -> AppConfig:
                 type="single_edge_liquidity",
                 production=False,
                 subscriptions=(
-                    Subscription(venue="mexc", symbol="ALPH/USDT"),
-                    Subscription(venue="bitget", symbol="ALPH/USDT"),
+                    Subscription(venue="venue_x", symbol="BASE/USDT"),
+                    Subscription(venue="venue_y", symbol="BASE/USDT"),
                 ),
                 params={},
             ),
@@ -292,7 +298,7 @@ def watching_config() -> AppConfig:
 def test_build_tasks_follows_subscriptions():
     """One loop per venue and symbol the strategies declare."""
     redis = MagicMock()
-    clients = {"mexc": MagicMock(), "bitget": MagicMock()}
+    clients = {"venue_x": MagicMock(), "venue_y": MagicMock()}
     tasks = build_tasks(watching_config(), clients, redis, StreamPublisher(1), False)
 
     assert len(tasks) == 2
@@ -303,7 +309,7 @@ def test_build_tasks_follows_subscriptions():
 def test_build_tasks_skips_venues_without_credentials():
     """A venue declared for market data alone is not watched for orders."""
     redis = MagicMock()
-    clients = {"mexc": MagicMock()}
+    clients = {"venue_x": MagicMock()}
     tasks = build_tasks(watching_config(), clients, redis, StreamPublisher(1), False)
 
     assert len(tasks) == 1
@@ -314,7 +320,7 @@ def test_build_tasks_skips_venues_without_credentials():
 def test_build_tasks_ignores_the_other_production_group():
     """Only the strategies of the running mode are watched."""
     redis = MagicMock()
-    clients = {"mexc": AsyncMock(), "bitget": AsyncMock()}
+    clients = {"venue_x": AsyncMock(), "venue_y": AsyncMock()}
     tasks = build_tasks(watching_config(), clients, redis, StreamPublisher(1), True)
 
     assert tasks == []
@@ -324,11 +330,11 @@ def test_build_tasks_ignores_the_other_production_group():
 async def test_watch_orders_asks_only_for_what_happens_from_now():
     """Orders that predate the loop belong to the order manager's recollection."""
     redis = fakeredis.FakeRedis(decode_responses=True)
-    client = FakeClient("mexc", [[ccxt_order()]])
+    client = FakeClient("venue_x", [[ccxt_order()]])
     started_ms = int(time.time() * 1000)
 
     with pytest.raises(StopWatching):
-        await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
+        await watch_orders(client, "BASE/USDT", redis, StreamPublisher(maxlen=100))
 
     assert client.since is not None
     assert abs(client.since - started_ms) < 5000
@@ -356,13 +362,13 @@ async def test_a_reconnect_publishes_the_fill_the_socket_missed(monkeypatch):
         average=0.35,
     )
     client = FakeClient(
-        "mexc",
+        "venue_x",
         [[ccxt_order()], NetworkError("gone"), [ccxt_order(status="canceled")]],
         rest_results=[[ccxt_order(), filled_in_the_gap]],
     )
 
     with pytest.raises(StopWatching):
-        await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
+        await watch_orders(client, "BASE/USDT", redis, StreamPublisher(maxlen=100))
 
     events = await events_on(redis)
     assert [(e.intent_id[-6:], e.state) for e in events] == [
@@ -382,11 +388,13 @@ async def test_reconciliation_fetches_from_before_the_last_delivery(monkeypatch)
     """The REST window starts a margin before the last update the socket delivered."""
     monkeypatch.setattr(watcher, "RETRY_DELAY_S", 0)
     redis = fakeredis.FakeRedis(decode_responses=True)
-    client = FakeClient("mexc", [[ccxt_order()], NetworkError("gone"), [ccxt_order()]])
+    client = FakeClient(
+        "venue_x", [[ccxt_order()], NetworkError("gone"), [ccxt_order()]]
+    )
     before = int(time.time() * 1000)
 
     with pytest.raises(StopWatching):
-        await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
+        await watch_orders(client, "BASE/USDT", redis, StreamPublisher(maxlen=100))
 
     ((_name, since),) = client.rest_calls
     assert (
@@ -400,10 +408,10 @@ async def test_reconciliation_fetches_from_before_the_last_delivery(monkeypatch)
 async def test_no_reconciliation_without_a_reconnect():
     """A healthy socket never triggers a REST fetch."""
     redis = fakeredis.FakeRedis(decode_responses=True)
-    client = FakeClient("mexc", [[ccxt_order()], [ccxt_order(status="closed")]])
+    client = FakeClient("venue_x", [[ccxt_order()], [ccxt_order(status="closed")]])
 
     with pytest.raises(StopWatching):
-        await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
+        await watch_orders(client, "BASE/USDT", redis, StreamPublisher(maxlen=100))
 
     assert client.rest_calls == []
 
@@ -414,7 +422,7 @@ async def test_reconciliation_does_not_republish_what_the_socket_reported(monkey
     monkeypatch.setattr(watcher, "RETRY_DELAY_S", 0)
     redis = fakeredis.FakeRedis(decode_responses=True)
     client = FakeClient(
-        "mexc",
+        "venue_x",
         [
             [ccxt_order()],
             NetworkError("gone"),
@@ -425,7 +433,7 @@ async def test_reconciliation_does_not_republish_what_the_socket_reported(monkey
     )
 
     with pytest.raises(StopWatching):
-        await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
+        await watch_orders(client, "BASE/USDT", redis, StreamPublisher(maxlen=100))
 
     assert [e.state for e in await events_on(redis)] == [
         OrderState.OPEN,
@@ -439,13 +447,13 @@ async def test_a_failed_reconciliation_does_not_take_the_feed_down(monkeypatch):
     monkeypatch.setattr(watcher, "RETRY_DELAY_S", 0)
     redis = fakeredis.FakeRedis(decode_responses=True)
     client = FakeClient(
-        "mexc",
+        "venue_x",
         [NetworkError("gone"), [ccxt_order()]],
         rest_results=[RuntimeError("rest is down too")],
     )
 
     with pytest.raises(StopWatching):
-        await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
+        await watch_orders(client, "BASE/USDT", redis, StreamPublisher(maxlen=100))
 
     assert [e.state for e in await events_on(redis)] == [OrderState.OPEN]
 
@@ -467,7 +475,7 @@ async def test_a_snapshot_reporting_less_filled_than_published_is_dropped():
     """
     redis = fakeredis.FakeRedis(decode_responses=True)
     memory = OrderMemory.sized(10)
-    client = FakeClient("mexc", [])
+    client = FakeClient("venue_x", [])
 
     await publish(client, redis, memory, ccxt_order(filled=10, average=0.35))
     dropped = await publish(client, redis, memory, ccxt_order(filled=5, average=0.35))
@@ -484,7 +492,7 @@ async def test_a_snapshot_of_a_finished_order_is_dropped():
     """An order the socket reported closed does not reopen from a REST snapshot."""
     redis = fakeredis.FakeRedis(decode_responses=True)
     memory = OrderMemory.sized(10)
-    client = FakeClient("mexc", [])
+    client = FakeClient("venue_x", [])
 
     await publish(client, redis, memory, ccxt_order(filled=10, average=0.35))
     await publish(
@@ -507,8 +515,8 @@ async def test_a_snapshot_of_a_finished_order_is_dropped():
 def test_a_stale_update_does_not_rewind_the_fill_baseline():
     """The remembered filled size only ever grows."""
     memory = BoundedDict(10)
-    event_from_order("mexc", ccxt_order(filled=10, average=0.35), 1, memory)
-    event_from_order("mexc", ccxt_order(filled=5, average=0.35), 2, memory)
+    event_from_order("venue_x", ccxt_order(filled=10, average=0.35), 1, memory)
+    event_from_order("venue_x", ccxt_order(filled=5, average=0.35), 2, memory)
     assert memory.get(OID, Decimal(0)) == Decimal(10)
 
 
@@ -526,11 +534,11 @@ async def test_the_periodic_reconcile_survives_a_failed_pass(monkeypatch):
         return 0
 
     monkeypatch.setattr(watcher_module, "reconcile", flaky_reconcile)
-    client = FakeClient("mexc", [])
+    client = FakeClient("venue_x", [])
     task = asyncio.create_task(
         reconcile_periodically(
             client,
-            "ALPH/USDT",
+            "BASE/USDT",
             watcher_module.Delivery(last_ms=0),
             fakeredis.FakeRedis(decode_responses=True),
             StreamPublisher(maxlen=100),
@@ -548,19 +556,19 @@ async def test_the_periodic_reconcile_survives_a_failed_pass(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_fetch_orders_since_uses_one_call_where_the_venue_has_it():
-    """MEXC has fetchOrders."""
+    """A venue with fetchOrders lists every state in one call."""
     client = FakeClient(
-        "mexc", [], rest_results=[[ccxt_order()]], has={"fetchOrders": True}
+        "venue_x", [], rest_results=[[ccxt_order()]], has={"fetchOrders": True}
     )
-    assert len(await fetch_orders_since(client, "ALPH/USDT", 1)) == 1
+    assert len(await fetch_orders_since(client, "BASE/USDT", 1)) == 1
     assert [name for name, _ in client.rest_calls] == ["fetch_orders"]
 
 
 @pytest.mark.asyncio
 async def test_fetch_orders_since_combines_endpoints_where_it_must():
-    """Bitget has no fetchOrders: open plus cancelled-and-closed cover every state."""
+    """Without fetchOrders, open plus cancelled-and-closed cover every state."""
     client = FakeClient(
-        "bitget",
+        "venue_y",
         [],
         rest_results=[
             [ccxt_order()],
@@ -572,7 +580,7 @@ async def test_fetch_orders_since_combines_endpoints_where_it_must():
             "fetchCanceledAndClosedOrders": True,
         },
     )
-    orders = await fetch_orders_since(client, "ALPH/USDT", 1)
+    orders = await fetch_orders_since(client, "BASE/USDT", 1)
     assert len(orders) == 3
     assert [name for name, _ in client.rest_calls] == [
         "fetch_open_orders",
@@ -597,7 +605,7 @@ async def test_fetch_orders_since_falls_back_to_closed_and_cancelled():
             "fetchCanceledOrders": True,
         },
     )
-    assert len(await fetch_orders_since(client, "ALPH/USDT", 1)) == 2
+    assert len(await fetch_orders_since(client, "BASE/USDT", 1)) == 2
     assert [name for name, _ in client.rest_calls] == [
         "fetch_open_orders",
         "fetch_closed_orders",
@@ -624,10 +632,10 @@ async def test_a_healthy_socket_is_reconciled_on_a_timer(monkeypatch):
             await asyncio.sleep(0.05)
             return await super().watch_orders(symbol, since)
 
-    client = SlowClient("mexc", [[ccxt_order()]], rest_results=[[silent_fill]])
+    client = SlowClient("venue_x", [[ccxt_order()]], rest_results=[[silent_fill]])
 
     with pytest.raises(StopWatching):
-        await watch_orders(client, "ALPH/USDT", redis, StreamPublisher(maxlen=100))
+        await watch_orders(client, "BASE/USDT", redis, StreamPublisher(maxlen=100))
 
     events = await events_on(redis)
     assert ("lmb_es", OrderState.FILLED) in [

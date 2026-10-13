@@ -27,7 +27,7 @@ def strategy_config(type_: str) -> StrategyConfig:
         identifier="fmb",
         type=type_,
         production=False,
-        subscriptions=(Subscription(venue="mexc", symbol="ALPH/USDT"),),
+        subscriptions=(Subscription(venue="venue_x", symbol="BASE/USDT"),),
         params={"a": 1},
     )
 

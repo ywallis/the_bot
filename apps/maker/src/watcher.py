@@ -118,7 +118,7 @@ def trade_key(trade: dict[str, Any]) -> tuple[Any, ...]:
     -------
     tuple[Any, ...]
         The venue trade id if present, otherwise timestamp, price and
-        amount. Venues that send no ids (MEXC) fall back to the latter.
+        amount. Venues that send no ids fall back to the latter.
     """
     trade_id = trade.get("id")
     if trade_id is not None:
