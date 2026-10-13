@@ -687,3 +687,119 @@ and -29 bps a week: on a large market the basis is a few bps against the
 build and the carry does not pay two taker fees, which is what section 8
 expects there. The recorded mode carries no hedge columns yet; the feeds
 that would record them come next in this phase.
+
+## 15. Phases 2 to 6, 2026-10-13
+
+Built on `feat/inventory-hedging-phase-2b` in this repository and on
+`feat/inventory-hedging` in the strategies repository.
+
+### 15.1 The unified venue
+
+The key of the unified venue now has the management permission. The
+conformance run of 2026-10-13 passed every swap check: leverage, a post-only
+order under our client order id, and a reduce-only order refused on a flat
+account. Two facts came from the run:
+
+- The account accepted one-way position mode through CCXT. After that, the
+  plain order passed. The `posSide` error of section 13.1 was hedge mode.
+- The account refuses the per-symbol margin mode setter with its "classic
+  account API" error. A unified account has one margin mode, cross. The
+  venue entry therefore has no `margin_mode`.
+
+The perpetual is a second venue entry with `market_type = "swap"`,
+`credentials` set to the spot entry, and CCXT's `uta` switch in `options`.
+The spot entry keeps the endpoints it trades on today. Both entries share
+one rate limit. Section 15.6 tells what that caused.
+
+### 15.2 Phase 2: events and feeds
+
+- `PositionEvent`, `FundingEvent`, `DeltaEvent` and `AlertEvent` are in
+  `apps/shared/src/events.py`, with the streams of section 5 and the
+  `alerts` stream.
+- `position`, `funding` and `delta` are subscription feeds. A position or
+  funding feed on a spot symbol is a config error. A `delta` feed reads
+  `acct:delta:<base>` of the subscribed symbol.
+- `apps/maker/src/derivatives_feed.py` publishes both feeds. It polls
+  positions every `[derivatives] position_poll_s` and fetches again when
+  `oms:events` reports a fill on the venue. It publishes a position when it
+  changes and once a minute otherwise. A symbol without a position is
+  `flat`. It polls funding every `funding_poll_s`. A failed fetch is logged
+  and retried. The process does not stop.
+- The runtime reads and primes the three feeds and calls `on_position`,
+  `on_funding` and `on_delta`. `Runtime.publish` and `Runtime.alert` send
+  other events. `order_intent` takes `reduce_only`.
+- The recorder records the new streams.
+
+### 15.3 Phase 3: the matcher
+
+- A strategy names its hedge instrument with
+  `hedge = { venue = "...", symbol = "..." }`. `taker_exchange` stays the
+  shorthand for the same symbol on another venue.
+- On a contract target, the matcher adds the base flow of each fill, net of
+  a fee charged in base, to a residual per strategy. It hedges the whole
+  contracts of the residual once they clear the market's minimum notional.
+  It does not bump a hedge over the minimum, because that leaves the short
+  larger than the inventory. The residual is in memory only. The
+  reconciler corrects it after a restart.
+- A hedge that buys contracts is reduce-only.
+- The matcher reads `oms:intents` and remembers the ids tagged
+  `self_hedged`. Fill events do not carry intent tags, so this is the only
+  way to see the tag.
+- The matcher never hedges a fill on the hedge instrument itself.
+
+### 15.4 Phase 4: reconciler, margin guard, notifier
+
+- `delta_reconciler` (strategies repository) publishes the delta every
+  `interval_s`. It corrects a delta outside `deadband_base` for two checks in
+  a row with a market order on the perpetual. It nets its own corrections in
+  flight. It does not see the matcher's hedges in flight. The two-check rule
+  covers them, because a hedge completes in about a second.
+- The delta is unhealthy when a balance or the position is missing, the
+  position is older than `stale_after_s`, the mark is within
+  `margin_floor_pct` of liquidation, or the correction is larger than
+  `max_correction_base`. An unhealthy delta alerts and sends no correction.
+- `act = false` publishes the delta and logs the correction it would send.
+- `apps/maker/src/notifier.py` delivers alerts with a cooldown per key. It
+  also alerts on funding under `[notifier] min_funding_bps` and on its
+  recovery, on a rejected hedge, on an unhealthy delta and on a silent
+  position or funding stream. It sends to Telegram when `TELEGRAM_BOT_TOKEN`
+  and `TELEGRAM_CHAT_ID` are set, and to the log otherwise. It stops with
+  the recorder.
+
+### 15.5 Phase 5 and 6: inventory strategy, PnL
+
+- `inventory` (strategies repository) has the quote, take and fast unwind
+  modes of section 7.2. `mode = "observe"` logs every order and sends none.
+  It does not trade until the reconciler publishes a healthy, fresh delta,
+  which is at least one `interval_s` after start.
+- Price ticks are not in the fee schedule. A build quote joins the spot bid
+  or rests behind it, and never improves it.
+- The take legs are IOC limits. The order manager dropped every time in
+  force but post-only until this phase. An IOC or FOK limit now reaches
+  CCXT as `timeInForce`.
+- After a take, an imbalance of one contract or more is closed on the
+  perpetual at market, with an alert.
+- `pnl` converts a contract leg to base with the recorded contract size,
+  reads a `spot` and a `hedge` table as the venue pair, and adds a carry
+  section from the recorded funding and position streams. It does not yet
+  report the unrealized basis.
+
+### 15.6 The first live run
+
+The first start in testing mode hit the venue's rate limit (429) from the
+burst of calls on one key. Two faults followed and are fixed:
+
+- The fee watcher retried a failed fetch only after its refresh interval,
+  one hour. It now retries after 30 seconds.
+- The broker loaded markets inside its subscriber task and retried only
+  timeouts. The 429 ended the task without a log. The order manager then
+  waited for open orders without end and ignored SIGTERM. The broker now
+  retries any network error with a growing pause and exits when the task
+  ends.
+
+### 15.7 Still open
+
+- The position feed polls. It does not follow `watch_positions` yet.
+- The notifier needs a Telegram bot token and chat id on the trading host.
+- The PnL report has no unrealized basis line.
+- One key serves two venue entries. Watch for 429 errors at start.
