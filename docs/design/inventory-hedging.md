@@ -797,9 +797,36 @@ burst of calls on one key. Two faults followed and are fixed:
   retries any network error with a growing pause and exits when the task
   ends.
 
+The live build of 2026-10-13 then bought 70 base in two quotes on the
+spot venue. Each fill was hedged on the perpetual about 340 ms after it was
+reported, and the reconciler published a delta of zero. The fast unwind
+sold the 70 base in two slices. Each pair finished with no imbalance, and
+the perpetual went flat.
+
+One more fault showed in the unwind, and it is fixed:
+
+- The spot venue omits an asset with a zero balance. The balance feed
+  overlaid every update on its cache, so the sold-out asset stayed on the
+  stream at 34 base. The websocket did not report the sale either. The
+  reconciler saw a delta of 34 base for two checks and sold 34 contracts.
+  That short had no inventory behind it. It stayed open for about six
+  minutes, and the operator's agent closed it by hand with a reduce-only
+  buy.
+- The balance feed now fetches every venue over REST each minute, and the
+  fetch replaces the snapshot. The reconciler treats a balance older than
+  `stale_after_s` as unhealthy. It corrects only when every balance and the
+  position arrived after it first saw the delta out of band.
+
+The order watcher reported the spot venue's IOC fills late: a partial fill
+on the socket, and the full fill about one minute later from the REST
+reconcile. The fast unwind waits for both legs, so each slice took about a
+minute.
+
 ### 15.7 Still open
 
 - The position feed polls. It does not follow `watch_positions` yet.
 - The notifier needs a Telegram bot token and chat id on the trading host.
 - The PnL report has no unrealized basis line.
 - One key serves two venue entries. Watch for 429 errors at start.
+- IOC fills on the spot venue arrive late on the socket. A slice of the
+  fast unwind takes about a minute.
