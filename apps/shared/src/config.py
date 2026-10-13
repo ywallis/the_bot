@@ -962,6 +962,38 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
     return config
 
 
+def load_archive_config(path: Path | None = None) -> ArchiveConfig:
+    """
+    Read and validate only the ``[archive]`` table of a configuration file.
+
+    The archive host needs no venues or strategies, so it can run from a file
+    that holds this table alone.
+
+    Parameters
+    ----------
+    path : Path | None
+        Path to the TOML file. Defaults to the strategies submodule config.
+
+    Returns
+    -------
+    ArchiveConfig
+        The validated archive settings.
+
+    Raises
+    ------
+    ConfigError
+        If the file is missing or the table is malformed.
+    """
+    try:
+        archive = msgspec.convert(
+            load_raw_config(path).get("archive", {}), ArchiveConfig
+        )
+    except msgspec.ValidationError as e:
+        raise ConfigError(str(e)) from e
+    _validate_archive(archive)
+    return archive
+
+
 def load_app_config(path: Path | None = None) -> AppConfig:
     """
     Read and validate the configuration file.
