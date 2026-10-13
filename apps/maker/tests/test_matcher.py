@@ -11,7 +11,11 @@ from apps.maker.src import matcher
 from apps.maker.src.matcher import (
     HEDGE_MEMORY,
     HedgeBook,
+    ContractHedger,
+    HedgeTarget,
+    contract_order,
     hedge_id,
+    hedge_target,
     consume_order_events,
     resolve_cursors,
     size_hedge,
@@ -37,6 +41,7 @@ from apps.shared.src.config import (
 from apps.shared.src.events import (
     INTENTS_STREAM,
     ORDER_EVENTS_STREAM,
+    SELF_HEDGED_TAG,
     FeeScheduleEvent,
     FeeSource,
     fees_stream,
@@ -54,7 +59,7 @@ from apps.shared.src.events import (
 from apps.shared.src.streams import StreamPublisher, stream_tail
 
 SYMBOL = "BTC/USDT"
-SHOULD_MATCH = {"lmb": "venue_b"}
+SHOULD_MATCH = {"lmb": HedgeTarget("venue_b")}
 
 
 def schedule(
@@ -488,7 +493,7 @@ def test_a_partial_fill_is_hedged_at_once():
     """A partial fill is hedged when reported, not when the order finishes."""
     event = fill_event(state=OrderState.PARTIALLY_FILLED, filled=Decimal("16"))
     assert should_hedge(event, SHOULD_MATCH, HedgeBook(10)) == (
-        "venue_b",
+        HedgeTarget("venue_b"),
         Decimal("16"),
     )
 
@@ -498,12 +503,18 @@ def test_later_reports_hedge_only_what_is_new():
     hedged = HedgeBook(10)
     key = ("venue_a", "t-250906120000_lmb_eb")
     first = fill_event(state=OrderState.PARTIALLY_FILLED, filled=Decimal("16"))
-    assert should_hedge(first, SHOULD_MATCH, hedged) == ("venue_b", Decimal("16"))
+    assert should_hedge(first, SHOULD_MATCH, hedged) == (
+        HedgeTarget("venue_b"),
+        Decimal("16"),
+    )
     hedged.record(key, Decimal("16"))
     again = fill_event(state=OrderState.PARTIALLY_FILLED, filled=Decimal("16"))
     assert should_hedge(again, SHOULD_MATCH, hedged) is None
     more = fill_event(state=OrderState.PARTIALLY_FILLED, filled=Decimal("40"))
-    assert should_hedge(more, SHOULD_MATCH, hedged) == ("venue_b", Decimal("24"))
+    assert should_hedge(more, SHOULD_MATCH, hedged) == (
+        HedgeTarget("venue_b"),
+        Decimal("24"),
+    )
     hedged.record(key, Decimal("24"))
     done = fill_event(state=OrderState.CANCELLED, filled=Decimal("40"))
     assert should_hedge(done, SHOULD_MATCH, hedged) is None
@@ -514,8 +525,14 @@ def test_should_hedge_does_not_write_the_book():
     """Deciding on a hedge covers nothing; only a published hedge does."""
     hedged = HedgeBook(10)
     event = fill_event(state=OrderState.PARTIALLY_FILLED, filled=Decimal("16"))
-    assert should_hedge(event, SHOULD_MATCH, hedged) == ("venue_b", Decimal("16"))
-    assert should_hedge(event, SHOULD_MATCH, hedged) == ("venue_b", Decimal("16"))
+    assert should_hedge(event, SHOULD_MATCH, hedged) == (
+        HedgeTarget("venue_b"),
+        Decimal("16"),
+    )
+    assert should_hedge(event, SHOULD_MATCH, hedged) == (
+        HedgeTarget("venue_b"),
+        Decimal("16"),
+    )
     assert hedged.hedged(("venue_a", event.intent_id)) == 0
 
 
@@ -527,7 +544,10 @@ def test_a_report_behind_a_bumped_hedge_adds_nothing():
     behind = fill_event(state=OrderState.PARTIALLY_FILLED, filled=Decimal("100"))
     assert should_hedge(behind, SHOULD_MATCH, hedged) is None
     ahead = fill_event(state=OrderState.PARTIALLY_FILLED, filled=Decimal("110"))
-    assert should_hedge(ahead, SHOULD_MATCH, hedged) == ("venue_b", Decimal("7"))
+    assert should_hedge(ahead, SHOULD_MATCH, hedged) == (
+        HedgeTarget("venue_b"),
+        Decimal("7"),
+    )
 
 
 def test_hedge_ids_stay_unique_and_attributable():
@@ -554,7 +574,7 @@ def test_a_cancelled_order_that_filled_is_still_hedged():
     """A cancellation after a partial fill still leaves a position to close."""
     event = fill_event(state=OrderState.CANCELLED, filled=Decimal("10"))
     assert should_hedge(event, SHOULD_MATCH, HedgeBook(10)) == (
-        "venue_b",
+        HedgeTarget("venue_b"),
         Decimal("10"),
     )
 
@@ -907,6 +927,7 @@ async def test_consume_order_events_picks_up_a_refreshed_fee_schedule():
     }
     cursors = await resolve_cursors(redis, {"venue_a", "venue_b"})
     assert set(cursors) == {
+        INTENTS_STREAM,
         ORDER_EVENTS_STREAM,
         fees_stream("venue_a"),
         fees_stream("venue_b"),
@@ -1062,7 +1083,7 @@ def test_matching_venues_reads_every_strategy_that_hedges():
         ),
     )
 
-    assert matching_venues(config) == {"lmb": "venue_b"}
+    assert matching_venues(config) == {"lmb": HedgeTarget("venue_b")}
 
 
 def test_hedging_venues_covers_both_legs_and_nothing_else():
@@ -1200,3 +1221,212 @@ async def test_a_second_increment_is_published_under_a_fresh_id():
     assert second.amount == Decimal("24")
     assert second.tags["hedge_of"] == fill_event().intent_id
     assert len(await intents_on(redis)) == 2
+
+
+# Contract hedges -----------------------------------------------------------
+
+PERP = "BTC/USDT:USDT"
+PERP_TARGET = {"lmb": HedgeTarget("venue_p", PERP)}
+
+
+def perp_schedule(
+    contract_size: str = "10", min_cost: str | None = "5", precision: int = 0
+) -> FeeScheduleEvent:
+    """Return the perpetual venue's schedule: fees in quote, sized in contracts."""
+    return FeeScheduleEvent(
+        ts_recv=now_ns(),
+        venue="venue_p",
+        fee_currency="quote",
+        symbols=[
+            SymbolFees(
+                symbol=PERP,
+                maker=Decimal("0.0002"),
+                taker=Decimal("0.0006"),
+                min_cost=None if min_cost is None else float(min_cost),
+                amount_precision=precision,
+                contract_size=Decimal(contract_size),
+            )
+        ],
+        source=FeeSource.MARKETS,
+    )
+
+
+def test_contract_order_rounds_towards_zero_and_respects_the_minimum():
+    """Whole contracts only, never over the residual, never under the minimum."""
+    entry = perp_schedule().symbols[0]
+    order = contract_order(Decimal("37"), entry, Decimal(1))
+    assert order is not None
+    assert (order.side, order.contracts, order.base) == (
+        Side.SELL,
+        Decimal(3),
+        Decimal(30),
+    )
+    assert order.reduce_only is False
+    cover = contract_order(Decimal("-25"), entry, Decimal(1))
+    assert cover is not None
+    assert (cover.side, cover.contracts, cover.base, cover.reduce_only) == (
+        Side.BUY,
+        Decimal(2),
+        Decimal(-20),
+        True,
+    )
+    assert contract_order(Decimal("9"), entry, Decimal(1)) is None
+    # One contract of 10 base at 0.4 is 4 quote, under the minimum of 5.
+    assert contract_order(Decimal("10"), entry, Decimal("0.4")) is None
+
+
+@pytest.mark.asyncio
+async def test_a_spot_buy_is_hedged_by_a_perpetual_short_with_carry_over():
+    """37 base hedge 3 contracts of 10; the 7 left join the next fill."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+    schedules = {"venue_a": QUOTE, "venue_p": perp_schedule()}
+    hedged = HedgeBook(10)
+    contracts = ContractHedger()
+    first = await handle_order_event(
+        redis,
+        publisher,
+        fill_event(intent_id="t-1_lmb_eb", side=Side.BUY, filled=Decimal(37)),
+        PERP_TARGET,
+        hedged,
+        schedules,
+        contracts,
+    )
+    assert first is not None
+    assert (first.venue, first.symbol, first.side) == ("venue_p", PERP, Side.SELL)
+    assert first.amount == Decimal(3)
+    assert first.reduce_only is False
+    assert contracts.residual("lmb") == Decimal(7)
+
+    # A repeated report of the same fill adds nothing.
+    again = await handle_order_event(
+        redis,
+        publisher,
+        fill_event(intent_id="t-1_lmb_eb", side=Side.BUY, filled=Decimal(37)),
+        PERP_TARGET,
+        hedged,
+        schedules,
+        contracts,
+    )
+    assert again is None
+    assert contracts.residual("lmb") == Decimal(7)
+
+    second = await handle_order_event(
+        redis,
+        publisher,
+        fill_event(intent_id="t-2_lmb_eb", side=Side.BUY, filled=Decimal(5)),
+        PERP_TARGET,
+        hedged,
+        schedules,
+        contracts,
+    )
+    assert second is not None and second.amount == Decimal(1)
+    assert contracts.residual("lmb") == Decimal(2)
+
+
+@pytest.mark.asyncio
+async def test_a_spot_sell_is_covered_reduce_only():
+    """Selling inventory buys the short back, and only ever shrinks it."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    hedge = await handle_order_event(
+        redis,
+        StreamPublisher(maxlen=100),
+        fill_event(side=Side.SELL, filled=Decimal(20)),
+        PERP_TARGET,
+        HedgeBook(10),
+        {"venue_a": QUOTE, "venue_p": perp_schedule()},
+        ContractHedger(),
+    )
+    assert hedge is not None
+    assert (hedge.side, hedge.amount, hedge.reduce_only) == (
+        Side.BUY,
+        Decimal(2),
+        True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_fee_charged_in_base_shrinks_the_short():
+    """A buy charged in base delivers less base, and the short matches it."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    contracts = ContractHedger()
+    hedge = await handle_order_event(
+        redis,
+        StreamPublisher(maxlen=100),
+        fill_event(side=Side.BUY, filled=Decimal(100)),
+        PERP_TARGET,
+        HedgeBook(10),
+        {
+            "venue_a": schedule("venue_a", "received", maker="0.01"),
+            "venue_p": perp_schedule(contract_size="1"),
+        },
+        contracts,
+    )
+    assert hedge is not None and hedge.amount == Decimal(99)
+    assert contracts.residual("lmb") == Decimal(0)
+
+
+@pytest.mark.asyncio
+async def test_a_fill_on_the_hedge_instrument_is_not_hedged_again():
+    """The hedge's own fill, attributed to the strategy, is left alone."""
+    event = fill_event(venue="venue_p")
+    event = OrderEvent(
+        **{
+            **{f: getattr(event, f) for f in event.__struct_fields__},
+            "symbol": PERP,
+        }
+    )
+    assert should_hedge(event, PERP_TARGET, HedgeBook(10)) is None
+
+
+@pytest.mark.asyncio
+async def test_a_self_hedged_leg_is_skipped_by_the_consumer():
+    """An intent tagged self-hedged is read from oms:intents and its fill skipped."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+    schedules = {"venue_a": QUOTE, "venue_p": perp_schedule(contract_size="1")}
+    cursors = await resolve_cursors(redis, {"venue_a", "venue_p"})
+    consumer = asyncio.create_task(
+        consume_order_events(redis, publisher, PERP_TARGET, 10, 10, schedules, cursors)
+    )
+    await asyncio.sleep(0.05)
+    await publisher.publish(
+        redis,
+        OrderIntent(
+            ts_recv=now_ns(),
+            intent_id="t-9_lmb_tk",
+            strategy="lmb_tk",
+            venue="venue_a",
+            symbol=SYMBOL,
+            side=Side.BUY,
+            order_type=OrderKind.LIMIT,
+            amount=Decimal(10),
+            price=Decimal(1),
+            tags={SELF_HEDGED_TAG: "1"},
+        ),
+    )
+    await publisher.publish(
+        redis, fill_event(intent_id="t-9_lmb_tk", side=Side.BUY, filled=Decimal(10))
+    )
+    await publisher.publish(
+        redis, fill_event(intent_id="t-8_lmb_eb", side=Side.BUY, filled=Decimal(10))
+    )
+    await asyncio.sleep(0.2)
+    consumer.cancel()
+    hedges = [i for i in await intents_on(redis) if i.venue == "venue_p"]
+    assert [h.tags["hedge_of"] for h in hedges] == ["t-8_lmb_eb"]
+
+
+def test_hedge_target_reads_the_hedge_table_or_the_shorthand():
+    """A hedge table names an instrument; taker_exchange is the same symbol."""
+    assert hedge_target({"should_match": False, "taker_exchange": "v"}) is None
+    assert hedge_target({"should_match": True, "taker_exchange": "v"}) == HedgeTarget(
+        "v"
+    )
+    target = hedge_target(
+        {"should_match": True, "hedge": {"venue": "venue_p", "symbol": PERP}}
+    )
+    assert target == HedgeTarget("venue_p", PERP)
+    assert target is not None and target.is_contract()
+    with pytest.raises(ValueError):
+        hedge_target({"should_match": True})
