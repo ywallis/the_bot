@@ -7,6 +7,7 @@ entries differ in ``market_type`` and share a CCXT class through
 ``ccxt_id``. See ``docs/design/inventory-hedging.md`` section 3.
 """
 
+import asyncio
 import logging
 import os
 
@@ -15,7 +16,7 @@ from dotenv import load_dotenv
 
 import apps.shared.src.logging_config as logging_config
 from apps.shared.src.config import VenueConfig, load_app_config
-from apps.shared.src.errors import RequestTimeout
+from apps.shared.src.errors import NetworkError
 from apps.shared.src.structs import CustomExchange
 
 # Initializing centralized logging
@@ -23,25 +24,39 @@ logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
 
+# Attempts at loading a client's markets, and the pause before the n-th
+# retry in seconds is n times this.
+LOAD_ATTEMPTS = 5
+LOAD_BACKOFF_S = 2.0
+
+
 async def load_clients():
     """
     Load markets for all authenticated clients with retry logic.
 
-    Attempts to load markets for each client up to 5 times.
-    Logs success or failure.
+    A timeout or any other network error, a rate limit refusal included, is
+    retried with a growing pause: every process loads markets at start, and
+    two venue entries sharing one key make that burst hit the limit.
+
+    Raises
+    ------
+    NetworkError
+        If a client still fails after ``LOAD_ATTEMPTS`` attempts.
     """
     for client in authenticated_clients.values():
-        attempt: int = 1
-        while attempt <= 5:
+        for attempt in range(1, LOAD_ATTEMPTS + 1):
             try:
                 await client.load_markets()
                 logger.info(f"Client {client.name} loaded successfully.")
                 break
-            except RequestTimeout as e:
+            except NetworkError as e:
                 logger.error(
-                    f"Client {client.name} has timed out on attempt n. {attempt}, retrying. {e}"
+                    f"Client {client.name} failed to load markets on attempt "
+                    f"n. {attempt}: {e}"
                 )
-                attempt += 1
+                if attempt == LOAD_ATTEMPTS:
+                    raise
+                await asyncio.sleep(LOAD_BACKOFF_S * attempt)
 
 
 def ccxt_params(
