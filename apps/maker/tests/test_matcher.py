@@ -39,9 +39,12 @@ from apps.shared.src.config import (
     VenueConfig,
 )
 from apps.shared.src.events import (
+    ALERTS_STREAM,
     INTENTS_STREAM,
     ORDER_EVENTS_STREAM,
     SELF_HEDGED_TAG,
+    AlertEvent,
+    AlertLevel,
     FeeScheduleEvent,
     FeeSource,
     fees_stream,
@@ -1322,6 +1325,36 @@ async def test_a_spot_buy_is_hedged_by_a_perpetual_short_with_carry_over():
     )
     assert second is not None and second.amount == Decimal(1)
     assert contracts.residual("lmb") == Decimal(2)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("perp", [None, "no_size"])
+async def test_no_contract_size_sends_no_hedge_and_alerts(perp):
+    """Without a contract size the fill stays in the residual and an alert goes out."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    schedules: dict[str, FeeScheduleEvent] = {"venue_a": QUOTE}
+    if perp == "no_size":
+        schedule = perp_schedule()
+        schedule.symbols[0].contract_size = None
+        schedules["venue_p"] = schedule
+    contracts = ContractHedger()
+    hedge = await handle_order_event(
+        redis,
+        StreamPublisher(maxlen=100),
+        fill_event(side=Side.BUY, filled=Decimal(40)),
+        PERP_TARGET,
+        HedgeBook(10),
+        schedules,
+        contracts,
+    )
+    assert hedge is None
+    assert contracts.residual("lmb") == Decimal(40)
+    assert await redis.xlen(INTENTS_STREAM) == 0
+    [(_, fields)] = await redis.xrange(ALERTS_STREAM)
+    alert = from_stream_fields(fields)
+    assert isinstance(alert, AlertEvent)
+    assert alert.level is AlertLevel.CRITICAL
+    assert alert.key == f"hedge:venue_p:{PERP}"
 
 
 @pytest.mark.asyncio
