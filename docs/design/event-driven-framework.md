@@ -478,6 +478,53 @@ the recorder's write path, and a trading process must never be able to stall
 on the shipper. A `.sealed` sidecar marker per bucket does not eliminate the
 reopen race, only moves it, and doubles the inode count.
 
+### 7.5 The shipper as built, 2026-10-13
+
+The archive host pulls. It connects to each trading host over SSH and runs
+`apps/maker/src/shipper.py` there, one verb per connection:
+
+1. `manifest` packs every sealed `.jsonl` to `.jsonl.zst` at level 3, then
+   lists each sealed compressed file with its size and SHA-256.
+2. `send` reads the paths the archive lacks and writes them to stdout as one
+   uncompressed tar stream.
+3. `prune` reads `(path, sha256)` pairs and deletes each file whose checksum
+   still matches.
+
+`apps/accountant/src/archive.py` drives the three verbs. It verifies each
+file against the manifest as it arrives, recompresses it at `archive.level`,
+and records it in `<archive root>/ledger.sqlite` before it reads the next
+one. It sends `prune` only for files the ledger holds with the checksum the
+source still reports. An interrupted run therefore loses nothing.
+
+Why pull and not push:
+
+- The archive host can sit behind NAT. It needs no open port.
+- The trading host holds venue keys and no credential to anything else.
+- The archive's key can do three things only. `shipper serve` runs as a
+  forced command in `authorized_keys`, and it honours only the last word of
+  `SSH_ORIGINAL_COMMAND`. The key gives no shell on the trading host.
+
+Each side checks the other's input. The shipper accepts a path only in the
+exact form its manifest prints, inside the root and in `sealed_files`. The
+archive accepts a manifest path only if it is relative, holds no `..` and
+names a compressed recording.
+
+The layout is `<archive root>/<source>/<stream path>/<bucket>.jsonl.zst`.
+Each source has its own directory, because receive times carry the latency
+of the host that recorded them. Every recording tool reads an archived
+source with `--root <archive root>/<source>`, through
+`streams.open_recording`.
+
+The shipper keeps the conservative `sealed_files` of section 7.2, so it
+needs none of the changes in section 7.4. A lagging recorder can reopen a
+sealed bucket only while that bucket is still the newest file, and the
+shipper never takes the newest file. The cost is that the newest file of
+each stream stays on the trading host while the recorder is stopped.
+Section 7.4 is still the way to release it.
+
+Not built yet: the replayer of section 9, a dashboard over the archive, and
+compaction to Parquet.
+
 ## 8. Strategy runtime
 
 `apps/shared/src/runtime.py` is a small SDK for writing a strategy against
