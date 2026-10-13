@@ -108,9 +108,9 @@ async def test_watch_balance_publishes_complete_snapshots():
     publisher = StreamPublisher(maxlen=100)
     cache: balance.BalanceCache = {}
     client = Client()
-    await balance.fetch_balance(client, redis, publisher, cache)  # ty: ignore[invalid-argument-type]
+    await balance.fetch_balance(client, redis, publisher, cache)
     with pytest.raises(RuntimeError):
-        await balance.watch_balance(client, redis, publisher, cache)  # ty: ignore[invalid-argument-type]
+        await balance.watch_balance(client, redis, publisher, cache)
 
     entries = await redis.xrange("acct:balance:venue_a")
     assert len(entries) == 2
@@ -147,8 +147,8 @@ async def test_a_rest_fetch_drops_a_currency_the_venue_no_longer_lists():
     publisher = StreamPublisher(maxlen=100)
     cache: balance.BalanceCache = {}
     client = Client()
-    await balance.fetch_balance(client, redis, publisher, cache)  # ty: ignore[invalid-argument-type]
-    await balance.fetch_balance(client, redis, publisher, cache)  # ty: ignore[invalid-argument-type]
+    await balance.fetch_balance(client, redis, publisher, cache)
+    await balance.fetch_balance(client, redis, publisher, cache)
     entries = await redis.xrange("acct:balance:venue_a")
     last = events.from_stream_fields(entries[-1][1])
     assert isinstance(last, BalanceEvent)
@@ -181,5 +181,5 @@ async def test_refresh_balance_fetches_on_its_interval(monkeypatch):
         id = "venue_a"
 
     with pytest.raises(asyncio.CancelledError):
-        await balance.refresh_balance(Client(), None, None, {})  # ty: ignore[invalid-argument-type]
+        await balance.refresh_balance(Client(), None, None, {})
     assert len(calls) == 2
