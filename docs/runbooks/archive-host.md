@@ -7,12 +7,19 @@ after it verifies them. Design: section 7.5 of
 
 ## 1. Prepare the trading host
 
-1. Clone the repository with its submodule and run `uv sync --locked`.
-2. Make sure that `recorder.root` in `config.toml` points at the recordings.
-3. Run the shipper once by hand:
+1. Make a checkout for the shipper only. Do not use a checkout that you
+   switch branches in, because the forced command runs from it:
 
    ```bash
-   uv run --frozen -m apps.maker.src.shipper manifest
+   git worktree add --detach ~/services/the_bot-shipper origin/main
+   cd ~/services/the_bot-shipper && uv sync --frozen
+   ```
+
+2. Run the shipper once by hand. Replace `<data>` with the absolute path of
+   the recording root:
+
+   ```bash
+   uv run --frozen -m apps.maker.src.shipper --root <data> manifest
    ```
 
    The command prints one JSON line for each sealed recording. An empty
@@ -27,15 +34,16 @@ after it verifies them. Design: section 7.5 of
    ```
 
 2. On the trading host, add the public key to `~/.ssh/authorized_keys` on
-   one line. Replace `<repo>` with the absolute path of the checkout and
-   `<uv>` with the output of `command -v uv`:
+   one line. Replace `<archive ip>` with the address the archive host
+   connects from, `<repo>` with the shipper checkout, `<uv>` with the
+   output of `command -v uv` and `<data>` with the recording root:
 
    ```text
-   command="cd <repo> && <uv> run --frozen -m apps.maker.src.shipper serve",restrict ssh-ed25519 AAAA... archive_pull
+   from="<archive ip>",command="cd <repo> && <uv> run --frozen -m apps.maker.src.shipper --root <data> serve",restrict ssh-ed25519 AAAA... archive_pull
    ```
 
    This key can run `manifest`, `send` and `prune` only. It cannot open a
-   shell.
+   shell. Leave out `from=` if the archive host has no fixed address.
 
 3. On the archive host, add an alias to `~/.ssh/config`:
 
@@ -55,9 +63,10 @@ after it verifies them. Design: section 7.5 of
 
 ## 3. Configure the archive host
 
-Add the archive section to `config.toml`. Use one `[[archive.sources]]`
-entry for each trading host. The `name` is the directory under the archive
-root.
+The archive host reads only the `[archive]` table. Put it in a separate
+file, for example `~/services/archive.toml`, and pass `--config` to every
+command. Use one `[[archive.sources]]` entry for each trading host. The
+`name` is the directory under the archive root.
 
 ```toml
 [archive]
@@ -75,7 +84,7 @@ To archive recordings on the archive host itself, leave out `ssh` and set
 ## 4. Pull for the first time without pruning
 
 ```bash
-uv run -m apps.accountant.src.archive --no-prune
+uv run -m apps.accountant.src.archive --config ~/services/archive.toml --no-prune
 ```
 
 The command prints one summary line for each source. Check that `failed` is
@@ -91,7 +100,7 @@ If the first pull is correct, run the pull with pruning every hour from cron
 on the archive host:
 
 ```text
-15 * * * * cd <repo> && <uv> run -m apps.accountant.src.archive >> archive.log 2>&1
+15 * * * * cd <repo> && <uv> run --frozen -m apps.accountant.src.archive --config <archive.toml> >> archive.log 2>&1
 ```
 
 Minute 15 is after the recorder seals the previous hour. The recorder keeps
