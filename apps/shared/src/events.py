@@ -21,6 +21,7 @@ SCHEMA_VERSION = 1
 INTENTS_STREAM = "oms:intents"
 ORDER_EVENTS_STREAM = "oms:events"
 LATENCY_STREAM = "oms:latency"
+ALERTS_STREAM = "alerts"
 OMS_CONSUMER_GROUP = "oms"
 
 # ``replace_of`` value meaning "whatever this strategy key has resting". A
@@ -108,6 +109,59 @@ def fees_stream(venue: str) -> str:
     return f"acct:fees:{venue}"
 
 
+def position_stream(venue: str) -> str:
+    """
+    Return the position stream name for a derivatives venue.
+
+    Parameters
+    ----------
+    venue : str
+        Venue id.
+
+    Returns
+    -------
+    str
+        Stream name.
+    """
+    return f"acct:position:{venue}"
+
+
+def funding_stream(venue: str, symbol: str) -> str:
+    """
+    Return the funding rate stream name for a perpetual.
+
+    Parameters
+    ----------
+    venue : str
+        Venue id.
+    symbol : str
+        CCXT contract symbol.
+
+    Returns
+    -------
+    str
+        Stream name.
+    """
+    return f"md:funding:{venue}:{symbol}"
+
+
+def delta_stream(asset: str) -> str:
+    """
+    Return the delta stream name for an asset.
+
+    Parameters
+    ----------
+    asset : str
+        Base asset code, e.g. ``BTC``.
+
+    Returns
+    -------
+    str
+        Stream name.
+    """
+    return f"acct:delta:{asset}"
+
+
 def snapshot_key(venue: str, symbol: str) -> str:
     """
     Return the legacy latest-snapshot key for an order book.
@@ -174,6 +228,10 @@ class EventType(str, Enum):
     CANCEL_INTENT = "cancel_intent"
     ORDER_EVENT = "order_event"
     LATENCY = "latency"
+    POSITION = "position"
+    FUNDING = "funding"
+    DELTA = "delta"
+    ALERT = "alert"
 
 
 class FeeSource(str, Enum):
@@ -217,6 +275,22 @@ class OrderState(str, Enum):
     FILLED = "filled"
     CANCELLED = "cancelled"
     EXPIRED = "expired"
+
+
+class PositionSide(str, Enum):
+    """Direction of a derivatives position."""
+
+    LONG = "long"
+    SHORT = "short"
+    FLAT = "flat"
+
+
+class AlertLevel(str, Enum):
+    """How urgently an alert wants the operator."""
+
+    INFO = "info"
+    WARNING = "warning"
+    CRITICAL = "critical"
 
 
 class Liquidity(str, Enum):
@@ -614,6 +688,165 @@ class LatencyRecord(Event, tag=EventType.LATENCY.value):
     ts_venue_ack: int | None = None
 
 
+class PositionEvent(Event, tag=EventType.POSITION.value):
+    """
+    The position held in one contract symbol on one venue.
+
+    A snapshot by contract, like ``BalanceEvent``: the latest event per
+    venue and symbol is the whole truth about that position. A symbol with
+    no position is published as ``flat`` so that a consumer can tell "no
+    position" from "no feed yet". See ``docs/design/inventory-hedging.md``
+    section 5.
+
+    Attributes
+    ----------
+    venue : str
+        Venue id.
+    symbol : str
+        CCXT contract symbol.
+    seq : int
+        Per-stream producer sequence number.
+    ts_exch : int | None
+        Exchange timestamp in milliseconds, if provided.
+    side : PositionSide
+        Long, short or flat.
+    contracts : Decimal
+        Size in contracts, never negative; ``side`` carries the sign.
+    contract_size : Decimal
+        Base units one contract stands for.
+    base_amount : Decimal
+        Contracts times contract size, negative for a short. This is the
+        figure delta is computed from.
+    entry_price : Decimal | None
+        Average entry price, if reported.
+    mark_price : Decimal | None
+        Mark price, if reported.
+    liquidation_price : Decimal | None
+        Liquidation price, if reported. A unified account often reports
+        none for a hedged short, which is what it should be.
+    unrealized_pnl : Decimal | None
+        Unrealized profit in the settlement currency, if reported.
+    margin_mode : str | None
+        ``cross`` or ``isolated``, if reported.
+    leverage : Decimal | None
+        Leverage, if reported.
+    collateral : Decimal | None
+        Margin backing the position, if reported.
+    """
+
+    venue: str
+    symbol: str
+    seq: int
+    ts_exch: int | None
+    side: PositionSide
+    contracts: Decimal
+    contract_size: Decimal
+    base_amount: Decimal
+    entry_price: Decimal | None = None
+    mark_price: Decimal | None = None
+    liquidation_price: Decimal | None = None
+    unrealized_pnl: Decimal | None = None
+    margin_mode: str | None = None
+    leverage: Decimal | None = None
+    collateral: Decimal | None = None
+
+
+class FundingEvent(Event, tag=EventType.FUNDING.value):
+    """
+    The current funding rate of one perpetual.
+
+    Attributes
+    ----------
+    venue : str
+        Venue id.
+    symbol : str
+        CCXT contract symbol.
+    seq : int
+        Per-stream producer sequence number.
+    funding_rate : float
+        Rate for the coming interval as a fraction of notional; positive
+        pays the short.
+    next_funding_ts : int | None
+        When the next payment is due, milliseconds since the epoch.
+    interval_s : int | None
+        Seconds between payments, None when the venue does not say.
+    mark_price : float | None
+        Mark price, if reported.
+    index_price : float | None
+        Index price, if reported.
+    """
+
+    venue: str
+    symbol: str
+    seq: int
+    funding_rate: float
+    next_funding_ts: int | None = None
+    interval_s: int | None = None
+    mark_price: float | None = None
+    index_price: float | None = None
+
+
+class DeltaEvent(Event, tag=EventType.DELTA.value):
+    """
+    How far one asset's holdings are from flat, as the reconciler sees them.
+
+    A snapshot. The inventory strategy reads it as its kill switch and the
+    notifier for the out-of-band alert.
+
+    Attributes
+    ----------
+    asset : str
+        Base asset code.
+    spot_base : dict[str, Decimal]
+        Total base held per spot venue.
+    perp_base : Decimal
+        Perpetual position in base units, negative for a short.
+    delta : Decimal
+        Total spot base plus ``perp_base``.
+    in_flight_base : Decimal
+        Signed base of corrections sent and not yet reported terminal.
+    deadband : Decimal
+        Delta the reconciler tolerates without acting.
+    healthy : bool
+        False when a feed the delta depends on is missing or stale, or the
+        margin guard has tripped. A builder stops on False.
+    reason : str | None
+        Why the delta is not healthy, if it is not.
+    """
+
+    asset: str
+    spot_base: dict[str, Decimal]
+    perp_base: Decimal
+    delta: Decimal
+    in_flight_base: Decimal
+    deadband: Decimal
+    healthy: bool = True
+    reason: str | None = None
+
+
+class AlertEvent(Event, tag=EventType.ALERT.value):
+    """
+    Something the operator should hear about.
+
+    Attributes
+    ----------
+    source : str
+        What raised it, e.g. a strategy identifier or ``notifier``.
+    key : str
+        Stable name of the condition, used for the cooldown: two alerts
+        with one key within the cooldown are delivered once.
+    level : AlertLevel
+        Urgency.
+    message : str
+        Human readable text.
+    """
+
+    source: str
+    key: str
+    level: AlertLevel
+    message: str
+
+
 AnyEvent = Union[
     BookEvent,
     TradeEvent,
@@ -623,6 +856,10 @@ AnyEvent = Union[
     CancelIntent,
     OrderEvent,
     LatencyRecord,
+    PositionEvent,
+    FundingEvent,
+    DeltaEvent,
+    AlertEvent,
 ]
 
 EVENT_TYPES: dict[type, EventType] = {
@@ -634,6 +871,10 @@ EVENT_TYPES: dict[type, EventType] = {
     CancelIntent: EventType.CANCEL_INTENT,
     OrderEvent: EventType.ORDER_EVENT,
     LatencyRecord: EventType.LATENCY,
+    PositionEvent: EventType.POSITION,
+    FundingEvent: EventType.FUNDING,
+    DeltaEvent: EventType.DELTA,
+    AlertEvent: EventType.ALERT,
 }
 
 # Codec ---------------------------------------------------------------------
@@ -774,4 +1015,12 @@ def stream_for(event: AnyEvent) -> str:
             return ORDER_EVENTS_STREAM
         case LatencyRecord():
             return LATENCY_STREAM
+        case PositionEvent():
+            return position_stream(event.venue)
+        case FundingEvent():
+            return funding_stream(event.venue, event.symbol)
+        case DeltaEvent():
+            return delta_stream(event.asset)
+        case AlertEvent():
+            return ALERTS_STREAM
     raise TypeError(f"Unknown event type: {type(event)!r}")

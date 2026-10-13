@@ -9,6 +9,7 @@ from apps.shared.src import events
 from apps.shared.src.config import parse_app_config
 from apps.shared.src.events import BookEvent, TradeEvent
 from apps.shared.src.streams import (
+    feed_stream,
     StreamPublisher,
     bucket_of_file,
     configured_streams,
@@ -126,6 +127,7 @@ def test_configured_streams_covers_feeds_venues_and_oms():
         "acct:balance:venue_b",
         "acct:fees:venue_a",
         "acct:fees:venue_b",
+        "alerts",
         "md:book:venue_a:BTC/USDT",
         "md:book:venue_b:SOL/USDT",
         "md:trade:venue_a:BTC/USDT",
@@ -135,6 +137,46 @@ def test_configured_streams_covers_feeds_venues_and_oms():
     ]
     assert "md:book:venue_b:ETH/USDT" in configured_streams(config, production=False)
     assert "md:book:venue_b:ETH/USDT" in configured_streams(config, production=None)
+
+
+def test_configured_streams_cover_the_derivatives_feeds():
+    """Position, funding and delta feeds are recorded like every other."""
+    config = parse_app_config(
+        {
+            "venues": VENUES
+            + [{"id": "venueperp", "name": "Perp", "market_type": "swap"}],
+            "strategies": [
+                {
+                    "identifier": "inv",
+                    "type": "inventory",
+                    "production": True,
+                    "subscriptions": [
+                        {
+                            "venue": "venueperp",
+                            "symbol": "BTC/USDT:USDT",
+                            "feeds": ["book", "position", "funding"],
+                        },
+                        {
+                            "venue": "venue_a",
+                            "symbol": "BTC/USDT",
+                            "feeds": ["book", "delta"],
+                        },
+                    ],
+                },
+            ],
+        }
+    )
+    streams = configured_streams(config, production=True)
+    assert "acct:position:venueperp" in streams
+    assert "md:funding:venueperp:BTC/USDT:USDT" in streams
+    assert "acct:delta:BTC" in streams
+    assert "md:book:venueperp:BTC/USDT:USDT" in streams
+
+
+def test_feed_stream_rejects_an_unknown_feed():
+    """A feed name nothing publishes is an error, not a silent stream."""
+    with pytest.raises(ValueError):
+        feed_stream("ticker", "venue_a", "BTC/USDT")
 
 
 def test_stream_path_layout():

@@ -22,17 +22,23 @@ from apps.shared.src.events import (
     INTENTS_STREAM,
     ORDER_EVENTS_STREAM,
     REPLACE_RESTING,
+    AlertEvent,
+    AlertLevel,
     AnyEvent,
     AssetBalance,
     BalanceEvent,
     BookEvent,
     CancelIntent,
+    DeltaEvent,
     FeeScheduleEvent,
     FeeSource,
+    FundingEvent,
     OrderEvent,
     OrderIntent,
     OrderKind,
     OrderState,
+    PositionEvent,
+    PositionSide,
     Side,
     SymbolFees,
     TradeEvent,
@@ -646,3 +652,137 @@ async def test_no_timer_without_an_interval(redis: Any):
     await runtime.step()
     assert handler.timers == 0
     assert runtime._block_ms() == 10
+
+
+class DerivativesRecorder(Recorder):
+    """A recorder that also keeps positions, funding and deltas."""
+
+    async def on_position(self, event: PositionEvent) -> None:
+        """Record the event."""
+        self.events.append(event)
+
+    async def on_funding(self, event: FundingEvent) -> None:
+        """Record the event."""
+        self.events.append(event)
+
+    async def on_delta(self, event: DeltaEvent) -> None:
+        """Record the event."""
+        self.events.append(event)
+
+
+def inventory_config() -> StrategyConfig:
+    """Return a strategy subscribed to a perpetual's derivatives feeds."""
+    return StrategyConfig(
+        identifier="inv",
+        type="inventory",
+        production=False,
+        subscriptions=(
+            Subscription(venue="venue_b", symbol="TEST/USDT", feeds=("book", "delta")),
+            Subscription(
+                venue="venue_p",
+                symbol="TEST/USDT:USDT",
+                feeds=("book", "position", "funding"),
+            ),
+        ),
+        params={},
+    )
+
+
+def position(ts_recv: int = T0, base: str = "-10") -> PositionEvent:
+    """Return a short position."""
+    return PositionEvent(
+        ts_recv=ts_recv,
+        venue="venue_p",
+        symbol="TEST/USDT:USDT",
+        seq=1,
+        ts_exch=None,
+        side=PositionSide.SHORT,
+        contracts=-Decimal(base),
+        contract_size=Decimal(1),
+        base_amount=Decimal(base),
+    )
+
+
+def funding(ts_recv: int = T0) -> FundingEvent:
+    """Return a funding rate."""
+    return FundingEvent(
+        ts_recv=ts_recv,
+        venue="venue_p",
+        symbol="TEST/USDT:USDT",
+        seq=1,
+        funding_rate=0.0001,
+    )
+
+
+def delta(ts_recv: int = T0) -> DeltaEvent:
+    """Return a delta."""
+    return DeltaEvent(
+        ts_recv=ts_recv,
+        asset="TEST",
+        spot_base={"venue_b": Decimal(10)},
+        perp_base=Decimal(-10),
+        delta=Decimal(0),
+        in_flight_base=Decimal(0),
+        deadband=Decimal(1),
+    )
+
+
+def test_derivatives_feeds_are_read_and_primed():
+    """Position, funding and delta streams are read, and primed before books."""
+    streams = subscribed_streams(inventory_config())
+    assert "acct:position:venue_p" in streams
+    assert "md:funding:venue_p:TEST/USDT:USDT" in streams
+    assert "acct:delta:TEST" in streams
+    snapshots = snapshot_streams(inventory_config())
+    assert snapshots.index("acct:position:venue_p") < snapshots.index(
+        "md:book:venue_b:TEST/USDT"
+    )
+    assert "acct:delta:TEST" in snapshots
+
+
+@pytest.mark.asyncio
+async def test_derivatives_events_reach_their_hooks(redis: Any):
+    """A strategy starting late knows its position, funding and delta."""
+    await publish(redis, position(base="-5"), position(), funding(), delta())
+    handler = DerivativesRecorder()
+    runtime = Runtime(redis, config(), inventory_config(), handler)
+    await runtime.start()
+    kinds = sorted(type(e).__name__ for e in handler.events)
+    assert kinds == ["DeltaEvent", "FundingEvent", "PositionEvent"]
+    (primed,) = [e for e in handler.events if isinstance(e, PositionEvent)]
+    assert primed.base_amount == Decimal(-10)
+    await publish(redis, position(base="-7"))
+    await runtime.step()
+    last = handler.events[-1]
+    assert isinstance(last, PositionEvent) and last.base_amount == Decimal(-7)
+
+
+@pytest.mark.asyncio
+async def test_alerts_go_to_the_alerts_stream(redis: Any):
+    """A strategy's alert is published for the notifier."""
+    runtime = Runtime(redis, config(), inventory_config(), Recorder())
+    await runtime.alert("delta", AlertLevel.WARNING, "out of band")
+    (entry,) = await redis.xrange("alerts")
+    event = from_stream_fields(entry[1])
+    assert isinstance(event, AlertEvent)
+    assert (event.source, event.key, event.level) == (
+        "inv",
+        "delta",
+        AlertLevel.WARNING,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_reduce_only_intent_is_built_through_the_runtime(redis: Any):
+    """The runtime builds reduce-only intents for unwinding a perpetual."""
+    runtime = Runtime(redis, config(), inventory_config(), Recorder())
+    intent = runtime.order_intent(
+        venue="venue_p",
+        symbol="TEST/USDT:USDT",
+        side=Side.BUY,
+        amount=3,
+        order_identifier="h",
+        order_type=OrderKind.MARKET,
+        reduce_only=True,
+    )
+    assert intent.reduce_only is True
