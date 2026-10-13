@@ -856,3 +856,39 @@ minute.
   a floor of one minimum order, is worth considering.
 - The inventory strategy is parked in observe mode. The reconciler runs
   with `act = true`.
+
+### 15.8 Review of 2026-10-13
+
+Two reviews read both pull requests. Each finding rated critical or high
+was checked against the code. These were fixed:
+
+- The matcher sent a contract hedge without a contract size or an amount
+  precision. It assumed one base per contract. It now sends nothing, keeps
+  the fill in the residual and publishes a critical alert.
+- The derivatives feed exited when no strategy subscribed to its feeds.
+  The orchestrator read the exit as a crash and stopped the system. The
+  feed now waits until it is stopped.
+- The reconciler and the trading strategy corrected the same imbalance. A
+  spot IOC fill arrived a minute late, and the reconciler corrects after
+  two 60 s checks. The reconciler now waits `settle_s`, 180 s by default,
+  before a correction.
+- An unwind quote was not capped at the short. The matcher covers its fill
+  with a reduce-only buy, and the venue refuses a buy larger than the
+  short. The quote is now capped at the short.
+
+One finding rated high was not confirmed. The venue reports a liquidation
+price for the short, so the margin guard works on this account.
+
+These findings are rated medium and stay open:
+
+- The matcher's residual is invisible to the reconciler. A correction can
+  include it, and the matcher hedges it again later. The error stays
+  inside the deadband.
+- A hedge that fills in part leaves the rest out of the residual, and no
+  alert fires. The reconciler corrects it once it passes the deadband.
+- A position with contracts and no side is published as flat.
+- The reconciler's freshness check reads the time of the last balance
+  update, not of the last full REST snapshot.
+- A tripped margin guard also stops corrections that reduce the short.
+- A correction in flight never expires when its terminal event is lost.
+- The cooldown also drops repeated critical alerts.
