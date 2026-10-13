@@ -75,6 +75,33 @@ async def test_create_and_return_order_passes_post_only_through():
     assert params == {"clientOrderId": "t-prefix_fmb_es"}
 
 
+@pytest.mark.asyncio
+async def test_create_and_return_order_passes_ioc_to_a_limit():
+    """A taken leg reaches CCXT as an IOC limit, so it can never rest."""
+    order = OrderMessage(
+        kind=MessageType.ORDER,
+        strategy="inv_it",
+        exchange="venue_a",
+        id="t-prefix_inv_it",
+        exchange_id="_",
+        pair="BASE/QUOTE",
+        side=OrderSide.BUY,
+        order_type=OrderType.UNIQUE,
+        price=Decimal("1.5"),
+        amount=Decimal("10"),
+        time_in_force="IOC",
+    )
+    mock_client = AsyncMock()
+    mock_client.create_order.return_value = {"id": "1"}
+    await create_and_return_order(order, mock_client)
+    kwargs = mock_client.create_order.call_args.kwargs
+    assert kwargs["type"] == "limit"
+    assert kwargs["params"] == {
+        "clientOrderId": "t-prefix_inv_it",
+        "timeInForce": "IOC",
+    }
+
+
 def market_order(side: OrderSide) -> OrderMessage:
     """Return a market hedge priced at the fill it offsets."""
     return OrderMessage(

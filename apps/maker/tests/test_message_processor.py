@@ -1026,6 +1026,17 @@ def test_broker_order_from_intent_marks_post_only_quotes():
     assert isinstance(parsed, dict) and parsed.get("post_only") is True
 
 
+def test_broker_order_from_intent_carries_ioc_and_fok():
+    """An IOC or FOK limit reaches the broker as such; GTC carries nothing."""
+    for tif, expected in ((TimeInForce.IOC, "IOC"), (TimeInForce.FOK, "FOK")):
+        intent = msgspec.structs.replace(order_intent(), time_in_force=tif)
+        message = broker_order_from_intent(intent)
+        assert message.get("time_in_force") == expected
+        parsed = parse_message(json.dumps(message, default=str))
+        assert isinstance(parsed, dict) and parsed.get("time_in_force") == expected
+    assert "time_in_force" not in broker_order_from_intent(order_intent())
+
+
 def test_broker_order_from_intent_marks_reduce_only_orders():
     """A reduce-only intent tells the broker so, and the flag survives JSON."""
     intent = msgspec.structs.replace(

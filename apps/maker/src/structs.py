@@ -67,6 +67,9 @@ class OrderMessage(TypedDict):
     reduce_only : bool
         Whether the venue must only shrink an existing position with this
         order. Contract markets only. Absent means no.
+    time_in_force : str
+        ``IOC`` or ``FOK``, CCXT's unified ``timeInForce`` values, for a
+        limit order that must not rest. Absent means good till cancelled.
     """
 
     kind: MessageType
@@ -81,6 +84,7 @@ class OrderMessage(TypedDict):
     amount: Decimal
     post_only: NotRequired[bool]
     reduce_only: NotRequired[bool]
+    time_in_force: NotRequired[str]
 
 
 class OrderBatchMessage(TypedDict):

@@ -185,6 +185,9 @@ async def create_and_return_order(
     # shrinks the position and refuses to open one the other way.
     if order.get("reduce_only"):
         params["reduceOnly"] = True
+    time_in_force = order.get("time_in_force")
+    if time_in_force and order_type == "limit":
+        params["timeInForce"] = time_in_force
 
     price: float | None = float(order["price"])
     limit_bps = market_as_limit_bps(client)
