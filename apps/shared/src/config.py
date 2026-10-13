@@ -142,6 +142,55 @@ class RecorderConfig(msgspec.Struct, frozen=True):
     batch: int = 1000
 
 
+class ArchiveSource(msgspec.Struct, frozen=True):
+    """
+    A host whose recordings the archive host pulls.
+
+    Attributes
+    ----------
+    name : str
+        Directory the source's recordings land in under the archive root.
+        Recordings from two hosts never share a directory, because their
+        receive times carry each host's own latency.
+    ssh : str
+        SSH destination, a host alias or ``user@host``. Empty for recordings
+        on the archive host itself.
+    command : str
+        Remote command that runs the shipper, before its verb. Ignored by a
+        host that pins the shipper as a forced command.
+    root : str
+        Recording root for a local source, when ``ssh`` is empty.
+    """
+
+    name: str
+    ssh: str = ""
+    command: str = "cd the_bot && uv run --frozen -m apps.maker.src.shipper"
+    root: str = "data"
+
+
+class ArchiveConfig(msgspec.Struct, frozen=True):
+    """
+    Settings for the archive host, which keeps every recording long term.
+
+    Attributes
+    ----------
+    root : str
+        Directory the archive is kept under.
+    level : int
+        zstd level the archive recompresses at. 19 gives about 40x on book
+        data, against 25x at the trading host's level 3.
+    prune : bool
+        Whether a pull deletes what it archived from the source.
+    sources : tuple[ArchiveSource, ...]
+        Hosts to pull from.
+    """
+
+    root: str = "archive"
+    level: int = 19
+    prune: bool = True
+    sources: tuple[ArchiveSource, ...] = ()
+
+
 class OmsConfig(msgspec.Struct, frozen=True):
     """
     Settings for the order manager.
@@ -448,6 +497,8 @@ class AppConfig(msgspec.Struct, frozen=True):
         Polling interval for strategies that still read snapshot keys.
     recorder : RecorderConfig
         Stream recorder settings.
+    archive : ArchiveConfig
+        Archive host settings.
     oms : OmsConfig
         Order manager settings.
     fees : FeesConfig
@@ -460,6 +511,7 @@ class AppConfig(msgspec.Struct, frozen=True):
     strategies: tuple[StrategyConfig, ...]
     refresh_speed: float | None = None
     recorder: RecorderConfig = RecorderConfig()
+    archive: ArchiveConfig = ArchiveConfig()
     oms: OmsConfig = OmsConfig()
     fees: FeesConfig = FeesConfig()
 
@@ -772,6 +824,32 @@ def _validate_markets(venue: VenueConfig) -> None:
         )
 
 
+def _validate_archive(archive: ArchiveConfig) -> None:
+    """
+    Check that archive sources have unique names that are safe directories.
+
+    Parameters
+    ----------
+    archive : ArchiveConfig
+        The archive settings.
+
+    Raises
+    ------
+    ConfigError
+        If a name is duplicated, empty, a path marker or holds a separator.
+    """
+    names = [source.name for source in archive.sources]
+    if len(set(names)) != len(names):
+        raise ConfigError(f"Duplicate archive source name in {names}")
+    for name in names:
+        if name in ("", ".", "..") or "/" in name or name.startswith("."):
+            raise ConfigError(
+                f"Archive source name {name!r} must be a plain directory name"
+            )
+    if not 1 <= archive.level <= 22:
+        raise ConfigError(f"Archive level {archive.level} is not a zstd level")
+
+
 def _validate(config: AppConfig) -> None:
     """
     Check cross-field invariants.
@@ -785,9 +863,11 @@ def _validate(config: AppConfig) -> None:
     ------
     ConfigError
         On duplicate venue or strategy identifiers, references to
-        undeclared venues, unknown feed names, or a symbol subscribed on a
-        venue whose market type cannot trade it.
+        undeclared venues, unknown feed names, a symbol subscribed on a
+        venue whose market type cannot trade it, or an archive source name
+        that is not a single safe directory name.
     """
+    _validate_archive(config.archive)
     venue_ids = config.venue_ids
     if len(venue_ids) != len(config.venues):
         raise ConfigError("Duplicate venue id")
@@ -853,6 +933,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
         redis = msgspec.convert(raw.get("redis", {}), RedisConfig)
         market_data = msgspec.convert(raw.get("market_data", {}), MarketDataConfig)
         recorder = msgspec.convert(raw.get("recorder", {}), RecorderConfig)
+        archive = msgspec.convert(raw.get("archive", {}), ArchiveConfig)
         oms = msgspec.convert(raw.get("oms", {}), OmsConfig)
         fees = msgspec.convert(raw.get("fees", {}), FeesConfig)
         venues = msgspec.convert(raw.get("venues", []), tuple[VenueConfig, ...])
@@ -873,6 +954,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
         strategies=tuple(_parse_strategy(s) for s in raw_strategies),
         refresh_speed=refresh_speed,
         recorder=recorder,
+        archive=archive,
         oms=oms,
         fees=fees,
     )
