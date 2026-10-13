@@ -205,6 +205,19 @@ async def test_tick_size_precision_is_reported_as_decimals():
     assert entry_of(event).amount_precision == 4
 
 
+@pytest.mark.asyncio
+async def test_a_whole_unit_step_means_no_decimal_places():
+    """A step of 1.0, as contract markets report it, is whole units."""
+    client = fake_client(
+        markets={SYMBOL: market(precision={"amount": 1.0})},
+        precision_mode=TICK_SIZE,
+    )
+    event = await fee_schedule_from_client(
+        client, VenueConfig(id="venue_a", name="Venue A"), {SYMBOL}, ts_recv=1
+    )
+    assert entry_of(event).amount_precision == 0
+
+
 def test_tick_size_mode_matches_ccxt():
     """
     The tick size mode is CCXT's, not a number typed from memory.
