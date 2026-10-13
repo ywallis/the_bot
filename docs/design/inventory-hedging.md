@@ -817,6 +817,27 @@ One more fault showed in the unwind, and it is fixed:
   `stale_after_s` as unhealthy. It corrects only when every balance and the
   position arrived after it first saw the delta out of band.
 
+A second build and unwind found three more faults, all fixed:
+
+- The last slice of the unwind asked to buy back 34 contracts against a
+  short of 29: the matcher had carried 7 base as residual during the build.
+  The venue refuses a reduce-only order larger than the position whole,
+  and the spot leg sold alone. The inventory strategy now follows the
+  position, caps the buy-back at the short and sells spot beyond it alone.
+  It settles a pair against the imbalance it intended.
+- The next slice was then sized off a position reported before the last
+  slice's buy-back. An unwind now waits for a position newer than its last
+  settled pair.
+- A step size of 1.0 was read as one decimal place, and the matcher sent a
+  hedge of 30.6 contracts to a market that trades whole ones. The schedule
+  now normalizes the step.
+
+Each fault left a short of 27 to 34 base, about 7 USDT, with no inventory
+behind it, for a few minutes. Each was inside or close to the deadband, so
+the reconciler did not act, and each was closed by hand. The last cycle
+built 65 base and unwound it in two slices with no imbalance and no
+correction. The session cost about 0.30 USDT in fees and spread.
+
 The order watcher reported the spot venue's IOC fills late: a partial fill
 on the socket, and the full fill about one minute later from the REST
 reconcile. The fast unwind waits for both legs, so each slice took about a
@@ -830,3 +851,8 @@ minute.
 - One key serves two venue entries. Watch for 429 errors at start.
 - IOC fills on the spot venue arrive late on the socket. A slice of the
   fast unwind takes about a minute.
+- `deadband_base` must clear one minimum perpetual order, so on a small
+  book it is large: 30 base against 65 held. A deadband in quote units, or
+  a floor of one minimum order, is worth considering.
+- The inventory strategy is parked in observe mode. The reconciler runs
+  with `act = true`.
