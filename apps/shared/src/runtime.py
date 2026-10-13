@@ -28,31 +28,47 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, cast
 
-from apps.shared.src.config import BOOK_FEED, TRADE_FEED, AppConfig, StrategyConfig
+from apps.shared.src.config import (
+    BOOK_FEED,
+    DELTA_FEED,
+    FUNDING_FEED,
+    POSITION_FEED,
+    TRADE_FEED,
+    AppConfig,
+    StrategyConfig,
+)
 from apps.shared.src.events import (
     ORDER_EVENTS_STREAM,
+    AlertEvent,
+    AlertLevel,
     AnyEvent,
     BalanceEvent,
     BookEvent,
     CancelIntent,
+    DeltaEvent,
     FeeScheduleEvent,
+    FundingEvent,
     OrderEvent,
     OrderIntent,
     OrderKind,
+    PositionEvent,
     Side,
     SymbolFees,
     TimeInForce,
     TradeEvent,
     balance_stream,
-    book_stream,
     fees_stream,
     from_stream_fields,
     now_ns,
     prefixed,
-    trade_stream,
 )
 from apps.shared.src.fees import schedule_for
-from apps.shared.src.streams import StreamPublisher, entry_id_str, stream_tail
+from apps.shared.src.streams import (
+    StreamPublisher,
+    entry_id_str,
+    feed_stream,
+    stream_tail,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -254,20 +270,31 @@ def snapshot_streams(strategy: StrategyConfig, prefix: str = "") -> list[str]:
     -------
     list[str]
         The balance stream of every subscribed venue, then the fee schedule
-        stream of every subscribed venue, then one book stream per
-        subscription listing the book feed. Balances come first so that
-        a strategy primed with a book already knows what it can fund.
+        stream of every subscribed venue, then the position, funding and
+        delta streams subscribed to, then one book stream per subscription
+        listing the book feed. Balances and positions come first so that a
+        strategy primed with a book already knows what it can fund and
+        what it holds.
     """
     venues: list[str] = []
+    derivatives: list[str] = []
     books: list[str] = []
     for subscription in strategy.subscriptions:
         if subscription.venue not in venues:
             venues.append(subscription.venue)
+        for feed in (POSITION_FEED, FUNDING_FEED, DELTA_FEED):
+            if feed in subscription.feeds:
+                derivatives.append(
+                    feed_stream(feed, subscription.venue, subscription.symbol)
+                )
         if BOOK_FEED in subscription.feeds:
-            books.append(book_stream(subscription.venue, subscription.symbol))
+            books.append(
+                feed_stream(BOOK_FEED, subscription.venue, subscription.symbol)
+            )
     streams = (
         [balance_stream(venue) for venue in venues]
         + [fees_stream(venue) for venue in venues]
+        + derivatives
         + books
     )
     return list(dict.fromkeys(prefixed(prefix, stream) for stream in streams))
@@ -287,17 +314,19 @@ def subscribed_streams(strategy: StrategyConfig, prefix: str = "") -> list[str]:
     Returns
     -------
     list[str]
-        One book or trade stream per subscribed feed, in subscription
-        order, then the balance and fee schedule stream of every subscribed
-        venue, then ``oms:events``. Prefixed and free of duplicates.
+        One stream per subscribed feed (book, trade, position, funding,
+        delta), in subscription order, then the balance and fee schedule
+        stream of every subscribed venue, then ``oms:events``. Prefixed and
+        free of duplicates.
     """
     streams: list[str] = []
     venues: list[str] = []
     for subscription in strategy.subscriptions:
-        if BOOK_FEED in subscription.feeds:
-            streams.append(book_stream(subscription.venue, subscription.symbol))
-        if TRADE_FEED in subscription.feeds:
-            streams.append(trade_stream(subscription.venue, subscription.symbol))
+        for feed in (BOOK_FEED, TRADE_FEED, POSITION_FEED, FUNDING_FEED, DELTA_FEED):
+            if feed in subscription.feeds:
+                streams.append(
+                    feed_stream(feed, subscription.venue, subscription.symbol)
+                )
         if subscription.venue not in venues:
             venues.append(subscription.venue)
     streams.extend(balance_stream(venue) for venue in venues)
@@ -398,6 +427,37 @@ class Strategy:
         Parameters
         ----------
         event : BalanceEvent
+            The event.
+        """
+
+    async def on_position(self, event: PositionEvent) -> None:
+        """
+        Handle a position snapshot of a subscribed contract venue.
+
+        Parameters
+        ----------
+        event : PositionEvent
+            The event. A venue's stream carries every symbol it holds, so
+            a strategy filters on ``event.symbol``.
+        """
+
+    async def on_funding(self, event: FundingEvent) -> None:
+        """
+        Handle a funding rate update.
+
+        Parameters
+        ----------
+        event : FundingEvent
+            The event.
+        """
+
+    async def on_delta(self, event: DeltaEvent) -> None:
+        """
+        Handle the reconciler's view of an asset's delta.
+
+        Parameters
+        ----------
+        event : DeltaEvent
             The event.
         """
 
@@ -554,6 +614,7 @@ class Runtime:
         time_in_force: TimeInForce = TimeInForce.GTC,
         replace_of: str | None = None,
         tags: dict[str, str] | None = None,
+        reduce_only: bool = False,
     ) -> OrderIntent:
         """
         Build an order intent stamped by this runtime's clock.
@@ -567,7 +628,8 @@ class Runtime:
         side : Side
             Buy or sell.
         amount : Decimal | float | str
-            Size in base asset.
+            Size in the market's unit: base on spot, contracts on a
+            contract symbol.
         order_identifier : str
             The order slot; it names the strategy key the order manager
             locks and coalesces on, and goes into the client order id.
@@ -582,6 +644,9 @@ class Runtime:
             with nothing to name yet, or None for an independent order.
         tags : dict[str, str] | None
             Free-form labels carried through to order events.
+        reduce_only : bool
+            Whether the order may only shrink a position, see
+            ``OrderIntent.reduce_only``. Contract symbols only.
 
         Returns
         -------
@@ -601,6 +666,7 @@ class Runtime:
             time_in_force=time_in_force,
             replace_of=replace_of,
             tags=dict(tags or {}),
+            reduce_only=reduce_only,
         )
 
     async def submit(self, intent: OrderIntent) -> OrderIntent:
@@ -625,6 +691,53 @@ class Runtime:
             del self.submitted[next(iter(self.submitted))]
         logger.debug(f"Submitted {intent.intent_id}")
         return intent
+
+    async def publish(self, event: AnyEvent) -> str:
+        """
+        Publish an event that is not an intent, e.g. a delta or an alert.
+
+        Parameters
+        ----------
+        event : AnyEvent
+            The event. It goes to the stream ``events.stream_for`` routes
+            it to, under this runtime's prefix.
+
+        Returns
+        -------
+        str
+            The prefixed stream name.
+        """
+        return await self.publisher.publish(self.redis, event)
+
+    async def alert(self, key: str, level: AlertLevel, message: str) -> AlertEvent:
+        """
+        Publish an alert for the notifier to deliver.
+
+        Parameters
+        ----------
+        key : str
+            Stable name of the condition; the notifier delivers one alert
+            per key per cooldown.
+        level : AlertLevel
+            Urgency.
+        message : str
+            Human readable text.
+
+        Returns
+        -------
+        AlertEvent
+            The published alert.
+        """
+        event = AlertEvent(
+            ts_recv=self.clock.now(),
+            source=self.identifier,
+            key=key,
+            level=level,
+            message=message,
+        )
+        await self.publish(event)
+        logger.warning(f"{self.identifier} alert {key}: {message}")
+        return event
 
     async def cancel(self, intent_id: str) -> CancelIntent:
         """
@@ -865,6 +978,12 @@ class Runtime:
                 await self.handler.on_balance(event)
             case FeeScheduleEvent():
                 self._fee_schedules[event.venue] = event
+            case PositionEvent():
+                await self.handler.on_position(event)
+            case FundingEvent():
+                await self.handler.on_funding(event)
+            case DeltaEvent():
+                await self.handler.on_delta(event)
             case OrderEvent():
                 if self.is_mine(event):
                     await self.handler.on_order_event(event)

@@ -16,15 +16,26 @@ from io import BufferedIOBase
 from pathlib import Path
 from typing import Any
 
-from apps.shared.src.config import AppConfig, BOOK_FEED, TRADE_FEED
+from apps.shared.src.config import (
+    BOOK_FEED,
+    DELTA_FEED,
+    FUNDING_FEED,
+    POSITION_FEED,
+    TRADE_FEED,
+    AppConfig,
+)
 from apps.shared.src.events import (
+    ALERTS_STREAM,
     INTENTS_STREAM,
     LATENCY_STREAM,
     ORDER_EVENTS_STREAM,
     AnyEvent,
     balance_stream,
     book_stream,
+    delta_stream,
     fees_stream,
+    funding_stream,
+    position_stream,
     prefixed,
     stream_for,
     to_stream_fields,
@@ -192,6 +203,44 @@ async def stream_tail(redis: Any, stream: str) -> str:
     return entry_id_str(entries[0][0])
 
 
+def feed_stream(feed: str, venue: str, symbol: str) -> str:
+    """
+    Return the stream a feed of one subscription is published on.
+
+    Parameters
+    ----------
+    feed : str
+        Feed name, one of ``config.KNOWN_FEEDS``.
+    venue : str
+        Venue id of the subscription.
+    symbol : str
+        CCXT symbol of the subscription.
+
+    Returns
+    -------
+    str
+        Unprefixed stream name. A position is per venue, a delta per base
+        asset; every other feed is per venue and symbol.
+
+    Raises
+    ------
+    ValueError
+        If the feed is unknown.
+    """
+    match feed:
+        case "book":
+            return book_stream(venue, symbol)
+        case "trade":
+            return trade_stream(venue, symbol)
+        case "position":
+            return position_stream(venue)
+        case "funding":
+            return funding_stream(venue, symbol)
+        case "delta":
+            return delta_stream(symbol.partition("/")[0])
+    raise ValueError(f"Unknown feed {feed!r}")
+
+
 def configured_streams(config: AppConfig, production: bool | None) -> list[str]:
     """
     Enumerate every stream the running system can produce.
@@ -207,18 +256,18 @@ def configured_streams(config: AppConfig, production: bool | None) -> list[str]:
     -------
     list[str]
         Sorted, unprefixed stream names: one book and trade stream per
-        subscribed feed, one balance and fee schedule stream per venue and
-        the order management streams.
+        subscribed feed, the position, funding and delta streams the
+        derivatives feeds publish, one balance and fee schedule stream per
+        venue, the order management streams and the alerts.
     """
     streams: set[str] = set()
-    for venue, symbol in config.feed_pairs(BOOK_FEED, production):
-        streams.add(book_stream(venue, symbol))
-    for venue, symbol in config.feed_pairs(TRADE_FEED, production):
-        streams.add(trade_stream(venue, symbol))
+    for feed in (BOOK_FEED, TRADE_FEED, POSITION_FEED, FUNDING_FEED, DELTA_FEED):
+        for venue, symbol in config.feed_pairs(feed, production):
+            streams.add(feed_stream(feed, venue, symbol))
     for venue_config in config.venues:
         streams.add(balance_stream(venue_config.id))
         streams.add(fees_stream(venue_config.id))
-    streams.update({INTENTS_STREAM, ORDER_EVENTS_STREAM, LATENCY_STREAM})
+    streams.update({INTENTS_STREAM, ORDER_EVENTS_STREAM, LATENCY_STREAM, ALERTS_STREAM})
     return sorted(streams)
 
 

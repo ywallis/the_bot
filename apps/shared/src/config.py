@@ -30,7 +30,17 @@ STRATEGY_KEYS: frozenset[str] = frozenset(
 
 BOOK_FEED = "book"
 TRADE_FEED = "trade"
-KNOWN_FEEDS: frozenset[str] = frozenset({BOOK_FEED, TRADE_FEED})
+# Derivatives feeds, on contract symbols only: the position held and the
+# funding rate. ``delta`` is the reconciler's view of how far the symbol's
+# base asset is from flat, readable on any symbol of that asset. See
+# ``docs/design/inventory-hedging.md`` section 5.
+POSITION_FEED = "position"
+FUNDING_FEED = "funding"
+DELTA_FEED = "delta"
+CONTRACT_FEEDS: frozenset[str] = frozenset({POSITION_FEED, FUNDING_FEED})
+KNOWN_FEEDS: frozenset[str] = frozenset(
+    {BOOK_FEED, TRADE_FEED, POSITION_FEED, FUNDING_FEED, DELTA_FEED}
+)
 
 # Fee currency policies a venue can declare: always the quote asset, always
 # the base asset, or the asset received (base on buys, quote on sells). Any
@@ -234,6 +244,25 @@ class FeesConfig(msgspec.Struct, frozen=True):
     """
 
     refresh_s: int = 3600
+
+
+class DerivativesConfig(msgspec.Struct, frozen=True):
+    """
+    Settings for the position and funding feeds.
+
+    Attributes
+    ----------
+    position_poll_s : float
+        Seconds between position fetches. A position changes only when one
+        of our own orders fills, and the feed also fetches right after every
+        fill on the venue, so the poll is a backstop.
+    funding_poll_s : float
+        Seconds between funding rate fetches. The rate changes once per
+        funding interval.
+    """
+
+    position_poll_s: float = 5.0
+    funding_poll_s: float = 60.0
 
 
 class VenueConfig(msgspec.Struct, frozen=True):
@@ -503,6 +532,8 @@ class AppConfig(msgspec.Struct, frozen=True):
         Order manager settings.
     fees : FeesConfig
         Fee schedule feed settings.
+    derivatives : DerivativesConfig
+        Position and funding feed settings.
     """
 
     redis: RedisConfig
@@ -514,6 +545,7 @@ class AppConfig(msgspec.Struct, frozen=True):
     archive: ArchiveConfig = ArchiveConfig()
     oms: OmsConfig = OmsConfig()
     fees: FeesConfig = FeesConfig()
+    derivatives: DerivativesConfig = DerivativesConfig()
 
     @property
     def venue_ids(self) -> set[str]:
@@ -863,8 +895,9 @@ def _validate(config: AppConfig) -> None:
     ------
     ConfigError
         On duplicate venue or strategy identifiers, references to
-        undeclared venues, unknown feed names, a symbol subscribed on a
-        venue whose market type cannot trade it, or an archive source name
+        undeclared venues, unknown feed names, a position or funding feed
+        on a spot symbol, a symbol subscribed on a venue whose market type
+        cannot trade it, or an archive source name
         that is not a single safe directory name.
     """
     _validate_archive(config.archive)
@@ -908,6 +941,14 @@ def _validate(config: AppConfig) -> None:
                     f"feeds {sorted(unknown)} on {sub.venue}:{sub.symbol}; "
                     f"known feeds are {sorted(KNOWN_FEEDS)}"
                 )
+            contract_only = set(sub.feeds) & CONTRACT_FEEDS
+            if contract_only and not is_contract(sub.symbol):
+                raise ConfigError(
+                    f"Strategy {strategy.identifier!r} subscribes to "
+                    f"{sorted(contract_only)} on the spot symbol "
+                    f"{sub.venue}:{sub.symbol}; positions and funding exist on "
+                    "contract symbols only"
+                )
 
 
 def parse_app_config(raw: dict[str, Any]) -> AppConfig:
@@ -936,6 +977,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
         archive = msgspec.convert(raw.get("archive", {}), ArchiveConfig)
         oms = msgspec.convert(raw.get("oms", {}), OmsConfig)
         fees = msgspec.convert(raw.get("fees", {}), FeesConfig)
+        derivatives = msgspec.convert(raw.get("derivatives", {}), DerivativesConfig)
         venues = msgspec.convert(raw.get("venues", []), tuple[VenueConfig, ...])
     except msgspec.ValidationError as e:
         raise ConfigError(str(e)) from e
@@ -957,6 +999,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
         archive=archive,
         oms=oms,
         fees=fees,
+        derivatives=derivatives,
     )
     _validate(config)
     return config

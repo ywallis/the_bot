@@ -37,6 +37,7 @@ PROCESS_LIST = [
     ["uv", "run", "-m", "apps.maker.src.matcher"],
     ["uv", "run", "-m", "apps.maker.src.balance"],
     ["uv", "run", "-m", "apps.maker.src.fees"],
+    ["uv", "run", "-m", "apps.maker.src.derivatives_feed"],
     ["uv", "run", "-m", "apps.maker.src.recorder"],
 ]
 
@@ -54,7 +55,17 @@ SHUTDOWN_PHASES: tuple[tuple[str, frozenset[str], float], ...] = (
     ("order manager", frozenset({"message_processor"}), 20.0),
     (
         "feeds and broker",
-        frozenset({"watcher", "order_watcher", "balance", "fees", "matcher", "broker"}),
+        frozenset(
+            {
+                "watcher",
+                "order_watcher",
+                "balance",
+                "fees",
+                "derivatives_feed",
+                "matcher",
+                "broker",
+            }
+        ),
         10.0,
     ),
     ("recorder", frozenset({"recorder"}), 10.0),

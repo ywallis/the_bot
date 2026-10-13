@@ -18,6 +18,8 @@ from apps.shared.src.events import (
     Liquidity,
     OrderEvent,
     OrderState,
+    PositionEvent,
+    PositionSide,
     Side,
     TradeEvent,
 )
@@ -384,4 +386,72 @@ def order_event_from_ccxt(
         avg_price=_decimal(order.get("average")),
         last_fill=fill_from_ccxt(order, previous_filled),
         tags=dict(tags or {}),
+    )
+
+
+def position_event_from_ccxt(
+    venue: str,
+    symbol: str,
+    position: dict[str, Any] | None,
+    *,
+    contract_size: Decimal,
+    seq: int,
+    ts_recv: int,
+) -> PositionEvent:
+    """
+    Build a ``PositionEvent`` from a CCXT unified position structure.
+
+    Parameters
+    ----------
+    venue : str
+        Venue id.
+    symbol : str
+        CCXT contract symbol. Taken from the caller, not the structure, so a
+        symbol the venue reports nothing for is published as flat.
+    position : dict[str, Any] | None
+        What ``fetch_positions`` returned for the symbol, None when it
+        returned nothing for it.
+    contract_size : Decimal
+        Base units per contract, from the market. A structure that carries
+        its own ``contractSize`` wins.
+    seq : int
+        Per-stream sequence number.
+    ts_recv : int
+        Local receive time in nanoseconds.
+
+    Returns
+    -------
+    PositionEvent
+        The event. ``base_amount`` is negative for a short; a structure with
+        no contracts, or no side, is flat.
+    """
+    position = position or {}
+    contracts = abs(_decimal(position.get("contracts"), Decimal(0)) or Decimal(0))
+    size = _decimal(position.get("contractSize"), contract_size) or contract_size
+    raw_side = str(position.get("side") or "").lower()
+    if contracts == 0 or raw_side not in ("long", "short"):
+        side = PositionSide.FLAT
+        contracts = Decimal(0)
+    else:
+        side = PositionSide(raw_side)
+    base_amount = contracts * size
+    if side is PositionSide.SHORT:
+        base_amount = -base_amount
+    return PositionEvent(
+        ts_recv=ts_recv,
+        venue=venue,
+        symbol=symbol,
+        seq=seq,
+        ts_exch=_optional_int(position.get("timestamp")),
+        side=side,
+        contracts=contracts,
+        contract_size=size,
+        base_amount=base_amount,
+        entry_price=_decimal(position.get("entryPrice")),
+        mark_price=_decimal(position.get("markPrice")),
+        liquidation_price=_decimal(position.get("liquidationPrice")),
+        unrealized_pnl=_decimal(position.get("unrealizedPnl")),
+        margin_mode=position.get("marginMode"),
+        leverage=_decimal(position.get("leverage")),
+        collateral=_decimal(position.get("collateral")),
     )

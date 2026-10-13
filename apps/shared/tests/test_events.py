@@ -8,20 +8,26 @@ import pytest
 
 from apps.shared.src import events
 from apps.shared.src.events import (
+    AlertEvent,
+    AlertLevel,
     AssetBalance,
     BalanceEvent,
     BookEvent,
     CancelIntent,
+    DeltaEvent,
     EventType,
     FeeScheduleEvent,
     FeeSource,
     Fill,
+    FundingEvent,
     LatencyRecord,
     Liquidity,
     OrderEvent,
     OrderIntent,
     OrderKind,
     OrderState,
+    PositionEvent,
+    PositionSide,
     Side,
     SymbolFees,
     TimeInForce,
@@ -126,6 +132,46 @@ def sample_events():
             ts_oms_recv=TS + 50_000,
             ts_broker_send=TS + 120_000,
             ts_broker_ack=TS + 90_000_000,
+        ),
+        PositionEvent(
+            ts_recv=TS,
+            venue="venue_p",
+            symbol="SOL/USDT:USDT",
+            seq=3,
+            ts_exch=1_757_160_000_000,
+            side=PositionSide.SHORT,
+            contracts=Decimal("12"),
+            contract_size=Decimal("0.1"),
+            base_amount=Decimal("-1.2"),
+            entry_price=Decimal("150.2"),
+            mark_price=Decimal("150.4"),
+            leverage=Decimal("2"),
+        ),
+        FundingEvent(
+            ts_recv=TS,
+            venue="venue_p",
+            symbol="SOL/USDT:USDT",
+            seq=4,
+            funding_rate=0.0001,
+            next_funding_ts=1_757_174_400_000,
+            interval_s=28_800,
+            mark_price=150.4,
+        ),
+        DeltaEvent(
+            ts_recv=TS,
+            asset="SOL",
+            spot_base={"venue_a": Decimal("1.25"), "venue_b": Decimal("0")},
+            perp_base=Decimal("-1.2"),
+            delta=Decimal("0.05"),
+            in_flight_base=Decimal("0"),
+            deadband=Decimal("0.1"),
+        ),
+        AlertEvent(
+            ts_recv=TS,
+            source="inv1",
+            key="delta",
+            level=AlertLevel.WARNING,
+            message="delta out of band",
         ),
     ]
 
@@ -232,6 +278,10 @@ def test_stream_for_routes_every_event():
         cancel,
         order_event,
         latency,
+        position,
+        funding,
+        delta,
+        alert,
     ) = sample_events()
     assert events.stream_for(book) == "md:book:venue_a:BTC/USDT"
     assert events.stream_for(trade) == "md:trade:venue_b:SOL/USDT"
@@ -241,6 +291,10 @@ def test_stream_for_routes_every_event():
     assert events.stream_for(cancel) == events.INTENTS_STREAM
     assert events.stream_for(order_event) == events.ORDER_EVENTS_STREAM
     assert events.stream_for(latency) == events.LATENCY_STREAM
+    assert events.stream_for(position) == "acct:position:venue_p"
+    assert events.stream_for(funding) == "md:funding:venue_p:SOL/USDT:USDT"
+    assert events.stream_for(delta) == "acct:delta:SOL"
+    assert events.stream_for(alert) == events.ALERTS_STREAM
 
 
 def test_now_ns_is_nanoseconds():
