@@ -11,6 +11,14 @@ it comes makes every other currency vanish from the strategies' view. Live,
 that was one side of the quoting silently going insolvent after the first
 fill. So every update is overlaid onto the last full snapshot of its venue
 before it is published, and what goes out is always complete.
+
+The overlay cannot see a currency leave: a venue that omits zero balances
+never sends the asset again once it is sold out, and live a sold-out asset
+stayed on the stream at its last figure while the delta reconciler shorted
+against it. So every venue is also fetched over REST every
+``REFRESH_S`` seconds, and a REST fetch replaces the snapshot rather than
+being overlaid, since it is complete by itself. That also republishes an
+unchanged balance once a minute, which is what lets a consumer judge its age.
 """
 
 import asyncio
@@ -40,6 +48,9 @@ BALANCE_META_KEYS: frozenset[str] = frozenset(
 
 # The last full balance published per venue, which deltas are overlaid on.
 BalanceCache = dict[str, dict[str, Any]]
+
+# Seconds between REST fetches that replace each venue's snapshot.
+REFRESH_S = 60.0
 
 
 def merge_balance(
@@ -159,15 +170,16 @@ async def fetch_balance(
     publisher : StreamPublisher
         Publisher holding sequence numbers and trimming settings.
     cache : BalanceCache | None
-        Last full balance per venue, updated in place so later deltas are
-        overlaid on this fetch.
+        Last full balance per venue, replaced by this fetch, which is
+        complete: a currency it omits is a currency the account no longer
+        holds, and later deltas are overlaid on it.
     """
     try:
         balance = await client.fetch_balance()
         ts_recv = now_ns()
         logger.debug(f"Balances on {client.name} are {balance}")
         if cache is not None:
-            balance = merge_balance(cache.get(client.id), balance)
+            balance = merge_balance(None, balance)
             cache[client.id] = balance
         await publish_balance(redis, publisher, client.id, balance, ts_recv)
     except NetworkError as e:
@@ -220,6 +232,37 @@ async def watch_balance(
             raise
 
 
+async def refresh_balance(
+    client: CustomExchange,
+    redis: Redis,
+    publisher: StreamPublisher,
+    cache: BalanceCache,
+    interval_s: float = REFRESH_S,
+) -> None:
+    """
+    Replace a venue's snapshot with a REST fetch on an interval, forever.
+
+    Parameters
+    ----------
+    client : CustomExchange
+        A CCXT exchange instance.
+    redis : Redis
+        A redis client instance.
+    publisher : StreamPublisher
+        Publisher holding sequence numbers and trimming settings.
+    cache : BalanceCache
+        Last full balance per venue, replaced on every fetch.
+    interval_s : float
+        Seconds between fetches.
+    """
+    while True:
+        await asyncio.sleep(interval_s)
+        try:
+            await fetch_balance(client, redis, publisher, cache)
+        except Exception as error:  # noqa: BLE001, the next refresh retries
+            logger.error(f"Balance refresh failed for {client.id}: {error!r}")
+
+
 async def main(config: AppConfig, clients: dict[str, CustomExchange]) -> None:
     """
     Fetch initial balances then follow updates for every client.
@@ -249,6 +292,10 @@ async def main(config: AppConfig, clients: dict[str, CustomExchange]) -> None:
         await asyncio.gather(
             *[
                 watch_balance(client, redis, publisher, cache)
+                for client in clients.values()
+            ],
+            *[
+                refresh_balance(client, redis, publisher, cache)
                 for client in clients.values()
             ],
         )
