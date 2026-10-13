@@ -186,7 +186,10 @@ def _amount_precision(client: Any, market: dict[str, Any]) -> int | None:
             f"{getattr(client, 'id', 'venue')} reports decimal places but "
             f"{value} is a step size; reading it as one"
         )
-    exponent = value.as_tuple().exponent
+    # Normalized, so a step of 1.0 is read as whole units: its literal
+    # exponent says one decimal place, and live a hedge of 30.6 contracts
+    # went to a market that trades whole ones.
+    exponent = value.normalize().as_tuple().exponent
     if not isinstance(exponent, int):
         return None
     return max(0, -exponent)
