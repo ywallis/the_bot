@@ -40,6 +40,8 @@ from apps.shared.src.events import (
     INTENTS_STREAM,
     ORDER_EVENTS_STREAM,
     SELF_HEDGED_TAG,
+    AlertEvent,
+    AlertLevel,
     FeeScheduleEvent,
     Liquidity,
     OrderEvent,
@@ -485,7 +487,7 @@ class ContractOrder:
 
 def contract_order(
     residual: Decimal,
-    entry: SymbolFees | None,
+    entry: SymbolFees,
     price: Decimal,
 ) -> ContractOrder | None:
     """
@@ -503,10 +505,10 @@ def contract_order(
     ----------
     residual : Decimal
         Base to offset, positive when spot base was received.
-    entry : SymbolFees | None
+    entry : SymbolFees
         The contract market's schedule entry: contract size, amount
-        precision and minimum notional. None hedges one base unit per
-        contract at ``FALLBACK_PRECISION``.
+        precision and minimum notional. The caller makes sure the first two
+        are set (see ``sizes_contracts``).
     price : Decimal
         Price used for the minimum notional check.
 
@@ -515,15 +517,13 @@ def contract_order(
     ContractOrder | None
         The order, or None when nothing sizeable remains.
     """
-    size = Decimal(1)
-    places = FALLBACK_PRECISION
-    min_cost = None
-    if entry is not None:
-        if entry.contract_size is not None and entry.contract_size > 0:
-            size = entry.contract_size
-        if entry.amount_precision is not None:
-            places = entry.amount_precision
-        min_cost = entry.min_cost
+    size = entry.contract_size or Decimal(1)
+    places = (
+        entry.amount_precision
+        if entry.amount_precision is not None
+        else FALLBACK_PRECISION
+    )
+    min_cost = entry.min_cost
     tick = Decimal(1).scaleb(-places)
     contracts = (abs(residual) / size).quantize(tick, rounding=ROUND_DOWN)
     if contracts <= 0:
@@ -534,6 +534,33 @@ def contract_order(
     base = contracts * size if side is Side.SELL else -(contracts * size)
     return ContractOrder(
         side=side, contracts=contracts, base=base, reduce_only=side is Side.BUY
+    )
+
+
+def sizes_contracts(entry: SymbolFees | None) -> bool:
+    """
+    Tell whether a schedule entry can size an order on a contract market.
+
+    Without a contract size the matcher cannot convert base to contracts,
+    and without an amount precision it cannot round to what the venue
+    accepts. Guessing either sends a hedge of the wrong size or one the
+    venue refuses, so the matcher sends nothing instead.
+
+    Parameters
+    ----------
+    entry : SymbolFees | None
+        The contract market's schedule entry, None when there is none.
+
+    Returns
+    -------
+    bool
+        Whether contract size and amount precision are both known.
+    """
+    return (
+        entry is not None
+        and entry.contract_size is not None
+        and entry.contract_size > 0
+        and entry.amount_precision is not None
     )
 
 
@@ -1131,11 +1158,23 @@ async def hedge_on_contract(
     hedged.record(key, unhedged, sent=False)
     schedule = schedules.get(target.venue)
     entry = schedule_for(schedule, symbol) if schedule is not None else None
-    if entry is None:
-        logger.error(
-            f"No schedule for {target.venue} {symbol}; hedging one base per "
-            "contract at the fallback precision"
+    if entry is None or not sizes_contracts(entry):
+        message = (
+            f"no contract size or amount precision for {target.venue} {symbol}; "
+            f"{strategy} residual {residual} base is not hedged"
         )
+        logger.critical(message.capitalize())
+        await publisher.publish(
+            redis,
+            AlertEvent(
+                ts_recv=now_ns(),
+                source="matching",
+                key=f"hedge:{target.venue}:{symbol}",
+                level=AlertLevel.CRITICAL,
+                message=message,
+            ),
+        )
+        return None
     order = contract_order(residual, entry, price)
     if order is None:
         logger.info(
