@@ -16,6 +16,12 @@ Usage
     uv run -m apps.maker.src.tools.pnl --root data --start 2026-09-08T12:00Z
     uv run -m apps.maker.src.tools.pnl --maker-fee-bps 0 --taker-fee-bps 10 --json pnl.json
 
+A hedge on a perpetual is sized in contracts; its fills are converted to
+base with the contract size of the last fee schedule recorded for the
+venue. The carry of a perpetual short is reported apart: every funding
+payment the recorded ``md:funding`` stream shows to have fallen due, valued
+against the position the ``acct:position`` stream held at that moment.
+
 Fees: a fill that reports its own fee is charged that. Otherwise the rate
 comes from the command line, then from the venue's static ``maker_fee`` and
 ``taker_fee`` in config, then from the last fee schedule the recording holds
@@ -35,14 +41,26 @@ from pathlib import Path
 from typing import Any
 
 from apps.maker.src.order_watcher import STRATEGY_TAG
-from apps.shared.src.config import AppConfig, VenueConfig, load_app_config
+from apps.shared.src.config import (
+    FUNDING_FEED,
+    POSITION_FEED,
+    AppConfig,
+    VenueConfig,
+    is_contract,
+    load_app_config,
+)
 from apps.shared.src.events import (
     ORDER_EVENTS_STREAM,
+    AnyEvent,
     FeeScheduleEvent,
+    FundingEvent,
     OrderEvent,
+    PositionEvent,
     Side,
     fees_stream,
     from_stream_fields,
+    funding_stream,
+    position_stream,
 )
 from apps.shared.src.fees import base_quote, fee_in_base, schedule_for
 from apps.shared.src.streams import open_recording, recording_files, stream_path
@@ -204,6 +222,47 @@ class Pair:
     pnl_quote: float
 
 
+def read_stream(
+    directory: Path, start_ns: int, end_ns: int, kind: type
+) -> list[AnyEvent]:
+    """
+    Read every event of one type the recorder wrote inside a time range.
+
+    Parameters
+    ----------
+    directory : Path
+        The stream's recording directory.
+    start_ns : int
+        Earliest receive time kept, inclusive.
+    end_ns : int
+        Latest receive time kept, exclusive.
+    kind : type
+        The event class kept.
+
+    Returns
+    -------
+    list[AnyEvent]
+        Events in receive order.
+    """
+    out: list[AnyEvent] = []
+    if not directory.is_dir():
+        return out
+    for path in recording_files(directory):
+        with open_recording(path) as fh:
+            for line in fh:
+                try:
+                    record = json.loads(line)
+                    event = from_stream_fields(
+                        {"type": record["type"], "data": json.dumps(record["data"])}
+                    )
+                except Exception:  # noqa: BLE001, a torn last line is normal
+                    continue
+                if isinstance(event, kind) and start_ns <= event.ts_recv < end_ns:
+                    out.append(event)
+    out.sort(key=lambda e: e.ts_recv)
+    return out
+
+
 def read_events(directory: Path, start_ns: int, end_ns: int) -> list[OrderEvent]:
     """
     Read every order event the recorder wrote inside a time range.
@@ -222,23 +281,11 @@ def read_events(directory: Path, start_ns: int, end_ns: int) -> list[OrderEvent]
     list[OrderEvent]
         Events in receive order.
     """
-    out: list[OrderEvent] = []
-    if not directory.is_dir():
-        return out
-    for path in recording_files(directory):
-        with open_recording(path) as fh:
-            for line in fh:
-                try:
-                    record = json.loads(line)
-                    event = from_stream_fields(
-                        {"type": record["type"], "data": json.dumps(record["data"])}
-                    )
-                except Exception:  # noqa: BLE001, a torn last line is normal
-                    continue
-                if isinstance(event, OrderEvent) and start_ns <= event.ts_recv < end_ns:
-                    out.append(event)
-    out.sort(key=lambda e: e.ts_recv)
-    return out
+    return [
+        event
+        for event in read_stream(directory, start_ns, end_ns, OrderEvent)
+        if isinstance(event, OrderEvent)
+    ]
 
 
 HEDGE_OF_TAG = "hedge_of"
@@ -437,16 +484,25 @@ def maker_venues(config: AppConfig) -> dict[str, tuple[str, str]]:
     Returns
     -------
     dict[str, tuple[str, str]]
-        Maker and taker venue per strategy identifier.
+        Maker and taker venue per strategy identifier. The maker venue is
+        ``maker_exchange``, or the venue of a ``spot`` table; the taker
+        venue is the venue of a ``hedge`` table, or ``taker_exchange``.
     """
     out: dict[str, tuple[str, str]] = {}
     for strategy in config.strategies:
         params = strategy.params
-        if params.get("should_match") and "maker_exchange" in params:
-            out[strategy.identifier] = (
-                str(params["maker_exchange"]),
-                str(params["taker_exchange"]),
-            )
+        if not params.get("should_match"):
+            continue
+        spot = params.get("spot")
+        hedge = params.get("hedge")
+        maker = params.get("maker_exchange") or (
+            spot.get("venue") if isinstance(spot, dict) else None
+        )
+        taker = (hedge.get("venue") if isinstance(hedge, dict) else None) or params.get(
+            "taker_exchange"
+        )
+        if maker and taker:
+            out[strategy.identifier] = (str(maker), str(taker))
     return out
 
 
@@ -739,6 +795,12 @@ def realized_pnl(
     legs = fold_legs(events)
     configured = {venue.id: venue for venue in config.venues}
     schedules: dict[str, FeeScheduleEvent | None] = {}
+    for leg in legs.values():
+        if not is_contract(leg.symbol):
+            continue
+        if leg.venue not in schedules:
+            schedules[leg.venue] = latest_schedule(root, leg.venue, end_ns)
+        leg.filled *= contract_size(schedules[leg.venue], leg.symbol)
     sources: dict[str, str] = {}
     pairs: list[Pair] = []
     for maker, hedge in pair_legs(legs, maker_venues(config)):
@@ -767,6 +829,192 @@ def realized_pnl(
             sources[hedge.venue] = hedge_rate.source
         pairs.append(value_pair(maker, hedge, maker_rate, hedge_rate))
     return pairs, sources
+
+
+def contract_size(schedule: FeeScheduleEvent | None, symbol: str) -> Decimal:
+    """
+    Return the base units of one contract, as a recorded schedule says.
+
+    Parameters
+    ----------
+    schedule : FeeScheduleEvent | None
+        The venue's last recorded schedule.
+    symbol : str
+        Contract symbol.
+
+    Returns
+    -------
+    Decimal
+        The contract size, one when the schedule does not say.
+    """
+    if schedule is not None:
+        terms = schedule_for(schedule, symbol)
+        if terms is not None and terms.contract_size:
+            return terms.contract_size
+    return Decimal(1)
+
+
+@dataclass(frozen=True)
+class FundingPayment:
+    """
+    One funding payment on a perpetual position.
+
+    Attributes
+    ----------
+    venue : str
+        Venue id.
+    symbol : str
+        Contract symbol.
+    ts_ms : int
+        When it fell due, milliseconds since the epoch.
+    rate : float
+        Rate applied; positive pays the short.
+    base : float
+        Position in base at that moment, negative for a short.
+    mark : float
+        Price the notional is valued at.
+    amount_quote : float
+        What the position received, negative when it paid.
+    """
+
+    venue: str
+    symbol: str
+    ts_ms: int
+    rate: float
+    base: float
+    mark: float
+    amount_quote: float
+
+
+def funding_payments(
+    funding: list[FundingEvent], positions: list[PositionEvent]
+) -> list[FundingPayment]:
+    """
+    Work out the funding paid or received from recorded rates and positions.
+
+    A payment falls due at a funding event's ``next_funding_ts``. It is
+    known to have happened once a later event names a later time, and is
+    applied at the rate the earlier event announced to the position held at
+    that moment.
+
+    Parameters
+    ----------
+    funding : list[FundingEvent]
+        One perpetual's funding events, in receive order.
+    positions : list[PositionEvent]
+        Its position events, in receive order.
+
+    Returns
+    -------
+    list[FundingPayment]
+        Payments in time order, flat periods included at zero.
+    """
+    payments: list[FundingPayment] = []
+    previous: FundingEvent | None = None
+    for event in funding:
+        due = previous.next_funding_ts if previous is not None else None
+        if (
+            previous is not None
+            and due is not None
+            and event.next_funding_ts is not None
+            and event.next_funding_ts > due
+        ):
+            held = [p for p in positions if p.ts_recv <= due * NS_PER_MS]
+            if held:
+                position = held[-1]
+                mark = previous.mark_price or (
+                    float(position.mark_price) if position.mark_price else 0.0
+                )
+                base = float(position.base_amount)
+                payments.append(
+                    FundingPayment(
+                        venue=event.venue,
+                        symbol=event.symbol,
+                        ts_ms=due,
+                        rate=previous.funding_rate,
+                        base=base,
+                        mark=mark,
+                        amount_quote=-previous.funding_rate * base * mark,
+                    )
+                )
+        previous = event
+    return payments
+
+
+def carry(
+    config: AppConfig, root: Path, start_ns: int, end_ns: int
+) -> list[FundingPayment]:
+    """
+    Read the funding of every perpetual the config follows.
+
+    Parameters
+    ----------
+    config : AppConfig
+        The application configuration.
+    root : Path
+        Recording root.
+    start_ns : int
+        Earliest event kept.
+    end_ns : int
+        Latest event kept, exclusive.
+
+    Returns
+    -------
+    list[FundingPayment]
+        Payments of every perpetual with a funding and a position feed.
+    """
+    funded = config.feed_pairs(FUNDING_FEED)
+    held = config.feed_pairs(POSITION_FEED)
+    payments: list[FundingPayment] = []
+    for venue, symbol in sorted(funded & held):
+        funding = [
+            e
+            for e in read_stream(
+                stream_path(root, funding_stream(venue, symbol)),
+                start_ns,
+                end_ns,
+                FundingEvent,
+            )
+            if isinstance(e, FundingEvent)
+        ]
+        positions = [
+            e
+            for e in read_stream(
+                stream_path(root, position_stream(venue)), 0, end_ns, PositionEvent
+            )
+            if isinstance(e, PositionEvent) and e.symbol == symbol
+        ]
+        payments += funding_payments(funding, positions)
+    payments.sort(key=lambda p: p.ts_ms)
+    return payments
+
+
+def format_carry(payments: list[FundingPayment]) -> str:
+    """
+    Render funding payments as text.
+
+    Parameters
+    ----------
+    payments : list[FundingPayment]
+        Payments.
+
+    Returns
+    -------
+    str
+        The section, empty when there are none.
+    """
+    if not payments:
+        return ""
+    lines = ["", "carry (funding on perpetual positions)"]
+    for p in payments:
+        when = datetime.fromtimestamp(p.ts_ms / 1000, UTC).strftime("%m-%d %H:%M")
+        lines.append(
+            f"  {when}  {p.venue} {p.symbol}  rate {p.rate * 10_000:+.2f} bps  "
+            f"base {p.base:+.4f}  {p.amount_quote:+.4f}"
+        )
+    total = sum(p.amount_quote for p in payments)
+    lines.append(f"  carry {total:+.4f} quote units over {len(payments)} payments")
+    return "\n".join(lines)
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -812,7 +1060,15 @@ def main(argv: list[str]) -> None:
         args.taker_fee_bps,
     )
     summary = summarize(pairs)
-    print(format_report(pairs, summary, sources))
+    config = load_app_config()
+    payments = carry(
+        config,
+        Path(args.root),
+        parse_when(args.start, 0),
+        parse_when(args.end, 2**63 - 1),
+    )
+    summary["carry_quote"] = sum(p.amount_quote for p in payments)
+    print(format_report(pairs, summary, sources) + format_carry(payments))
     if args.json:
         with open(args.json, "w") as fh:
             json.dump(
@@ -820,6 +1076,7 @@ def main(argv: list[str]) -> None:
                     "pairs": [asdict(p) for p in pairs],
                     "summary": summary,
                     "fees": sources,
+                    "carry": [asdict(p) for p in payments],
                 },
                 fh,
                 indent=1,
