@@ -26,6 +26,9 @@ from apps.shared.src.utils import production
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
+# Seconds before a failed fetch is tried again.
+RETRY_S = 30
+
 
 async def publish_fees(
     redis: Redis, publisher: StreamPublisher, event: FeeScheduleEvent
@@ -64,9 +67,11 @@ async def watch_fees(
 
     The venue's markets are loaded on every pass: the first pass primes
     the client's market dict, later passes pick up listing changes and
-    updated default rates. A failed pass is logged and retried on the next
-    interval; nothing else in this process must go down because a REST
-    call did.
+    updated default rates. A failed pass is logged and retried after
+    ``RETRY_S``, not a whole interval: at start the venues' rate limits
+    refuse a burst of calls, and an hour without a schedule leaves every
+    hedge unadjusted and every strategy that sizes from it idle. Nothing
+    else in this process must go down because a REST call did.
 
     Parameters
     ----------
@@ -96,6 +101,8 @@ async def watch_fees(
             raise
         except Exception as error:  # noqa: BLE001, the feed must survive
             logger.error(f"Error in fee schedule for {client.id}: {error}")
+            await asyncio.sleep(min(RETRY_S, refresh_s))
+            continue
         await asyncio.sleep(refresh_s)
 
 
