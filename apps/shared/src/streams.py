@@ -11,6 +11,8 @@ directory depends on. See ``docs/design/event-driven-framework.md`` section 7.
 """
 
 from collections import defaultdict
+from compression import zstd
+from io import BufferedIOBase
 from pathlib import Path
 from typing import Any
 
@@ -293,6 +295,48 @@ def sealed_files(directory: Path) -> list[Path]:
         return []
     live = bucket_of_file(files[-1])
     return [path for path in files if bucket_of_file(path) != live]
+
+
+def recording_directories(root: Path) -> list[Path]:
+    """
+    Return every stream directory under a recording root.
+
+    Parameters
+    ----------
+    root : Path
+        Recording root directory.
+
+    Returns
+    -------
+    list[Path]
+        Directories that hold at least one recording, sorted.
+    """
+    if not root.is_dir():
+        return []
+    found = {path.parent for path in root.rglob("*") if bucket_of_file(path)}
+    return sorted(found)
+
+
+def open_recording(path: Path) -> BufferedIOBase:
+    """
+    Open a recording for binary reading, compressed or not.
+
+    Every reader of a recording goes through this function, so a tier can
+    compress its files without breaking a tool that reads them.
+
+    Parameters
+    ----------
+    path : Path
+        A ``.jsonl`` or ``.jsonl.zst`` recording.
+
+    Returns
+    -------
+    BufferedIOBase
+        A file object that yields the uncompressed lines.
+    """
+    if path.name.endswith(COMPRESSED_SUFFIX):
+        return zstd.open(path, "rb")
+    return open(path, "rb")
 
 
 def stream_path(root: Path, stream: str) -> Path:

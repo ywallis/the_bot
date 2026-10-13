@@ -91,7 +91,7 @@ from apps.shared.src.funding import (
     per_day,
     sum_rates,
 )
-from apps.shared.src.streams import recording_files, stream_path
+from apps.shared.src.streams import open_recording, recording_files, stream_path
 
 logger = logging.getLogger(__name__)
 
@@ -1273,7 +1273,7 @@ def recorded_events(directory: Path, start_ns: int, end_ns: int) -> list[Any]:
     if not directory.is_dir():
         return out
     for path in recording_files(directory):
-        with open(path) as fh:
+        with open_recording(path) as fh:
             for line in fh:
                 try:
                     record = json.loads(line)
