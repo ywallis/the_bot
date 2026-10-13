@@ -145,7 +145,7 @@ async def test_watch_fees_survives_a_failed_pass(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_watch_fees_retries_on_the_next_interval(monkeypatch):
-    """A pass that fails is followed by a pass that succeeds."""
+    """A pass that fails is retried soon and followed by one that succeeds."""
     redis = fakeredis.FakeRedis(decode_responses=True)
     publisher = StreamPublisher(maxlen=100)
     client = fake_client(
@@ -161,11 +161,20 @@ async def test_watch_fees_retries_on_the_next_interval(monkeypatch):
 
     client.load_markets = flaky  # type: ignore[method-assign]
 
-    monkeypatch.setattr(fees.asyncio, "sleep", stop_after(2))
+    slept: list[float] = []
+    stop = stop_after(2)
+
+    async def sleep(seconds: float) -> None:
+        slept.append(seconds)
+        await stop(seconds)
+
+    monkeypatch.setattr(fees.asyncio, "sleep", sleep)
     with pytest.raises(asyncio.CancelledError):
         await fees.watch_fees(client, VENUE, {SYMBOL}, 3600, redis, publisher)
 
     assert calls == 2
+    # The failure waits RETRY_S, not the hour; the success the full interval.
+    assert slept == [fees.RETRY_S, 3600]
     assert await redis.xlen("acct:fees:venue_a") == 1
 
 
