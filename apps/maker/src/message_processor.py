@@ -240,6 +240,10 @@ def broker_order_from_intent(intent: OrderIntent) -> OrderMessage:
         message["post_only"] = True
     if intent.reduce_only:
         message["reduce_only"] = True
+    # An IOC or FOK limit must never rest: a taken leg that rested would be
+    # an order nobody manages, on a book that already moved past it.
+    if intent.time_in_force in (TimeInForce.IOC, TimeInForce.FOK):
+        message["time_in_force"] = intent.time_in_force.value.upper()
     return message
 
 
