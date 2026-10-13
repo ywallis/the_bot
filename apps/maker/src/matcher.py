@@ -35,9 +35,11 @@ from redis.asyncio import ConnectionPool, Redis
 
 import apps.shared.src.logging_config as logging_config
 from apps.maker.src.order_watcher import STRATEGY_TAG
-from apps.shared.src.config import AppConfig, load_app_config
+from apps.shared.src.config import AppConfig, is_contract, load_app_config
 from apps.shared.src.events import (
+    INTENTS_STREAM,
     ORDER_EVENTS_STREAM,
+    SELF_HEDGED_TAG,
     FeeScheduleEvent,
     Liquidity,
     OrderEvent,
@@ -45,6 +47,7 @@ from apps.shared.src.events import (
     OrderKind,
     OrderState,
     Side,
+    SymbolFees,
     decode,
     fees_stream,
     from_stream_fields,
@@ -168,7 +171,7 @@ class HedgeBook:
         """
         return self._count.get(key, 0)
 
-    def record(self, key: tuple[str, str], covers: Decimal) -> None:
+    def record(self, key: tuple[str, str], covers: Decimal, sent: bool = True) -> None:
         """
         Note that one more hedge of an order went out.
 
@@ -184,6 +187,10 @@ class HedgeBook:
         covers : Decimal
             Fill size this hedge covers, see ``HedgeSize.covers``. Added to
             what earlier hedges covered.
+        sent : bool
+            Whether an order went out. A fill absorbed into a contract
+            hedge's residual is covered without one, and must not advance
+            the hedge count the next hedge id is derived from.
         """
         if key in self._hedged:
             self._hedged.move_to_end(key)
@@ -191,7 +198,8 @@ class HedgeBook:
             oldest, _ = self._hedged.popitem(last=False)
             self._count.pop(oldest, None)
         self._hedged[key] = self._hedged.get(key, Decimal(0)) + covers
-        self._count[key] = self._count.get(key, 0) + 1
+        if sent:
+            self._count[key] = self._count.get(key, 0) + 1
 
 
 @dataclass(frozen=True)
@@ -213,6 +221,52 @@ class HedgeSize:
 
     quantity: Decimal
     covers: Decimal
+
+
+@dataclass(frozen=True)
+class HedgeTarget:
+    """
+    The instrument a strategy's fills are hedged on.
+
+    Attributes
+    ----------
+    venue : str
+        Venue id to place the hedge on.
+    symbol : str | None
+        Symbol to hedge on, None for the filled order's own symbol: the
+        spot-to-spot hedge ``taker_exchange`` describes. A contract symbol
+        hedges in contracts, see ``ContractHedger``.
+    """
+
+    venue: str
+    symbol: str | None = None
+
+    def symbol_for(self, event: OrderEvent) -> str:
+        """
+        Return the symbol a hedge of this event trades.
+
+        Parameters
+        ----------
+        event : OrderEvent
+            The filled order's event.
+
+        Returns
+        -------
+        str
+            ``symbol``, or the event's own symbol when unset.
+        """
+        return self.symbol or event.symbol
+
+    def is_contract(self) -> bool:
+        """
+        Return whether hedges go to a contract market.
+
+        Returns
+        -------
+        bool
+            True when ``symbol`` names a contract.
+        """
+        return self.symbol is not None and is_contract(self.symbol)
 
 
 def _leg(
@@ -376,6 +430,164 @@ def hedge_quantity(
     return size_hedge(origin, matching, symbol, side, filled, price).quantity
 
 
+def base_flow(
+    origin: FeeScheduleEvent | None, symbol: str, side: Side, filled: Decimal
+) -> Decimal:
+    """
+    Return the signed base a fill moved into or out of the balance.
+
+    Parameters
+    ----------
+    origin : FeeScheduleEvent | None
+        The fee schedule of the venue the fill happened on.
+    symbol : str
+        CCXT symbol of the fill.
+    side : Side
+        Side of the filled order.
+    filled : Decimal
+        Quantity filled.
+
+    Returns
+    -------
+    Decimal
+        Positive for base received, negative for base given, net of a fee
+        charged in base at the maker rate, as in ``size_hedge``.
+    """
+    rate, in_base, _ = _leg(origin, symbol, side, taker=False)
+    if side is Side.BUY:
+        return filled * (1 - rate) if in_base else filled
+    return -(filled * (1 + rate) if in_base else filled)
+
+
+@dataclass(frozen=True)
+class ContractOrder:
+    """
+    A hedge on a contract market.
+
+    Attributes
+    ----------
+    side : Side
+        Sell to short against base received, buy to cover base given.
+    contracts : Decimal
+        Contracts to trade, quantized to the market's amount precision.
+    base : Decimal
+        Signed base the order offsets: contracts times contract size,
+        positive for a sell.
+    reduce_only : bool
+        True for a buy, which shrinks the short and must never open a long.
+    """
+
+    side: Side
+    contracts: Decimal
+    base: Decimal
+    reduce_only: bool
+
+
+def contract_order(
+    residual: Decimal,
+    entry: SymbolFees | None,
+    price: Decimal,
+) -> ContractOrder | None:
+    """
+    Size the contract order that hedges as much of a residual as fits.
+
+    The residual is the signed base not yet offset on the perpetual. Whole
+    contracts of it are hedged, rounded towards zero so the hedge never
+    exceeds the position it offsets; what does not fit stays in the
+    residual for the next fill. A hedge below the market's minimum notional
+    is not sent at all and also stays in the residual: bumping it over the
+    minimum, as the spot hedge does, would leave the short larger than the
+    inventory, and the reconciler corrects drift anyway.
+
+    Parameters
+    ----------
+    residual : Decimal
+        Base to offset, positive when spot base was received.
+    entry : SymbolFees | None
+        The contract market's schedule entry: contract size, amount
+        precision and minimum notional. None hedges one base unit per
+        contract at ``FALLBACK_PRECISION``.
+    price : Decimal
+        Price used for the minimum notional check.
+
+    Returns
+    -------
+    ContractOrder | None
+        The order, or None when nothing sizeable remains.
+    """
+    size = Decimal(1)
+    places = FALLBACK_PRECISION
+    min_cost = None
+    if entry is not None:
+        if entry.contract_size is not None and entry.contract_size > 0:
+            size = entry.contract_size
+        if entry.amount_precision is not None:
+            places = entry.amount_precision
+        min_cost = entry.min_cost
+    tick = Decimal(1).scaleb(-places)
+    contracts = (abs(residual) / size).quantize(tick, rounding=ROUND_DOWN)
+    if contracts <= 0:
+        return None
+    if min_cost is not None and contracts * size * price < Decimal(str(min_cost)):
+        return None
+    side = Side.SELL if residual > 0 else Side.BUY
+    base = contracts * size if side is Side.SELL else -(contracts * size)
+    return ContractOrder(
+        side=side, contracts=contracts, base=base, reduce_only=side is Side.BUY
+    )
+
+
+class ContractHedger:
+    """
+    Per-strategy residual base awaiting a whole contract.
+
+    A fill of 37 base against a contract of 10 hedges 30; the 7 stay here
+    and are hedged with the next fill of the same strategy once they make a
+    contract. Buys and sells net against each other. The residual lives in
+    memory only: after a restart the reconciler finds it on the delta.
+    """
+
+    def __init__(self) -> None:
+        """Start with nothing outstanding."""
+        self._residual: dict[str, Decimal] = {}
+
+    def residual(self, strategy: str) -> Decimal:
+        """
+        Return the base a strategy has filled and not yet hedged.
+
+        Parameters
+        ----------
+        strategy : str
+            Strategy identifier.
+
+        Returns
+        -------
+        Decimal
+            Signed base, positive when spot base was received.
+        """
+        return self._residual.get(strategy, Decimal(0))
+
+    def add(self, strategy: str, base: Decimal) -> Decimal:
+        """
+        Add a fill's base flow, or an order's offset, to the residual.
+
+        Parameters
+        ----------
+        strategy : str
+            Strategy identifier.
+        base : Decimal
+            Signed base.
+
+        Returns
+        -------
+        Decimal
+            The new residual.
+        """
+        total = self.residual(strategy) + base
+        self._residual[strategy] = total
+        return total
+
+
 def hedge_price(event: OrderEvent) -> Decimal | None:
     """
     Return the price a fill executed at.
@@ -489,6 +701,10 @@ def hedge_intent(
     quantity: Decimal,
     price: Decimal,
     sequence: int = 1,
+    *,
+    symbol: str | None = None,
+    side: Side | None = None,
+    reduce_only: bool = False,
 ) -> OrderIntent:
     """
     Build the market order that flattens a fill.
@@ -506,30 +722,42 @@ def hedge_intent(
         market order by cost.
     sequence : int
         Which hedge of the order this is, see ``hedge_id``.
+    symbol : str | None
+        Symbol to hedge on, the event's own when None.
+    side : Side | None
+        Side of the hedge, the opposite of the fill's when None. A contract
+        hedge nets several fills and names its side.
+    reduce_only : bool
+        Whether the hedge may only shrink a position.
 
     Returns
     -------
     OrderIntent
         The intent.
     """
-    side = Side.BUY if event.side is Side.SELL else Side.SELL
+    if side is None:
+        side = Side.BUY if event.side is Side.SELL else Side.SELL
     return OrderIntent(
         ts_recv=now_ns(),
         intent_id=hedge_id(event, sequence),
         strategy="matching",
         venue=matching_venue,
-        symbol=event.symbol,
+        symbol=symbol or event.symbol,
         side=side,
         order_type=OrderKind.MARKET,
         amount=quantity,
         price=price,
+        reduce_only=reduce_only,
         tags={"hedge_of": event.intent_id, "origin_venue": event.venue},
     )
 
 
 def should_hedge(
-    event: OrderEvent, should_match: dict[str, str], hedged: HedgeBook
-) -> tuple[str, Decimal] | None:
+    event: OrderEvent,
+    should_match: dict[str, HedgeTarget],
+    hedged: HedgeBook,
+    self_hedged: "SelfHedged | None" = None,
+) -> tuple[HedgeTarget, Decimal] | None:
     """
     Decide whether an order event calls for a hedge, where, and how much.
 
@@ -537,20 +765,24 @@ def should_hedge(
     ----------
     event : OrderEvent
         The order event.
-    should_match : dict[str, str]
-        Taker venue per strategy identifier.
+    should_match : dict[str, HedgeTarget]
+        Hedge target per strategy identifier.
     hedged : HedgeBook
         Fill size covered per order. Read here, written by the caller once
         the hedge is actually out.
+    self_hedged : SelfHedged | None
+        Intents whose strategy places the hedge itself; their fills are
+        skipped.
 
     Returns
     -------
-    tuple[str, Decimal] | None
-        The venue to hedge on and the size not yet hedged, or None if the
-        event adds nothing to hedge: the size it reports is already covered,
+    tuple[HedgeTarget, Decimal] | None
+        Where to hedge and the size not yet hedged, or None if the event
+        adds nothing to hedge: the size it reports is already covered,
         which is what a repeated report of the same fill looks like, or
         what a report after a bumped hedge looks like until the fill
-        catches up with the bump.
+        catches up with the bump. A fill on the hedge instrument itself is
+        never hedged: it is a hedge, or a leg its strategy placed.
     """
     if event.state not in HEDGEABLE_STATES or event.filled <= 0:
         return None
@@ -559,12 +791,15 @@ def should_hedge(
         return None
 
     strategy_identifier = event.tags.get(STRATEGY_TAG, "")
-    matching_venue = should_match.get(strategy_identifier)
-    if matching_venue is None:
+    target = should_match.get(strategy_identifier)
+    if target is None:
         logger.debug(f"{event.intent_id} belongs to no matching strategy")
         return None
-    if matching_venue == event.venue:
+    if target.venue == event.venue and target.symbol_for(event) == event.symbol:
         logger.debug("Cannot match self.")
+        return None
+    if self_hedged is not None and (event.venue, event.intent_id) in self_hedged:
+        logger.debug(f"{event.intent_id} is hedged by its own strategy")
         return None
 
     key = (event.venue, event.intent_id)
@@ -572,7 +807,60 @@ def should_hedge(
     if unhedged <= 0:
         logger.debug(f"{event.intent_id} reports {event.filled} filled, all hedged")
         return None
-    return matching_venue, unhedged
+    return target, unhedged
+
+
+class SelfHedged:
+    """
+    Intents a strategy tagged ``SELF_HEDGED_TAG``, remembered from ``oms:intents``.
+
+    The order watcher builds fill events from the venue's reports, which
+    carry the client order id and nothing of the intent's tags, so the
+    matcher learns which orders to skip by reading the intents themselves.
+    """
+
+    def __init__(self, max_size: int = HEDGE_MEMORY) -> None:
+        """
+        Initialize an empty memory.
+
+        Parameters
+        ----------
+        max_size : int
+            Intents remembered; the oldest is forgotten once full.
+        """
+        self.max_size = max_size
+        self._keys: OrderedDict[tuple[str, str], None] = OrderedDict()
+
+    def __contains__(self, key: object) -> bool:
+        """
+        Return whether a (venue, intent id) pair was tagged self-hedged.
+
+        Parameters
+        ----------
+        key : object
+            Venue and intent id.
+
+        Returns
+        -------
+        bool
+            True if remembered.
+        """
+        return key in self._keys
+
+    def observe(self, intent: OrderIntent) -> None:
+        """
+        Remember an intent if it carries the tag.
+
+        Parameters
+        ----------
+        intent : OrderIntent
+            An intent read from ``oms:intents``.
+        """
+        if SELF_HEDGED_TAG not in intent.tags:
+            return
+        self._keys[(intent.venue, intent.intent_id)] = None
+        while len(self._keys) > self.max_size:
+            self._keys.popitem(last=False)
 
 
 def hedging_venues(config: AppConfig, production_mode: bool) -> set[str]:
@@ -600,11 +888,45 @@ def hedging_venues(config: AppConfig, production_mode: bool) -> set[str]:
     """
     venues: set[str] = set()
     for strategy in config.active_strategies(production_mode):
-        if not strategy.params.get("should_match"):
+        target = hedge_target(strategy.params)
+        if target is None:
             continue
-        venues.add(strategy.params["taker_exchange"])
+        venues.add(target.venue)
         venues |= {sub.venue for sub in strategy.subscriptions}
     return venues
+
+
+def hedge_target(params: dict[str, Any]) -> HedgeTarget | None:
+    """
+    Read where a strategy's fills are hedged from its parameters.
+
+    Parameters
+    ----------
+    params : dict[str, Any]
+        The strategy's ``params``. ``should_match`` turns hedging on;
+        ``hedge = { venue = "...", symbol = "..." }`` names the instrument,
+        and ``taker_exchange`` is the shorthand for the same symbol on
+        another venue.
+
+    Returns
+    -------
+    HedgeTarget | None
+        The target, None when the strategy does not hedge.
+
+    Raises
+    ------
+    ValueError
+        If hedging is on and no target is named.
+    """
+    if not params.get("should_match"):
+        return None
+    hedge = params.get("hedge")
+    if isinstance(hedge, dict) and hedge.get("venue"):
+        return HedgeTarget(venue=hedge["venue"], symbol=hedge.get("symbol"))
+    venue = params.get("taker_exchange")
+    if not venue:
+        raise ValueError("should_match needs a hedge table or a taker_exchange")
+    return HedgeTarget(venue=venue)
 
 
 async def load_schedules(redis: Redis, venues: set[str]) -> dict[str, FeeScheduleEvent]:
@@ -664,9 +986,11 @@ async def handle_order_event(
     redis: Redis,
     publisher: StreamPublisher,
     event: OrderEvent,
-    should_match: dict[str, str],
+    should_match: dict[str, HedgeTarget],
     hedged: HedgeBook,
     schedules: dict[str, FeeScheduleEvent],
+    contracts: ContractHedger | None = None,
+    self_hedged: SelfHedged | None = None,
 ) -> OrderIntent | None:
     """
     Hedge one order event, if it needs hedging.
@@ -679,22 +1003,28 @@ async def handle_order_event(
         Publisher writing to ``oms:intents``.
     event : OrderEvent
         The order event.
-    should_match : dict[str, str]
-        Taker venue per strategy identifier.
+    should_match : dict[str, HedgeTarget]
+        Hedge target per strategy identifier.
     hedged : HedgeBook
         Fill size covered per order, updated once the hedge is published.
     schedules : dict[str, FeeScheduleEvent]
         Fee schedules by venue id, see ``load_schedules``.
+    contracts : ContractHedger | None
+        Residuals of strategies hedged on a contract market. A fresh one
+        is used when omitted, which forgets residuals between calls.
+    self_hedged : SelfHedged | None
+        Intents whose strategy places its own hedge.
 
     Returns
     -------
     OrderIntent | None
         The hedge that was published, if any.
     """
-    decision = should_hedge(event, should_match, hedged)
+    decision = should_hedge(event, should_match, hedged, self_hedged)
     if decision is None:
         return None
-    matching_venue, unhedged = decision
+    target, unhedged = decision
+    matching_venue = target.venue
 
     price = hedge_price(event)
     if price is None or price <= 0:
@@ -709,6 +1039,18 @@ async def handle_order_event(
         logger.error(
             f"Hedging {event.intent_id} without a fee schedule for "
             f"{event.venue if event.venue not in schedules else matching_venue}"
+        )
+    if target.is_contract():
+        return await hedge_on_contract(
+            redis,
+            publisher,
+            event,
+            target,
+            unhedged,
+            price,
+            hedged,
+            schedules,
+            contracts if contracts is not None else ContractHedger(),
         )
     size = size_hedge(
         schedules.get(event.venue),
@@ -736,6 +1078,92 @@ async def handle_order_event(
     return intent
 
 
+async def hedge_on_contract(
+    redis: Redis,
+    publisher: StreamPublisher,
+    event: OrderEvent,
+    target: HedgeTarget,
+    unhedged: Decimal,
+    price: Decimal,
+    hedged: HedgeBook,
+    schedules: dict[str, FeeScheduleEvent],
+    contracts: ContractHedger,
+) -> OrderIntent | None:
+    """
+    Add a fill to its strategy's residual and hedge the whole contracts.
+
+    Parameters
+    ----------
+    redis : Redis
+        The Redis client.
+    publisher : StreamPublisher
+        Publisher writing to ``oms:intents``.
+    event : OrderEvent
+        The order event reporting the fill.
+    target : HedgeTarget
+        The contract market to hedge on.
+    unhedged : Decimal
+        Fill size of this order not yet absorbed.
+    price : Decimal
+        Price the fill executed at.
+    hedged : HedgeBook
+        Fill size absorbed per order.
+    schedules : dict[str, FeeScheduleEvent]
+        Fee schedules by venue id.
+    contracts : ContractHedger
+        Residual per strategy, updated in place.
+
+    Returns
+    -------
+    OrderIntent | None
+        The hedge published, None when the residual is under a contract
+        or under the market's minimum.
+    """
+    strategy = event.tags.get(STRATEGY_TAG, "")
+    symbol = target.symbol_for(event)
+    flow = base_flow(
+        schedules.get(event.venue), event.symbol, event.side or Side.BUY, unhedged
+    )
+    key = (event.venue, event.intent_id)
+    residual = contracts.add(strategy, flow)
+    # The fill is now in the residual whether or not an order goes out, so a
+    # repeated report of it must not add it a second time.
+    hedged.record(key, unhedged, sent=False)
+    schedule = schedules.get(target.venue)
+    entry = schedule_for(schedule, symbol) if schedule is not None else None
+    if entry is None:
+        logger.error(
+            f"No schedule for {target.venue} {symbol}; hedging one base per "
+            "contract at the fallback precision"
+        )
+    order = contract_order(residual, entry, price)
+    if order is None:
+        logger.info(
+            f"{strategy} residual {residual} base on {symbol} is under one "
+            "hedgeable order; carried to the next fill"
+        )
+        return None
+    sequence = hedged.hedges(key) + 1
+    intent = hedge_intent(
+        event,
+        target.venue,
+        order.contracts,
+        price,
+        sequence,
+        symbol=symbol,
+        side=order.side,
+        reduce_only=order.reduce_only,
+    )
+    await publisher.publish(redis, intent)
+    contracts.add(strategy, -order.base)
+    hedged.record(key, Decimal(0))
+    logger.info(
+        f"Contract hedge sent: {order.side.value} {order.contracts} {symbol} "
+        f"for {order.base} base, residual {contracts.residual(strategy)}"
+    )
+    return intent
+
+
 async def resolve_cursors(redis: Redis, venues: set[str]) -> dict[str, str]:
     """
     Find where ``consume_order_events`` starts reading each of its streams.
@@ -751,17 +1179,21 @@ async def resolve_cursors(redis: Redis, venues: set[str]) -> dict[str, str]:
     Returns
     -------
     dict[str, str]
-        The current tail of ``oms:events`` and of every venue's fee stream,
-        keyed by stream name.
+        The current tail of ``oms:intents``, ``oms:events`` and every
+        venue's fee stream, keyed by stream name, intents first: an intent
+        always precedes its fills, and a read handles streams in this
+        order, so a self-hedged tag is known before its fill arrives.
     """
-    streams = [ORDER_EVENTS_STREAM] + [fees_stream(venue) for venue in sorted(venues)]
+    streams = [INTENTS_STREAM, ORDER_EVENTS_STREAM] + [
+        fees_stream(venue) for venue in sorted(venues)
+    ]
     return {stream: await stream_tail(redis, stream) for stream in streams}
 
 
 async def consume_order_events(
     redis: Redis,
     publisher: StreamPublisher,
-    should_match: dict[str, str],
+    should_match: dict[str, HedgeTarget],
     block_ms: int,
     batch: int,
     schedules: dict[str, FeeScheduleEvent],
@@ -790,8 +1222,8 @@ async def consume_order_events(
         The Redis client.
     publisher : StreamPublisher
         Publisher writing to ``oms:intents``.
-    should_match : dict[str, str]
-        Taker venue per strategy identifier.
+    should_match : dict[str, HedgeTarget]
+        Hedge target per strategy identifier.
     block_ms : int
         How long a blocking read waits when no event is available.
     batch : int
@@ -803,6 +1235,8 @@ async def consume_order_events(
         Stream id to read from per stream, see ``resolve_cursors``.
     """
     hedged = HedgeBook(HEDGE_MEMORY)
+    contracts = ContractHedger()
+    self_hedged = SelfHedged()
     positions: dict[Any, Any] = dict(cursors)
     while True:
         response = await redis.xread(positions, count=batch, block=block_ms)
@@ -826,16 +1260,26 @@ async def consume_order_events(
                         f"({event.source.value}, {len(event.symbols)} symbols)"
                     )
                     continue
+                if isinstance(event, OrderIntent):
+                    self_hedged.observe(event)
+                    continue
                 if not isinstance(event, OrderEvent):
                     continue
                 await handle_order_event(
-                    redis, publisher, event, should_match, hedged, schedules
+                    redis,
+                    publisher,
+                    event,
+                    should_match,
+                    hedged,
+                    schedules,
+                    contracts,
+                    self_hedged,
                 )
 
 
-def matching_venues(config: AppConfig) -> dict[str, str]:
+def matching_venues(config: AppConfig) -> dict[str, HedgeTarget]:
     """
-    Read the taker venue of every strategy that hedges.
+    Read the hedge target of every strategy that hedges.
 
     Parameters
     ----------
@@ -844,14 +1288,15 @@ def matching_venues(config: AppConfig) -> dict[str, str]:
 
     Returns
     -------
-    dict[str, str]
-        Taker venue per strategy identifier. Matching applies to every
+    dict[str, HedgeTarget]
+        Hedge target per strategy identifier. Matching applies to every
         strategy regardless of its production flag.
     """
-    should_match: dict[str, str] = {}
+    should_match: dict[str, HedgeTarget] = {}
     for strategy in config.strategies:
-        if strategy.params.get("should_match"):
-            should_match[strategy.identifier] = strategy.params["taker_exchange"]
+        target = hedge_target(strategy.params)
+        if target is not None:
+            should_match[strategy.identifier] = target
     return should_match
 
 
