@@ -2,7 +2,7 @@
 
 One process ``XREAD``s every configured stream and appends each entry to a
 JSON Lines file partitioned by stream and UTC hour, for example
-``data/md/book/mexc/ALPH-USDT/2026-09-06T14.jsonl``. Entries are written
+``data/md/book/venue_a/BASE-QUOTE/2026-09-06T14.jsonl``. Entries are written
 verbatim, without decoding the payload, so the recorder stays cheap and never
 rejects an event a newer producer emits.
 

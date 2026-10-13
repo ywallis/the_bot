@@ -13,15 +13,15 @@ from apps.shared.src.events import BookEvent
 from apps.shared.src.streams import StreamPublisher, stream_path
 
 TS = 1_757_160_000_000_000_000
-STREAM = "md:book:mexc:ALPH/USDT"
+STREAM = "md:book:venue_a:BASE/QUOTE"
 
 
 def book(seq: int) -> BookEvent:
     """Return a small book event."""
     return BookEvent(
         ts_recv=TS + seq,
-        venue="mexc",
-        symbol="ALPH/USDT",
+        venue="venue_a",
+        symbol="BASE/QUOTE",
         seq=seq,
         ts_exch=None,
         bids=[(1.0, 1.0)],

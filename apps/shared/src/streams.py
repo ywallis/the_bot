@@ -300,8 +300,8 @@ def stream_path(root: Path, stream: str) -> Path:
     Map a stream name to the directory its recordings live in.
 
     Each colon-separated component becomes a directory and slashes inside a
-    component are replaced by dashes, so ``md:book:gate:ALPH/USDT`` becomes
-    ``<root>/md/book/gate/ALPH-USDT``.
+    component are replaced by dashes, so ``md:book:venue_a:BASE/QUOTE`` becomes
+    ``<root>/md/book/venue_a/BASE-QUOTE``.
 
     Parameters
     ----------

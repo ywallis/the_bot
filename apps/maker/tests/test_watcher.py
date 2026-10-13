@@ -14,13 +14,13 @@ from apps.shared.src.errors import ChecksumError, NetworkError, UnsubscribeError
 from apps.shared.src.events import BookEvent, TradeEvent
 from apps.shared.src.streams import StreamPublisher
 
-VENUES = [{"id": "gate", "name": "Gate.io"}, {"id": "mexc", "name": "Mexc"}]
+VENUES = [{"id": "venue_z", "name": "Venue Z"}, {"id": "venue_x", "name": "Venue X"}]
 
 
 def order_book(best_bid: float) -> dict:
     """Return a CCXT-shaped order book with three levels per side."""
     return {
-        "symbol": "ALPH/USDT",
+        "symbol": "BASE/USDT",
         "timestamp": 1_757_160_000_000,
         "bids": [[best_bid, 10.0], [best_bid - 0.01, 20.0], [best_bid - 0.02, 30.0]],
         "asks": [
@@ -36,16 +36,16 @@ async def test_watch_ob_publishes_event_and_snapshot():
     """Each book update writes the legacy snapshot and a BookEvent."""
     redis = fakeredis.FakeRedis(decode_responses=True)
     publisher = StreamPublisher(maxlen=100)
-    client = FakeClient("mexc", [order_book(1.10), order_book(1.11)])
+    client = FakeClient("venue_x", [order_book(1.10), order_book(1.11)])
 
     with pytest.raises(StopWatching):
-        await watcher.watch_ob(client, "ALPH/USDT", redis, publisher, depth=2)
+        await watcher.watch_ob(client, "BASE/USDT", redis, publisher, depth=2)
 
-    snapshot = json.loads(await redis.get("ALPH/USDT-mexc"))
+    snapshot = json.loads(await redis.get("BASE/USDT-venue_x"))
     assert snapshot["bids"][0][0] == 1.11
     assert len(snapshot["bids"]) == 3, "snapshot keeps the full CCXT book"
 
-    entries = await redis.xrange("md:book:mexc:ALPH/USDT")
+    entries = await redis.xrange("md:book:venue_x:BASE/USDT")
     assert len(entries) == 2
     first = events.from_stream_fields(entries[0][1])
     second = events.from_stream_fields(entries[1][1])
@@ -64,14 +64,14 @@ async def test_watch_ob_recovers_from_network_errors(monkeypatch):
     redis = fakeredis.FakeRedis(decode_responses=True)
     publisher = StreamPublisher(maxlen=100)
     client = FakeClient(
-        "mexc", [order_book(1.0), NetworkError("blip"), order_book(2.0)]
+        "venue_x", [order_book(1.0), NetworkError("blip"), order_book(2.0)]
     )
 
     with pytest.raises(StopWatching):
-        await watcher.watch_ob(client, "ALPH/USDT", redis, publisher, depth=20)
+        await watcher.watch_ob(client, "BASE/USDT", redis, publisher, depth=20)
 
     assert client.closed == 1
-    assert await redis.xlen("md:book:mexc:ALPH/USDT") == 2
+    assert await redis.xlen("md:book:venue_x:BASE/USDT") == 2
 
 
 @pytest.mark.asyncio
@@ -81,13 +81,13 @@ async def test_watch_ob_resubscribes_without_closing(monkeypatch):
     redis = fakeredis.FakeRedis(decode_responses=True)
     publisher = StreamPublisher(maxlen=100)
     client = FakeClient(
-        "bitget",
-        [ChecksumError("bad"), UnsubscribeError("bitget orderbook"), order_book(1.0)],
+        "venue_y",
+        [ChecksumError("bad"), UnsubscribeError("venue_y orderbook"), order_book(1.0)],
     )
     with pytest.raises(StopWatching):
-        await watcher.watch_ob(client, "ALPH/USDT", redis, publisher, depth=20)
+        await watcher.watch_ob(client, "BASE/USDT", redis, publisher, depth=20)
     assert client.closed == 0
-    assert await redis.xlen("md:book:bitget:ALPH/USDT") == 1
+    assert await redis.xlen("md:book:venue_y:BASE/USDT") == 1
 
 
 def crossed_book() -> dict:
@@ -143,10 +143,10 @@ async def test_watch_trades_drops_replayed_cache(monkeypatch):
         for i in range(50)
     ]
     newer = {"id": "50", "timestamp": 50, "side": "sell", "price": 1.0, "amount": 1.0}
-    client = FakeClient("bitget", [cache, UnsubscribeError("x"), cache + [newer]])
+    client = FakeClient("venue_y", [cache, UnsubscribeError("x"), cache + [newer]])
     with pytest.raises(StopWatching):
-        await watcher.watch_trades(client, "ALPH/USDT", redis, publisher)
-    entries = await redis.xrange("md:trade:bitget:ALPH/USDT")
+        await watcher.watch_trades(client, "BASE/USDT", redis, publisher)
+    entries = await redis.xrange("md:trade:venue_y:BASE/USDT")
     ids = [events.from_stream_fields(f).trade_id for _, f in entries]
     assert ids == [str(i) for i in range(51)]
 
@@ -166,9 +166,9 @@ def test_trade_key_falls_back_without_id():
 async def test_watch_ob_reraises_unknown_errors():
     """Anything not in the recoverable list crashes the handler."""
     redis = fakeredis.FakeRedis(decode_responses=True)
-    client = FakeClient("mexc", [ValueError("bad")])
+    client = FakeClient("venue_x", [ValueError("bad")])
     with pytest.raises(ValueError):
-        await watcher.watch_ob(client, "ALPH/USDT", redis, StreamPublisher(10), 20)
+        await watcher.watch_ob(client, "BASE/USDT", redis, StreamPublisher(10), 20)
 
 
 @pytest.mark.asyncio
@@ -180,12 +180,12 @@ async def test_watch_trades_publishes_one_event_per_trade():
         {"id": "1", "timestamp": 1, "side": "buy", "price": 1.0, "amount": 2.0},
         {"id": "2", "timestamp": 2, "side": "sell", "price": 1.1, "amount": 3.0},
     ]
-    client = FakeClient("mexc", [batch, [], [batch[1]]])
+    client = FakeClient("venue_x", [batch, [], [batch[1]]])
 
     with pytest.raises(StopWatching):
-        await watcher.watch_trades(client, "ALPH/USDT", redis, publisher)
+        await watcher.watch_trades(client, "BASE/USDT", redis, publisher)
 
-    entries = await redis.xrange("md:trade:mexc:ALPH/USDT")
+    entries = await redis.xrange("md:trade:venue_x:BASE/USDT")
     decoded = [events.from_stream_fields(f) for _, f in entries]
     assert [e.seq for e in decoded] == [1, 2]
     assert all(isinstance(e, TradeEvent) for e in decoded)
@@ -206,23 +206,26 @@ def test_build_tasks_follows_subscriptions():
                     "production": True,
                     "subscriptions": [
                         {
-                            "venue": "gate",
+                            "venue": "venue_z",
                             "symbol": "BTC/USDT",
                             "feeds": ["book", "trade"],
                         },
-                        {"venue": "mexc", "symbol": "SOL/USDT"},
+                        {"venue": "venue_x", "symbol": "SOL/USDT"},
                     ],
                 },
                 {
                     "identifier": "tst",
                     "type": "x",
                     "production": False,
-                    "subscriptions": [{"venue": "mexc", "symbol": "ETH/USDT"}],
+                    "subscriptions": [{"venue": "venue_x", "symbol": "ETH/USDT"}],
                 },
             ],
         }
     )
-    clients = {"gate": FakeClient("gate", []), "mexc": FakeClient("mexc", [])}
+    clients = {
+        "venue_z": FakeClient("venue_z", []),
+        "venue_x": FakeClient("venue_x", []),
+    }
     tasks = watcher.build_tasks(config, clients, None, StreamPublisher(10), True)
     names = sorted(t.__name__ for t in tasks)
     for t in tasks:

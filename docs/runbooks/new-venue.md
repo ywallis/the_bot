@@ -2,7 +2,7 @@
 
 The feed handlers depend on behaviours of each venue's websocket
 implementation in CCXT that unit tests cannot see. Everything below was
-learned the hard way on 2026-09-06 with MEXC and Bitget. Run it before a new
+learned the hard way on 2026-09-06 with venue X and venue Y. Run it before a new
 venue goes into `config.toml`, after every CCXT upgrade, and whenever a feed
 misbehaves in production.
 
@@ -22,7 +22,7 @@ prints a PASS/FAIL/INFO table:
 |---|---|---|
 | control feed | BTC/USDT book updates arrive, so the transport is alive | Fix network or venue status first. A quiet result on your symbol means nothing while this fails. |
 | book first message | The symbol exists and pushes at all | Check the CCXT symbol spelling. Illiquid pairs can be silent for a minute. |
-| book checksum | CCXT's delta checksum holds with verification on | Upgrade CCXT first (Bitget was fixed in 4.5.77). Otherwise set `options = { watchOrderBook = { checksum = false } }` on the venue in config. |
+| book checksum | CCXT's delta checksum holds with verification on | Upgrade CCXT first (venue Y was fixed in 4.5.77). Otherwise set `options = { watchOrderBook = { checksum = false } }` on the venue in config. |
 | book other errors | No error types outside the watcher's known lists | Add the type to `RESUBSCRIBE_ERRORS` or `RECONNECT_ERRORS` in `apps/maker/src/watcher.py`, else it crashes the watcher. |
 | book depth / ts_exch / lag | At least `book_depth` levels, exchange timestamps present, exchange-to-receive lag | Informational. A venue without timestamps can only be researched on `ts_recv`. |
 | trade ids / newUpdates / cache replay | Trades carry ids, consecutive calls return only new trades, resubscribe replays the cache | Missing ids and replay are handled by the watcher's dedupe. A newUpdates failure needs a look at `ccxt.pro.<venue>.watch_trades`. |
@@ -36,7 +36,7 @@ say anything.
 
 ## 2. Interpret quiet markets correctly
 
-ALPH/USDT goes silent for 30 to 60 seconds regularly on both venues. Three
+A thin market can go silent for 30 to 60 seconds regularly on both venues. Three
 probes in a row with 40-second timeouts once looked like a broken transport
 after a dependency upgrade; a raw socket on BTC/USDT showed 250 updates in
 25 seconds. Always compare against a liquid pair before blaming code.
@@ -47,8 +47,8 @@ In the strategies repo `config/config.toml`:
 
 ```toml
 [[venues]]
-id = "gate"          # CCXT short id, also the prefix of GATE_KEY etc. in .env
-name = "Gate.io"
+id = "venue_c"       # CCXT short id, also the prefix of VENUE_C_KEY etc. in .env
+name = "Venue C"
 # options = { watchOrderBook = { checksum = false } }   # only if check 1 says so
 # fee_currency = "quote"   # see section 4; default is "quote"
 # maker_fee = 0.0          # only when the fees check says the API hides the schedule
@@ -196,9 +196,10 @@ changed to want one (`docs/design/inventory-hedging.md`, section 4).
 
 ## Known venue quirks
 
-- **Bitget**: full-depth book checksum failed on every ALPH/USDT update with
-  ccxt 4.5.11, fixed by 4.5.77 (pinned in `pyproject.toml`). Replays its
-  50-trade cache on every resubscription. Book rows have three columns.
-- **MEXC**: trades carry no id. The first book message can take about 18
-  seconds. Pushes balance updates on every order placement.
+- **Venue Y**: full-depth book checksum failed on every update of a
+  thin market with ccxt 4.5.11, fixed by 4.5.77 (pinned in
+  `pyproject.toml`). Replays its 50-trade cache on every resubscription.
+  Book rows have three columns.
+- **Venue X**: trades carry no id. The first book message can take
+  about 18 seconds. Pushes balance updates on every order placement.
 - Both: about 120 ms median exchange-to-receive lag for books.

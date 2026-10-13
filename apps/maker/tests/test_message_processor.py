@@ -67,7 +67,7 @@ def config() -> AppConfig:
 def order_intent(
     intent_id: str = "t-250906120000_lmb_eb",
     strategy: str = "lmb_eb",
-    venue: str = "mexc",
+    venue: str = "venue_x",
     legacy: OrderType | None = OrderType.REPLACE,
     replace_of: str | None = None,
     ts_recv: int | None = None,
@@ -79,7 +79,7 @@ def order_intent(
         intent_id=intent_id,
         strategy=strategy,
         venue=venue,
-        symbol="ALPH/USDT",
+        symbol="BASE/USDT",
         side=Side.SELL,
         order_type=OrderKind.LIMIT,
         amount=Decimal("40"),
@@ -226,8 +226,8 @@ def test_legacy_order_type_derived_for_native_intents():
         ts_recv=now_ns(),
         intent_id="i1",
         strategy="s",
-        venue="mexc",
-        symbol="ALPH/USDT",
+        venue="venue_x",
+        symbol="BASE/USDT",
         side=Side.BUY,
         order_type=OrderKind.MARKET,
         amount=Decimal("1"),
@@ -252,8 +252,8 @@ def test_broker_order_from_intent_carries_every_field():
     """The broker message is built from the intent alone."""
     msg = broker_order_from_intent(order_intent())
     assert msg["id"] == "t-250906120000_lmb_eb"
-    assert msg["exchange"] == "mexc"
-    assert msg["pair"] == "ALPH/USDT"
+    assert msg["exchange"] == "venue_x"
+    assert msg["pair"] == "BASE/USDT"
     assert msg["order_type"] is OrderType.REPLACE
     assert msg["price"] == Decimal("0.35")
     assert msg["amount"] == Decimal("40")
@@ -265,8 +265,8 @@ def test_broker_order_prices_a_market_intent_at_zero():
         ts_recv=now_ns(),
         intent_id="i1",
         strategy="s",
-        venue="mexc",
-        symbol="ALPH/USDT",
+        venue="venue_x",
+        symbol="BASE/USDT",
         side=Side.BUY,
         order_type=OrderKind.MARKET,
         amount=Decimal("1"),
@@ -296,10 +296,10 @@ async def test_intent_is_placed_acked_and_reported(
     assert [m["id"] for m in broker.orders] == [intent.intent_id]
     states = [e.state for e in await events_on(manager, ORDER_EVENTS_STREAM)]
     assert states == [OrderState.ACCEPTED, OrderState.OPEN]
-    assert manager.orders[("mexc", intent.intent_id)].venue_order_id == (
+    assert manager.orders[("venue_x", intent.intent_id)].venue_order_id == (
         f"venue-{intent.intent_id}"
     )
-    assert manager.resting["lmb_eb"] == ("mexc", intent.intent_id)
+    assert manager.resting["lmb_eb"] == ("venue_x", intent.intent_id)
     assert await pending_count(manager) == 0
 
 
@@ -336,8 +336,8 @@ async def test_a_replacing_intent_cancels_the_resting_order(
     await submit(manager, second)
 
     assert [m["id"] for m in broker.cancellations] == [f"venue-{first.intent_id}"]
-    assert ("mexc", "first") not in manager.orders
-    assert manager.resting["lmb_eb"] == ("mexc", "second")
+    assert ("venue_x", "first") not in manager.orders
+    assert manager.resting["lmb_eb"] == ("venue_x", "second")
 
 
 @pytest.mark.asyncio
@@ -353,7 +353,7 @@ async def test_replace_of_names_the_order_it_supersedes(
     await submit(manager, second)
 
     assert [m["id"] for m in broker.cancellations] == ["venue-first"]
-    assert ("mexc", "first") not in manager.orders
+    assert ("venue_x", "first") not in manager.orders
 
 
 @pytest.mark.asyncio
@@ -364,12 +364,12 @@ async def test_a_first_quote_rests_under_its_slot(
     first = order_intent(intent_id="first", legacy=None, replace_of=REPLACE_RESTING)
     await submit(manager, first)
     assert broker.cancellations == []
-    assert manager.resting["lmb_eb"] == ("mexc", "first")
+    assert manager.resting["lmb_eb"] == ("venue_x", "first")
 
     second = order_intent(intent_id="second", legacy=None, replace_of=REPLACE_RESTING)
     await submit(manager, second)
     assert [m["id"] for m in broker.cancellations] == ["venue-first"]
-    assert manager.resting["lmb_eb"] == ("mexc", "second")
+    assert manager.resting["lmb_eb"] == ("venue_x", "second")
 
 
 @pytest.mark.asyncio
@@ -388,8 +388,8 @@ async def test_superseding_clears_the_slot_even_when_naming_a_gone_order(
     await submit(manager, third)
 
     assert [m["id"] for m in broker.cancellations] == ["venue-first"]
-    assert ("mexc", "first") not in manager.orders
-    assert manager.resting["lmb_eb"] == ("mexc", "third")
+    assert ("venue_x", "first") not in manager.orders
+    assert manager.resting["lmb_eb"] == ("venue_x", "third")
 
 
 @pytest.mark.asyncio
@@ -406,8 +406,8 @@ async def test_independent_intents_do_not_cancel_each_other(
     assert [m["id"] for m in broker.orders] == ["one", "two"]
     assert broker.cancellations == []
     assert manager.resting == {}
-    assert ("mexc", "one") in manager.orders
-    assert ("mexc", "two") in manager.orders
+    assert ("venue_x", "one") in manager.orders
+    assert ("venue_x", "two") in manager.orders
 
 
 @pytest.mark.asyncio
@@ -419,8 +419,8 @@ async def test_market_orders_leave_the_book_immediately(
         ts_recv=now_ns(),
         intent_id="hedge",
         strategy="matching",
-        venue="bitget",
-        symbol="ALPH/USDT",
+        venue="venue_y",
+        symbol="BASE/USDT",
         side=Side.BUY,
         order_type=OrderKind.MARKET,
         amount=Decimal("40"),
@@ -498,7 +498,7 @@ async def test_a_busy_strategy_keeps_only_the_latest_quote(
     await settle(manager)
 
     assert [m["id"] for m in broker.orders] == ["first", "third"]
-    assert manager.resting["lmb_eb"] == ("mexc", "third")
+    assert manager.resting["lmb_eb"] == ("venue_x", "third")
     assert manager.queued == {}
     assert await pending_count(manager) == 0
 
@@ -512,8 +512,8 @@ def cancel_intent(target: str = "", strategy: str = "lmb_eb") -> CancelIntent:
         ts_recv=now_ns(),
         intent_id=f"cancel-{strategy}",
         strategy=strategy,
-        venue="mexc",
-        symbol="ALPH/USDT",
+        venue="venue_x",
+        symbol="BASE/USDT",
         target_intent_id=target,
     )
 
@@ -570,7 +570,7 @@ async def test_a_failed_cancellation_keeps_the_order(manager: OrderManager):
     manager.send_to_broker = refuse  # ty: ignore[invalid-assignment]
     await submit(manager, cancel_intent())
 
-    assert ("mexc", "resting") in manager.orders
+    assert ("venue_x", "resting") in manager.orders
     assert await pending_count(manager) == 0
 
 
@@ -580,7 +580,7 @@ async def test_a_failed_cancellation_keeps_the_order(manager: OrderManager):
 def order_event(
     intent_id: str,
     state: OrderState,
-    venue: str = "mexc",
+    venue: str = "venue_x",
     filled: Decimal = Decimal("40"),
 ) -> OrderEvent:
     """Return an order event as the order watcher would publish it."""
@@ -589,7 +589,7 @@ def order_event(
         intent_id=intent_id,
         strategy="lmb_eb",
         venue=venue,
-        symbol="ALPH/USDT",
+        symbol="BASE/USDT",
         state=state,
         side=Side.SELL,
         venue_order_id=f"venue-{intent_id}",
@@ -621,11 +621,11 @@ async def test_a_partial_fill_updates_the_book_without_leaving_it(
         order_event("resting", OrderState.PARTIALLY_FILLED, filled=Decimal("10"))
     )
 
-    tracked = manager.orders[("mexc", "resting")]
+    tracked = manager.orders[("venue_x", "resting")]
     assert tracked.filled == Decimal("10")
     assert tracked.remaining == Decimal("30")
     assert tracked.avg_price == Decimal("0.351")
-    assert manager.resting["lmb_eb"] == ("mexc", "resting")
+    assert manager.resting["lmb_eb"] == ("venue_x", "resting")
 
 
 @pytest.mark.asyncio
@@ -634,9 +634,11 @@ async def test_events_about_other_orders_are_ignored(
 ):
     """An order id we know on a venue we did not use is a different order."""
     await submit(manager, order_intent(intent_id="resting"))
-    manager.apply_order_event(order_event("resting", OrderState.FILLED, venue="bitget"))
+    manager.apply_order_event(
+        order_event("resting", OrderState.FILLED, venue="venue_y")
+    )
 
-    assert ("mexc", "resting") in manager.orders
+    assert ("venue_x", "resting") in manager.orders
 
 
 @pytest.mark.asyncio
@@ -673,7 +675,7 @@ async def test_an_undecodable_entry_is_dropped_not_retried(manager: OrderManager
 async def test_an_event_that_is_not_an_intent_is_dropped(manager: OrderManager):
     """Only intents belong on the intents stream, and the rest are ignored."""
     record = LatencyRecord(
-        ts_recv=now_ns(), intent_id="i", venue="mexc", ts_created=now_ns()
+        ts_recv=now_ns(), intent_id="i", venue="venue_x", ts_created=now_ns()
     )
     await manager.redis.xadd(INTENTS_STREAM, cast(Any, to_stream_fields(record)))
     await manager.consume_once()
@@ -732,10 +734,10 @@ async def test_adopted_orders_rest_without_being_announced(manager: OrderManager
     recollected = OrderMessage(
         kind=MessageType.ORDER,
         strategy="lmb_eb",
-        exchange="mexc",
+        exchange="venue_x",
         id="t-250906120000_lmb_eb",
         exchange_id="venue-7",
-        pair="ALPH/USDT",
+        pair="BASE/USDT",
         side=OrderSide.SELL,
         order_type=OrderType.REPLACE,
         price=Decimal("0.35"),
@@ -743,7 +745,7 @@ async def test_adopted_orders_rest_without_being_announced(manager: OrderManager
     )
     manager.adopt({"lmb_eb": recollected})
 
-    key = ("mexc", "t-250906120000_lmb_eb")
+    key = ("venue_x", "t-250906120000_lmb_eb")
     assert manager.orders[key].venue_order_id == "venue-7"
     assert manager.resting["lmb_eb"] == key
     assert await events_on(manager, ORDER_EVENTS_STREAM) == []
@@ -760,7 +762,7 @@ async def test_shutdown_cancels_resting_orders_only(
     await manager.cancel_all_open()
 
     assert [m["id"] for m in broker.cancellations] == ["venue-resting"]
-    assert ("mexc", "unique") in manager.orders
+    assert ("venue_x", "unique") in manager.orders
 
 
 @pytest.mark.asyncio
@@ -811,7 +813,7 @@ async def test_get_open_orders(
 
     open_orders = await manager.get_open_orders()
 
-    assert "ALPH_gate" in open_orders
+    assert "BASE_venue_z" in open_orders
     mock_redis.publish.assert_called_once()
     mock_pubsub.subscribe.assert_called_once_with("INIT")
     mock_pubsub.unsubscribe.assert_called_once_with("INIT")
@@ -872,7 +874,7 @@ async def test_a_quote_queued_behind_a_cancellation_still_runs(
     await settle(manager)
 
     assert [m["id"] for m in broker.orders] == ["resting", "next quote"]
-    assert manager.resting["lmb_eb"] == ("mexc", "next quote")
+    assert manager.resting["lmb_eb"] == ("venue_x", "next quote")
     assert manager.queued == {}
     assert await pending_count(manager) == 0
 

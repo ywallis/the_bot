@@ -23,13 +23,13 @@ async def test_publish_balance_writes_event_and_legacy_key():
         "USDT": {"free": 10.0, "used": 0.0, "total": 10.0},
         "free": {"USDT": 10.0},
     }
-    await balance.publish_balance(redis, publisher, "mexc", ccxt_balance, TS)
+    await balance.publish_balance(redis, publisher, "venue_x", ccxt_balance, TS)
 
-    legacy = json.loads(await redis.get("balance-mexc"))
+    legacy = json.loads(await redis.get("balance-venue_x"))
     assert legacy["timestamp"] == TS // 1_000_000
     assert legacy["USDT"]["free"] == 10.0
 
-    entries = await redis.xrange("acct:balance:mexc")
+    entries = await redis.xrange("acct:balance:venue_x")
     assert len(entries) == 1
     event = events.from_stream_fields(entries[0][1])
     assert isinstance(event, BalanceEvent)

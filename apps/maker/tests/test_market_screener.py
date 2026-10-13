@@ -613,22 +613,24 @@ def test_public_clients_build_from_the_exchange_class_with_client_options(
     import apps.maker.src.tools.market_screener as module
 
     class FakeCcxt:
-        gate = Recorder
+        venue_z = Recorder
 
     monkeypatch.setattr(module, "ccxt", FakeCcxt)
     config = SimpleNamespace(
         venues=(
-            VenueConfig(id="gate", name="spot", options={"x": 1}),
-            VenueConfig(id="gateperp", name="perp", ccxt_id="gate", market_type="swap"),
+            VenueConfig(id="venue_z", name="spot", options={"x": 1}),
+            VenueConfig(
+                id="venue_zperp", name="perp", ccxt_id="venue_z", market_type="swap"
+            ),
         )
     )
-    clients = public_clients(config, ["gate", "gateperp"], rate_limit_ms=50)
-    assert clients["gate"].params == {
+    clients = public_clients(config, ["venue_z", "venue_zperp"], rate_limit_ms=50)
+    assert clients["venue_z"].params == {
         "enableRateLimit": True,
         "rateLimit": 50,
         "options": {"x": 1},
     }
-    assert clients["gateperp"].params == {
+    assert clients["venue_zperp"].params == {
         "enableRateLimit": True,
         "rateLimit": 50,
         "options": {"defaultType": "swap"},
