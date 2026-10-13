@@ -65,7 +65,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import msgspec
-from compression import zstd
 
 from apps.maker.src.tools.market_screener import parse_when
 from apps.shared.src.config import VenueConfig, load_app_config
@@ -77,8 +76,8 @@ from apps.shared.src.events import (
     trade_stream,
 )
 from apps.shared.src.streams import (
-    COMPRESSED_SUFFIX,
     bucket_of_file,
+    open_recording,
     recording_files,
     stream_path,
 )
@@ -492,8 +491,7 @@ def stream_events(
         bounds = bucket_bounds(bucket) if bucket else None
         if bounds is not None and (bounds[1] <= start_ns or bounds[0] >= end_ns):
             continue
-        opener = zstd.open if path.name.endswith(COMPRESSED_SUFFIX) else open
-        with opener(path, "rb") as fh:
+        with open_recording(path) as fh:
             for line in fh:
                 try:
                     event = _line_decoder.decode(line).data
