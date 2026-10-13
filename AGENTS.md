@@ -76,8 +76,8 @@ uv run pytest -q --cov --cov-report=term
 
 `[tool.coverage.run]` measures the four `src` trees with branch coverage;
 `fail_under` in `[tool.coverage.report]` is a ratchet set to what the suite
-reaches today, not a target. `apps/accountant/src` has no tests at all and is
-what holds the number down; the other three trees sit around 79%. Raise the
+reaches today, not a target. Apart from `archive.py`, `apps/accountant/src`
+has no tests and is what holds the number down. Raise the
 floor as coverage improves, and do not lower it to make a red build green.
 
 ### Linting
@@ -286,6 +286,7 @@ apps/
 - Feed handlers (`apps/maker/src/watcher.py`, `balance.py`) publish through `StreamPublisher` and keep writing the legacy snapshot keys.
 - `apps/maker/src/fees.py` fetches each venue's fee schedule at startup and every `fees.refresh_s`, publishing `FeeScheduleEvent`s to `acct:fees:<venue>` and the `fees-<venue>` snapshot key. Rates come from `fetch_trading_fees` where the venue has it, market defaults otherwise, and config overrides last; the fee currency policy lives on the venue in config and is verified against what fills report.
 - `apps/maker/src/recorder.py` tails every configured stream into `data/<stream path>/<UTC hour>.jsonl`; it is the hot tier of the recording, shipped to the archive host once sealed. Never touch the newest file in a stream directory: the recorder still holds it open.
+- Recordings leave a trading host through `apps/maker/src/shipper.py` (pack, manifest, send, prune over SSH) driven by `apps/accountant/src/archive.py` on the archive host, configured under `[archive]`. A file is deleted from the trading host only after the archive's ledger holds it by checksum. Read recordings through `streams.open_recording`, never `open`: sealed files are `.jsonl.zst`. Setup: `docs/runbooks/archive-host.md`.
 - Orders travel as events: strategies publish `OrderIntent`/`CancelIntent` to `oms:intents`, the order manager (`apps/maker/src/message_processor.py`) is the single consumer of that stream through the `oms` consumer group, and it publishes `OrderEvent`s to `oms:events` and `LatencyRecord`s to `oms:latency`.
 - `apps/maker/src/order_watcher.py` turns CCXT `watch_orders` updates into `OrderEvent`s and, after every websocket drop, reconciles over REST (`fetch_orders` or open plus cancelled-and-closed, per the venue's `has` map) so an order that finished during the gap is still reported; `apps/maker/src/matcher.py` is an ordinary consumer of `oms:events` and holds no exchange connection. The matcher sizes hedges from the fee schedule (`apps/shared/src/fees.py`, model and loaders; `fees-{venue}` snapshot keys at startup) — maker rate for the fill leg, taker rate for the hedge leg, compensation only where the fee is charged in base — and logs a warning when a fill's reported fee contradicts the schedule.
 - `apps/maker/src/orchestrator.py` stops the system in phases (`SHUTDOWN_PHASES`): strategies, order manager, feeds and broker, recorder. A new long-running module must be added to a phase or it stops with the feeds; the order manager must never be stopped after the broker or before the recorder.
