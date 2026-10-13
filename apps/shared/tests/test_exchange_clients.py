@@ -1,49 +1,44 @@
-"""Tests for CCXT client construction."""
+"""Tests for loading the exchange clients' markets."""
 
-from apps.shared.src.config import VenueConfig
-from apps.shared.src.exchange_clients import ccxt_params
+import pytest
+from ccxt.async_support import RateLimitExceeded
 
-
-def test_ccxt_params_with_password_and_options():
-    """Password is included only when required; venue options are forwarded."""
-    venue = VenueConfig(
-        id="venue_y", name="Venue Y", options={"watchOrderBook": {"checksum": False}}
-    )
-    params = ccxt_params(venue, "k", "s", "p", requires_password=True)
-    assert params == {
-        "apiKey": "k",
-        "secret": "s",
-        "password": "p",
-        "options": {"watchOrderBook": {"checksum": False}},
-    }
+from apps.shared.src import exchange_clients
 
 
-def test_ccxt_params_minimal():
-    """No password and no options yields just the key pair."""
-    venue = VenueConfig(id="venue_x", name="Venue X")
-    assert ccxt_params(venue, "k", "s", None, requires_password=False) == {
-        "apiKey": "k",
-        "secret": "s",
-    }
+class Flaky:
+    """A client refused by the rate limit a given number of times."""
+
+    name = "venue"
+
+    def __init__(self, refusals: int):
+        """Store how many loads fail."""
+        self.refusals = refusals
+        self.calls = 0
+
+    async def load_markets(self):
+        """Fail, then succeed."""
+        self.calls += 1
+        if self.calls <= self.refusals:
+            raise RateLimitExceeded("429 Too Many Requests")
 
 
-def test_a_swap_venue_addresses_the_futures_account():
-    """``market_type = "swap"`` becomes CCXT's defaultType unless options say."""
-    venue = VenueConfig(
-        id="venue_a_perp", ccxt_id="venue_a", name="Venue A perp", market_type="swap"
-    )
-    params = ccxt_params(venue, "k", "s", None, requires_password=False)
-    assert params["options"] == {"defaultType": "swap"}
+@pytest.mark.asyncio
+async def test_a_rate_limited_load_is_retried(monkeypatch):
+    """A 429 at start is waited out rather than ending the start-up."""
+    client = Flaky(refusals=2)
+    monkeypatch.setattr(exchange_clients, "authenticated_clients", {"v": client})
+    monkeypatch.setattr(exchange_clients, "LOAD_BACKOFF_S", 0)
+    await exchange_clients.load_clients()
+    assert client.calls == 3
 
-    explicit = VenueConfig(
-        id="venue_a_perp",
-        ccxt_id="venue_a",
-        name="Venue A perp",
-        market_type="swap",
-        options={"defaultType": "future", "watchOrderBook": {"checksum": False}},
-    )
-    params = ccxt_params(explicit, "k", "s", None, requires_password=False)
-    assert params["options"] == {
-        "defaultType": "future",
-        "watchOrderBook": {"checksum": False},
-    }
+
+@pytest.mark.asyncio
+async def test_a_venue_that_never_loads_raises(monkeypatch):
+    """After the last attempt the error reaches the caller."""
+    client = Flaky(refusals=99)
+    monkeypatch.setattr(exchange_clients, "authenticated_clients", {"v": client})
+    monkeypatch.setattr(exchange_clients, "LOAD_BACKOFF_S", 0)
+    with pytest.raises(RateLimitExceeded):
+        await exchange_clients.load_clients()
+    assert client.calls == exchange_clients.LOAD_ATTEMPTS

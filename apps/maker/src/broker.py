@@ -348,8 +348,22 @@ async def main():
         for exchange in authenticated_clients.keys()
     ]
 
-    # Processing SIGTERM
-    await shutdown_event.wait()
+    # Processing SIGTERM, or the subscriber dying: it runs the start-up
+    # (markets, derivatives settings, open orders), and a broker whose
+    # start-up failed must exit rather than leave the order manager waiting
+    # for an answer that never comes.
+    stop_waiter = asyncio.create_task(shutdown_event.wait())
+    await asyncio.wait(
+        {stop_waiter, subscriber_task}, return_when=asyncio.FIRST_COMPLETED
+    )
+    if subscriber_task.done() and not stop_waiter.done():
+        stop_waiter.cancel()
+        error = subscriber_task.exception()
+        logger.critical(f"Broker subscriber stopped: {error!r}; exiting")
+        for client in authenticated_clients.values():
+            await client.close()
+        await redis.aclose()
+        raise SystemExit(1)
 
     logger.info(f"Shutting down after waiting for {SHUTDOWN_GRACE_S} seconds")
     await asyncio.sleep(SHUTDOWN_GRACE_S)
