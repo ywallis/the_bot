@@ -1,5 +1,6 @@
 """Tests for the balance feed handler."""
 
+import asyncio
 import json
 
 import pytest
@@ -120,3 +121,64 @@ async def test_watch_balance_publishes_complete_snapshots():
     assert second.balances["BASE"].used == 20.0
     legacy = json.loads(await redis.get("balance-venue_a"))
     assert set(legacy["free"]) == {"USDT", "BASE"}
+
+
+@pytest.mark.asyncio
+async def test_a_rest_fetch_drops_a_currency_the_venue_no_longer_lists():
+    """An asset sold to zero and omitted by the venue leaves the snapshot."""
+
+    class Client:
+        id = "venue_a"
+        name = "Venue A"
+
+        def __init__(self):
+            self.answers = [
+                {
+                    "USDT": {"free": 50.0, "used": 0.0, "total": 50.0},
+                    "BASE": {"free": 0.0, "used": 34.0, "total": 34.0},
+                },
+                {"USDT": {"free": 57.6, "used": 0.0, "total": 57.6}},
+            ]
+
+        async def fetch_balance(self):
+            return self.answers.pop(0)
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+    cache: balance.BalanceCache = {}
+    client = Client()
+    await balance.fetch_balance(client, redis, publisher, cache)  # ty: ignore[invalid-argument-type]
+    await balance.fetch_balance(client, redis, publisher, cache)  # ty: ignore[invalid-argument-type]
+    entries = await redis.xrange("acct:balance:venue_a")
+    last = events.from_stream_fields(entries[-1][1])
+    assert isinstance(last, BalanceEvent)
+    assert "BASE" not in last.balances
+    assert "BASE" not in cache["venue_a"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_balance_fetches_on_its_interval(monkeypatch):
+    """The refresh loop fetches after every interval and survives a failure."""
+    calls: list[int] = []
+
+    async def fake_fetch(client, redis, publisher, cache):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("down")
+
+    sleeps = 0
+
+    async def fake_sleep(_seconds):
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps > 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(balance, "fetch_balance", fake_fetch)
+    monkeypatch.setattr(balance.asyncio, "sleep", fake_sleep)
+    class Client:
+        id = "venue_a"
+
+    with pytest.raises(asyncio.CancelledError):
+        await balance.refresh_balance(Client(), None, None, {})  # ty: ignore[invalid-argument-type]
+    assert len(calls) == 2
