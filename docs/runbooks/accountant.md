@@ -72,14 +72,35 @@ To stop the export, remove the line and kill the process:
 pkill -f apps.accountant.src.export
 ```
 
-## 4. After a strategy change
+## 4. Serve the status page
 
-The export does not see a new symbol until its config has the symbol. Copy
-the config again after each change on the trading host. The next pass picks
-it up after a restart:
+`apps/accountant/src/web.py` shows open orders, balances, imbalances and
+the daily and monthly performance on one page. It takes a new snapshot
+every 15 seconds. It uses the same `.env` and config as the export.
+
+1. Add this line with `crontab -e`:
+
+   ```
+   */5 * * * * cd <repo> && flock -n ~/services/web.lock <uv> run --frozen -m apps.accountant.src.web --port 8080 >> ~/services/web.log 2>&1
+   ```
+
+2. Open `http://<archive host>:8080/` from the local network. The page has
+   no login. Do not expose the port outside the local network.
+
+An imbalance is pending if an open order has its client order id. The page
+lists only orders that the bot made. It counts the imbalances on orders
+made by hand. The "marked at last price" column adds the inventory change
+at the last trade price to the quote gain.
+
+## 5. After a strategy change
+
+The export and the status page do not see a new symbol until their config
+has the symbol. Copy the config again after each change on the trading
+host. Then restart both. Cron starts them again within five minutes:
 
 ```bash
 pkill -f apps.accountant.src.export
+pkill -f apps.accountant.src.web
 ```
 
 The export asks for the newest 100 finished orders and 100 trades per venue
