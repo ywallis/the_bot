@@ -9,6 +9,8 @@ snapshot every ``REFRESH_S`` seconds, so a page load never calls a venue.
 
 import argparse
 import asyncio
+import contextlib
+import dataclasses
 import html
 import logging
 from dataclasses import dataclass, field
@@ -20,8 +22,8 @@ from pandas import DataFrame
 from psycopg import sql
 
 import apps.shared.src.logging_config as logging_config
-from apps.accountant.src.sql_connector import QueryLoader, send_sql_query
-from apps.accountant.src.utils import load_pg_config
+from apps.accountant.src.sql_connector import QueryLoader
+from apps.accountant.src.utils import load_pg_config, pg_connect
 from apps.shared.src.exchange_clients import authenticated_clients, load_clients
 from apps.shared.src.structs import CustomExchange
 from apps.shared.src.utils import exchange_and_pair
@@ -66,6 +68,11 @@ class Snapshot:
         Daily performance rows of every symbol.
     monthly : list[dict[str, str]]
         Monthly performance rows of every symbol.
+    open_orders_complete : bool
+        False when a venue's open orders could not be listed, so an
+        imbalance missing from ``open_orders`` may still be pending.
+    database_ok : bool
+        False when the database could not be queried.
     errors : list[str]
         What failed while the snapshot was taken.
     """
@@ -77,6 +84,8 @@ class Snapshot:
     manual_imbalances: int = 0
     daily: list[dict[str, str]] = field(default_factory=list)
     monthly: list[dict[str, str]] = field(default_factory=list)
+    open_orders_complete: bool = True
+    database_ok: bool = True
     errors: list[str] = field(default_factory=list)
 
 
@@ -173,14 +182,18 @@ def balance_rows(venue: str, balance: dict) -> list[dict[str, str]]:
 
 
 def imbalance_rows(
-    imbalances: DataFrame | None, open_ids: set[str]
+    imbalances: DataFrame | None,
+    open_ids: set[str],
+    open_orders_complete: bool = True,
 ) -> tuple[list[dict[str, str]], int]:
     """
     Turn the ``fetch_imbalances`` result into page rows.
 
     An imbalance is pending when an open order carries its client order
-    id, because that order closes it when it fills. Imbalances on ids the
-    bot did not make are counted, not listed.
+    id, because that order closes it when it fills. If the open orders of
+    some venue could not be listed, an imbalance without a listed order is
+    unknown rather than unaddressed: its order may rest on that venue.
+    Imbalances on ids the bot did not make are counted, not listed.
 
     Parameters
     ----------
@@ -188,6 +201,8 @@ def imbalance_rows(
         Result of the ``fetch_imbalances`` query, None when it is empty.
     open_ids : set[str]
         Client order ids of every open order.
+    open_orders_complete : bool, optional
+        Whether every venue's open orders were listed. Defaults to True.
 
     Returns
     -------
@@ -206,6 +221,12 @@ def imbalance_rows(
             manual += 1
             continue
         delta = Decimal(str(record["delta"]))
+        if client_order_id in open_ids:
+            state = "pending"
+        elif open_orders_complete:
+            state = "unaddressed"
+        else:
+            state = "unknown"
         rows.append(
             {
                 "symbol": str(record["symbol"]),
@@ -213,7 +234,7 @@ def imbalance_rows(
                 "delta": fmt(delta, 4),
                 "quote value": fmt(record.get("usdt_delta"), 2),
                 "to close": "sell" if delta > 0 else "buy",
-                "state": "pending" if client_order_id in open_ids else "unaddressed",
+                "state": state,
             }
         )
     return rows, manual
@@ -288,6 +309,7 @@ async def fetch_venue(
             orders = await client.fetch_open_orders(symbol)
             snapshot.open_orders.extend(order_rows(venue, orders))
         except Exception as e:
+            snapshot.open_orders_complete = False
             snapshot.errors.append(f"{venue} {symbol} open orders: {e}")
     try:
         snapshot.balances.extend(balance_rows(venue, await client.fetch_balance()))
@@ -295,9 +317,75 @@ async def fetch_venue(
         snapshot.errors.append(f"{venue} balance: {e}")
 
 
+def run_query(
+    pg_config: dict[str, str],
+    query: sql.SQL | sql.Composed,
+    parameters: dict[str, object],
+) -> DataFrame | None:
+    """
+    Run one query and return its rows.
+
+    Unlike ``send_sql_query``, a database error is raised, not printed: an
+    empty table must mean no row, never an unreachable database.
+
+    Parameters
+    ----------
+    pg_config : dict[str, str]
+        PostgreSQL configuration.
+    query : sql.SQL | sql.Composed
+        The query.
+    parameters : dict[str, object]
+        Its named parameters.
+
+    Returns
+    -------
+    DataFrame | None
+        The rows, or None when there is none.
+    """
+    with pg_connect(pg_config) as conn, conn.cursor() as cur:
+        cur.execute(query, parameters)
+        rows = cur.fetchall()
+        if not rows or cur.description is None:
+            return None
+        return DataFrame(rows, columns=[d.name for d in cur.description])
+
+
+def named_query(queries: QueryLoader, name: str) -> sql.SQL | sql.Composed:
+    """
+    Return a loaded query with its ``{symbol}`` and ``{range}`` bound.
+
+    Parameters
+    ----------
+    queries : QueryLoader
+        Loaded queries.
+    name : str
+        File name of the query without ``.sql``.
+
+    Returns
+    -------
+    sql.SQL | sql.Composed
+        The query.
+
+    Raises
+    ------
+    Exception
+        If no query has that name.
+    """
+    text = queries.get_query(name)
+    if text is None:
+        raise Exception(f"Query {name} could not be loaded")
+    if "{symbol}" not in text:
+        return sql.SQL(text)
+    return sql.SQL(text).format(
+        symbol=sql.Placeholder("symbol"), range=sql.Placeholder("range")
+    )
+
+
 def query_database(
     pg_config: dict[str, str], queries: QueryLoader, symbols: list[str]
-) -> dict[str, tuple[DataFrame | None, DataFrame | None, DataFrame | None, object]]:
+) -> dict[
+    str, tuple[DataFrame | None, DataFrame | None, DataFrame | None, Decimal | None]
+]:
     """
     Run the database queries of every symbol.
 
@@ -315,26 +403,23 @@ def query_database(
     dict
         Per symbol: imbalances, daily overview, monthly overview and the
         last trade price, each None when the query returned nothing.
+
+    Raises
+    ------
+    psycopg.Error
+        If the database cannot be queried.
     """
-    imbalances = sql.SQL(queries.get_query("fetch_imbalances"))
-    daily = sql.SQL(queries.get_query("daily_overview")).format(
-        symbol=sql.Placeholder("symbol"), range=sql.Placeholder("range")
-    )
-    monthly = sql.SQL(queries.get_query("monthly_overview")).format(
-        symbol=sql.Placeholder("symbol"), range=sql.Placeholder("range")
-    )
+    imbalances = named_query(queries, "fetch_imbalances")
+    daily = named_query(queries, "daily_overview")
+    monthly = named_query(queries, "monthly_overview")
     results = {}
     for symbol in symbols:
-        last = send_sql_query(pg_config, LAST_PRICE_QUERY, False, {"symbol": symbol})
+        last = run_query(pg_config, LAST_PRICE_QUERY, {"symbol": symbol})
         results[symbol] = (
-            send_sql_query(pg_config, imbalances, False, {"symbol": symbol}),
-            send_sql_query(
-                pg_config, daily, False, {"symbol": symbol, "range": DAILY_ROWS}
-            ),
-            send_sql_query(
-                pg_config, monthly, False, {"symbol": symbol, "range": MONTHLY_ROWS}
-            ),
-            last["price"].iloc[0] if isinstance(last, DataFrame) else None,
+            run_query(pg_config, imbalances, {"symbol": symbol}),
+            run_query(pg_config, daily, {"symbol": symbol, "range": DAILY_ROWS}),
+            run_query(pg_config, monthly, {"symbol": symbol, "range": MONTHLY_ROWS}),
+            Decimal(str(last["price"].iloc[0])) if last is not None else None,
         )
     return results
 
@@ -377,15 +462,21 @@ async def take_snapshot(
             for venue, venue_symbols in per_venue.items()
         )
     )
-    results = await asyncio.to_thread(query_database, pg_config, queries, symbols)
+    try:
+        results = await asyncio.to_thread(query_database, pg_config, queries, symbols)
+    except Exception as e:
+        snapshot.database_ok = False
+        snapshot.errors.append(f"database: {e}")
+        results = {}
     await venues
 
     open_ids = {row["client order id"] for row in snapshot.open_orders}
-    for symbol, (imbalances, daily, monthly, last) in results.items():
-        rows, manual = imbalance_rows(imbalances, open_ids)
+    for imbalances, daily, monthly, last_price in results.values():
+        rows, manual = imbalance_rows(
+            imbalances, open_ids, snapshot.open_orders_complete
+        )
         snapshot.imbalances.extend(rows)
         snapshot.manual_imbalances += manual
-        last_price = Decimal(str(last)) if last is not None else None
         snapshot.daily.extend(performance_rows(daily, "date", last_price))
         snapshot.monthly.extend(performance_rows(monthly, "month", last_price))
     return snapshot
@@ -439,6 +530,17 @@ def render(snapshot: Snapshot) -> str:
         else "not yet"
     )
     errors = "".join(f"<li>{html.escape(error)}</li>" for error in snapshot.errors)
+    unavailable = "Database unavailable."
+    no_imbalance = (
+        "No imbalance on bot orders." if snapshot.database_ok else unavailable
+    )
+    no_trade = "No trade." if snapshot.database_ok else unavailable
+    incomplete = (
+        ""
+        if snapshot.open_orders_complete
+        else "<p class='errors'>Open orders are incomplete: an imbalance "
+        "without a listed order may still be pending, so it shows unknown.</p>"
+    )
     manual = (
         f"<p class='empty'>{snapshot.manual_imbalances} more on orders placed "
         "by hand, not listed.</p>"
@@ -475,30 +577,36 @@ th:first-child, td:first-child {{ text-align: left; }}
 <h2>Balances</h2>
 <div class="scroll">{table(snapshot.balances, "No balance.")}</div>
 <h2>Imbalances</h2>
-<div class="scroll">{table(snapshot.imbalances, "No imbalance on bot orders.")}</div>
+{incomplete}
+<div class="scroll">{table(snapshot.imbalances, no_imbalance)}</div>
 {manual}
 <h2>Daily performance</h2>
-<div class="scroll">{table(snapshot.daily, "No trade.")}</div>
+<div class="scroll">{table(snapshot.daily, no_trade)}</div>
 <h2>Monthly performance</h2>
-<div class="scroll">{table(snapshot.monthly, "No trade.")}</div>
+<div class="scroll">{table(snapshot.monthly, no_trade)}</div>
 </body>
 </html>
 """
 
 
-async def refresh(app: web.Application) -> None:
+async def refresh(
+    app: web.Application, pg_config: dict[str, str], queries: QueryLoader
+) -> None:
     """
     Replace the app's snapshot every ``REFRESH_S`` seconds.
+
+    A failed refresh keeps the last snapshot and replaces its errors with
+    one that says the page is stale, so the errors never pile up.
 
     Parameters
     ----------
     app : web.Application
         The application holding the snapshot.
+    pg_config : dict[str, str]
+        PostgreSQL configuration.
+    queries : QueryLoader
+        Loaded queries.
     """
-    pg_config = load_pg_config()
-    queries = QueryLoader()
-    queries.load_queries()
-    await load_clients()
     while True:
         try:
             app[SNAPSHOT] = await take_snapshot(
@@ -506,7 +614,11 @@ async def refresh(app: web.Application) -> None:
             )
         except Exception as e:
             logger.exception("Snapshot failed")
-            app[SNAPSHOT].errors.append(f"snapshot failed: {e}")
+            failed_at = datetime.now(UTC).strftime("%H:%M:%S UTC")
+            app[SNAPSHOT] = dataclasses.replace(
+                app[SNAPSHOT],
+                errors=[f"refresh failed at {failed_at}, page is stale: {e}"],
+            )
         await asyncio.sleep(REFRESH_S)
 
 
@@ -531,6 +643,10 @@ async def background(app: web.Application):
     """
     Run the refresh task for the lifetime of the app.
 
+    The configuration and the venues' markets load before the app serves:
+    if they fail, the process exits and cron starts it again, rather than
+    serving an empty page from a dead task.
+
     Parameters
     ----------
     app : web.Application
@@ -541,9 +657,15 @@ async def background(app: web.Application):
     None
         Control while the app serves.
     """
-    task = asyncio.create_task(refresh(app))
+    pg_config = load_pg_config()
+    queries = QueryLoader()
+    queries.load_queries()
+    await load_clients()
+    task = asyncio.create_task(refresh(app, pg_config, queries))
     yield
     task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
     for client in authenticated_clients.values():
         await client.close()
 
@@ -566,7 +688,11 @@ def make_app() -> web.Application:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
-    parser.add_argument("--host", default="0.0.0.0", help="Address to listen on.")
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Address to listen on; the page has no login.",
+    )
     parser.add_argument("--port", type=int, default=8080, help="Port to listen on.")
     args = parser.parse_args()
     web.run_app(make_app(), host=args.host, port=args.port, print=None)

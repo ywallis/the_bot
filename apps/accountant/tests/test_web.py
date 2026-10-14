@@ -2,9 +2,13 @@
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
+import psycopg
+import pytest
 from pandas import DataFrame
 
+import apps.accountant.src.web as web
 from apps.accountant.src.web import (
     Snapshot,
     balance_rows,
@@ -146,3 +150,93 @@ def test_render_escapes_values_and_lists_errors() -> None:
 def test_render_before_the_first_snapshot() -> None:
     """The page renders while the first snapshot is still being taken."""
     assert "not yet" in render(Snapshot())
+
+
+class FakeVenue:
+    """A venue client with one resting order and one balance."""
+
+    def __init__(self, fail_orders: bool = False) -> None:
+        self.fail_orders = fail_orders
+
+    async def fetch_open_orders(self, symbol: str) -> list[dict]:
+        """Return one resting order, or fail as a timed-out request does."""
+        if self.fail_orders:
+            raise TimeoutError("open orders timed out")
+        return [{"symbol": symbol, "side": "sell", "clientOrderId": "t-1_strat_slot"}]
+
+    async def fetch_balance(self) -> dict:
+        """Return a balance of one base unit."""
+        return {"free": {"BASE": 1}, "used": {"BASE": 0}, "total": {"BASE": 1}}
+
+
+IMBALANCES = DataFrame(
+    [
+        {
+            "symbol": SYMBOL,
+            "clientorderid": "t-2_strat_slot",
+            "delta": Decimal("5"),
+            "usdt_delta": Decimal("1"),
+        }
+    ]
+)
+
+
+def fake_database(*args: Any) -> dict:
+    """Return one imbalance and no performance row."""
+    return {SYMBOL: (IMBALANCES, None, None, Decimal("0.15"))}
+
+
+def failing_database(*args: Any) -> dict:
+    """Fail as an unreachable database does."""
+    raise psycopg.OperationalError("connection refused")
+
+
+async def snapshot_with(monkeypatch: pytest.MonkeyPatch, database: Any, **venues: Any):
+    """Take a snapshot over fake venues and a fake database."""
+    monkeypatch.setattr(web, "query_database", database)
+    pairs = {(venue, SYMBOL) for venue in venues}
+    return await web.take_snapshot(venues, pairs, {}, None)
+
+
+@pytest.mark.asyncio
+async def test_take_snapshot_marks_an_imbalance_without_an_order_unaddressed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With every venue listed, an imbalance without an order is unaddressed."""
+    snapshot = await snapshot_with(
+        monkeypatch, fake_database, venue_a=FakeVenue(), venue_b=FakeVenue()
+    )
+    assert snapshot.errors == []
+    assert len(snapshot.open_orders) == 2
+    assert [row["state"] for row in snapshot.imbalances] == ["unaddressed"]
+
+
+@pytest.mark.asyncio
+async def test_take_snapshot_marks_imbalances_unknown_when_a_venue_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A venue whose open orders failed may hold the order closing it."""
+    snapshot = await snapshot_with(
+        monkeypatch,
+        fake_database,
+        venue_a=FakeVenue(),
+        venue_b=FakeVenue(fail_orders=True),
+    )
+    assert not snapshot.open_orders_complete
+    assert [row["state"] for row in snapshot.imbalances] == ["unknown"]
+    assert any("venue_b" in error for error in snapshot.errors)
+    assert "Open orders are incomplete" in render(snapshot)
+
+
+@pytest.mark.asyncio
+async def test_take_snapshot_reports_an_unreachable_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unreachable database is an error, never an empty table."""
+    snapshot = await snapshot_with(monkeypatch, failing_database, venue_a=FakeVenue())
+    assert not snapshot.database_ok
+    assert any("connection refused" in error for error in snapshot.errors)
+    assert len(snapshot.balances) == 1
+    page = render(snapshot)
+    assert "Database unavailable." in page
+    assert "No trade." not in page
