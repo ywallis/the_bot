@@ -63,7 +63,7 @@ The host has no sudo and no lingering user, so cron starts the export.
 a crash or a reboot. Add this line with `crontab -e`:
 
 ```
-*/5 * * * * cd <repo> && flock -n <repo>/.export.lock <uv> run --frozen -m apps.accountant.src.export >> ~/services/export.log 2>&1
+*/5 * * * * cd <repo> && flock -n ~/services/export.lock <uv> run --frozen -m apps.accountant.src.export >> ~/services/export.log 2>&1
 ```
 
 To stop the export, remove the line and kill the process:
