@@ -4,8 +4,11 @@ from typing import Any
 
 import pytest
 
+import apps.accountant.src.utils as accountant_utils
 from apps.accountant.src.utils import (
     fetch_finished_orders,
+    load_pg_config,
+    pg_connect,
     prepare_items_for_pg,
     retrieve_and_prepare_orders,
 )
@@ -175,3 +178,57 @@ async def test_retrieve_and_prepare_orders_prepares_what_it_fetches():
     prepared = await retrieve_and_prepare_orders(client, SYMBOL, 1, 2)
     assert prepared[0]["usdt_value"] == "20.02"
     assert prepared[0]["exchange"] == "venue_a"
+
+
+@pytest.fixture
+def pg_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
+    """Set the required database variables and keep ``.env`` out of the way."""
+    monkeypatch.setattr(accountant_utils, "load_dotenv", lambda: False)
+    monkeypatch.setenv("POSTGRES_DB", "db")
+    monkeypatch.setenv("POSTGRES_USER", "user")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "p w'd")
+    monkeypatch.setenv("POSTGRES_PORT", "5432")
+    monkeypatch.delenv("POSTGRES_HOST", raising=False)
+    return monkeypatch
+
+
+def test_load_pg_config_defaults_the_host_to_localhost(
+    pg_env: pytest.MonkeyPatch,
+) -> None:
+    """Without ``POSTGRES_HOST`` the old local database is used."""
+    assert load_pg_config()["POSTGRES_HOST"] == "localhost"
+
+
+def test_load_pg_config_reads_the_host(pg_env: pytest.MonkeyPatch) -> None:
+    """``POSTGRES_HOST`` points the accountant at a remote database."""
+    pg_env.setenv("POSTGRES_HOST", "192.0.2.1")
+    assert load_pg_config()["POSTGRES_HOST"] == "192.0.2.1"
+
+
+def test_load_pg_config_names_the_missing_variable(
+    pg_env: pytest.MonkeyPatch,
+) -> None:
+    """A missing required variable is named in the error."""
+    pg_env.delenv("POSTGRES_PORT")
+    with pytest.raises(Exception, match="POSTGRES_PORT"):
+        load_pg_config()
+
+
+def test_pg_connect_passes_every_setting(
+    pg_env: pytest.MonkeyPatch,
+) -> None:
+    """Settings travel as keywords, so a password with spaces survives."""
+    pg_env.setenv("POSTGRES_HOST", "192.0.2.1")
+    seen: dict[str, Any] = {}
+    pg_env.setattr(
+        accountant_utils.psycopg, "connect", lambda **kwargs: seen.update(kwargs)
+    )
+    pg_connect(load_pg_config())
+    assert seen == {
+        "dbname": "db",
+        "user": "user",
+        "password": "p w'd",
+        "host": "192.0.2.1",
+        "port": "5432",
+        "connect_timeout": 10,
+    }

@@ -1,11 +1,15 @@
 """Tests for the typed configuration loader."""
 
+from pathlib import Path
+
 import pytest
 
 from apps.shared.src.config import (
+    CONFIG_PATH_ENV,
     ConfigError,
     Subscription,
     load_app_config,
+    load_raw_config,
     parse_app_config,
 )
 
@@ -464,3 +468,23 @@ def test_leverage_params_are_parsed_and_need_a_leverage():
         parse_app_config(
             {"venues": venues, "strategies": [new_strategy(subscriptions=[])]}
         )
+
+
+def test_load_raw_config_reads_the_path_in_the_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``THE_BOT_CONFIG`` replaces the submodule config."""
+    config_file = tmp_path / "host.toml"
+    config_file.write_text('marker = "host"\n')
+    monkeypatch.setenv(CONFIG_PATH_ENV, str(config_file))
+    assert load_raw_config()["marker"] == "host"
+
+
+def test_load_raw_config_prefers_an_explicit_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A path passed in wins over the environment."""
+    config_file = tmp_path / "explicit.toml"
+    config_file.write_text('marker = "explicit"\n')
+    monkeypatch.setenv(CONFIG_PATH_ENV, str(tmp_path / "missing.toml"))
+    assert load_raw_config(config_file)["marker"] == "explicit"

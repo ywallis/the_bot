@@ -19,36 +19,61 @@ from apps.shared.src.structs import CustomExchange, ccxtItem
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
+# Environment variables ``load_pg_config`` refuses to run without.
+PG_REQUIRED = ("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_PORT")
+
 
 def load_pg_config() -> dict[str, str]:
     """
     Load PostgreSQL configuration from environment variables.
 
+    ``POSTGRES_DB``, ``POSTGRES_USER``, ``POSTGRES_PASSWORD`` and
+    ``POSTGRES_PORT`` are required. ``POSTGRES_HOST`` is optional and
+    defaults to ``localhost``, the database the old Compose stack ran.
+
     Returns
     -------
     dict[str, str]
         The configuration dictionary.
-    """
-    config: dict[str, str] = {}
 
+    Raises
+    ------
+    Exception
+        If a required variable is missing.
+    """
     _ = load_dotenv()
-    POSTGRES_DB = os.getenv("POSTGRES_DB")
-    if POSTGRES_DB is None:
-        raise Exception("DB Credentials not found")
-    POSTGRES_USER = os.getenv("POSTGRES_USER")
-    if POSTGRES_USER is None:
-        raise Exception("DB Credentials not found")
-    POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
-    if POSTGRES_PASSWORD is None:
-        raise Exception("DB Credentials not found")
-    POSTGRES_PORT = os.getenv("POSTGRES_PORT")
-    if POSTGRES_PORT is None:
-        raise Exception("DB Credentials not found")
-    config["POSTGRES_DB"] = POSTGRES_DB
-    config["POSTGRES_USER"] = POSTGRES_USER
-    config["POSTGRES_PASSWORD"] = POSTGRES_PASSWORD
-    config["POSTGRES_PORT"] = POSTGRES_PORT
+    config: dict[str, str] = {}
+    for name in PG_REQUIRED:
+        value = os.getenv(name)
+        if value is None:
+            raise Exception(f"DB credentials not found: {name} is not set")
+        config[name] = value
+    config["POSTGRES_HOST"] = os.getenv("POSTGRES_HOST") or "localhost"
     return config
+
+
+def pg_connect(pg_config: dict[str, str]) -> psycopg.Connection:
+    """
+    Open a connection to the accountant's database.
+
+    Parameters
+    ----------
+    pg_config : dict[str, str]
+        Configuration from ``load_pg_config``.
+
+    Returns
+    -------
+    psycopg.Connection
+        The connection, to be used as a context manager.
+    """
+    return psycopg.connect(
+        dbname=pg_config["POSTGRES_DB"],
+        user=pg_config["POSTGRES_USER"],
+        password=pg_config["POSTGRES_PASSWORD"],
+        host=pg_config.get("POSTGRES_HOST", "localhost"),
+        port=pg_config["POSTGRES_PORT"],
+        connect_timeout=10,
+    )
 
 
 def _float_or_zero(value: object) -> float:
@@ -352,14 +377,7 @@ def export_to_sql(
     client_name : str
         The name of the client (for logging).
     """
-    dbname = credentials["POSTGRES_DB"]
-    user = credentials["POSTGRES_USER"]
-    password = credentials["POSTGRES_PASSWORD"]
-    port = credentials["POSTGRES_PORT"]
-
-    with psycopg.connect(
-        f"dbname={dbname} user={user} password={password} host=localhost port={port}"
-    ) as conn:
+    with pg_connect(credentials) as conn:
         with conn.cursor() as cur:
             # Insert data
             columns = data[0].keys()  # Get the column names from the dictionary
