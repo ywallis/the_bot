@@ -1,5 +1,6 @@
 """Tests for the accountant's status page."""
 
+import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -240,3 +241,32 @@ async def test_take_snapshot_reports_an_unreachable_database(
     page = render(snapshot)
     assert "Database unavailable." in page
     assert "No trade." not in page
+
+
+@pytest.mark.asyncio
+async def test_refresh_keeps_the_last_snapshot_and_says_it_is_stale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failed refreshes replace the error, they never pile errors up."""
+    good = Snapshot(taken_at=datetime(2026, 1, 1, tzinfo=UTC), errors=["old"])
+    app = web.make_app()
+    app[web.LATEST].snapshot = good
+    rounds = 0
+
+    async def failing_snapshot(*args: Any) -> Snapshot:
+        raise RuntimeError("venue down")
+
+    async def stop_after_three(seconds: float) -> None:
+        nonlocal rounds
+        rounds += 1
+        if rounds == 3:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(web, "take_snapshot", failing_snapshot)
+    monkeypatch.setattr(web.asyncio, "sleep", stop_after_three)
+    with pytest.raises(asyncio.CancelledError):
+        await web.refresh(app, {}, None)
+    shown = app[web.LATEST].snapshot
+    assert shown.taken_at == good.taken_at
+    assert len(shown.errors) == 1
+    assert "stale" in shown.errors[0] and "venue down" in shown.errors[0]
