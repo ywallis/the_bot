@@ -6,6 +6,8 @@ import pandas as pd
 import psycopg
 from psycopg.sql import SQL, Composed
 
+from apps.accountant.src.utils import pg_connect
+
 
 def send_sql_query(
     pg_config: dict,
@@ -37,11 +39,7 @@ def send_sql_query(
         parameters = ()
     try:
         # Establish a connection to the database
-        with psycopg.connect(
-            f"dbname={pg_config['POSTGRES_DB']} user={pg_config['POSTGRES_USER']} "
-            f"password={pg_config['POSTGRES_PASSWORD']} host={pg_config.get('HOST', 'localhost')} "
-            f"port={pg_config['POSTGRES_PORT']}"
-        ) as conn:
+        with pg_connect(pg_config) as conn:
             # Create a cursor object
             with conn.cursor() as cur:
                 # Execute the SQL query

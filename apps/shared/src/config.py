@@ -24,6 +24,10 @@ DEFAULT_CONFIG_PATH = (
     Path(__file__).parents[3] / "apps" / "strategies" / "config" / "config.toml"
 )
 
+# Environment variable naming a config file to read instead of the default,
+# for a host whose config is not the one committed to the submodule.
+CONFIG_PATH_ENV = "THE_BOT_CONFIG"
+
 STRATEGY_KEYS: frozenset[str] = frozenset(
     {"identifier", "type", "production", "subscriptions", "params"}
 )
@@ -726,7 +730,9 @@ def load_raw_config(path: Path | None = None) -> dict[str, Any]:
     Parameters
     ----------
     path : Path | None
-        Path to the TOML file. Defaults to the strategies submodule config.
+        Path to the TOML file. Defaults to the file named by
+        ``THE_BOT_CONFIG`` in the environment, else the strategies
+        submodule config.
 
     Returns
     -------
@@ -738,7 +744,7 @@ def load_raw_config(path: Path | None = None) -> dict[str, Any]:
     ConfigError
         If the file does not exist.
     """
-    config_path = path or DEFAULT_CONFIG_PATH
+    config_path = path or Path(os.getenv(CONFIG_PATH_ENV) or DEFAULT_CONFIG_PATH)
     if not config_path.exists():
         raise ConfigError(f"Config file not found: {config_path}")
     with open(config_path, "rb") as f:
