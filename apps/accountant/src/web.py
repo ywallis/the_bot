@@ -89,8 +89,25 @@ class Snapshot:
     errors: list[str] = field(default_factory=list)
 
 
+@dataclass
+class Latest:
+    """
+    Holder of the snapshot the page shows.
+
+    aiohttp deprecates replacing app state once the app has started, so
+    the app holds this object and the refresh task replaces its content.
+
+    Attributes
+    ----------
+    snapshot : Snapshot
+        The snapshot to show.
+    """
+
+    snapshot: Snapshot = field(default_factory=Snapshot)
+
+
 # Where the app keeps the latest snapshot.
-SNAPSHOT = web.AppKey("snapshot", Snapshot)
+LATEST = web.AppKey("latest", Latest)
 
 
 def fmt(value: object, places: int = 4) -> str:
@@ -609,14 +626,14 @@ async def refresh(
     """
     while True:
         try:
-            app[SNAPSHOT] = await take_snapshot(
+            app[LATEST].snapshot = await take_snapshot(
                 authenticated_clients, exchange_and_pair, pg_config, queries
             )
         except Exception as e:
             logger.exception("Snapshot failed")
             failed_at = datetime.now(UTC).strftime("%H:%M:%S UTC")
-            app[SNAPSHOT] = dataclasses.replace(
-                app[SNAPSHOT],
+            app[LATEST].snapshot = dataclasses.replace(
+                app[LATEST].snapshot,
                 errors=[f"refresh failed at {failed_at}, page is stale: {e}"],
             )
         await asyncio.sleep(REFRESH_S)
@@ -636,7 +653,9 @@ async def page(request: web.Request) -> web.Response:
     web.Response
         The page.
     """
-    return web.Response(text=render(request.app[SNAPSHOT]), content_type="text/html")
+    return web.Response(
+        text=render(request.app[LATEST].snapshot), content_type="text/html"
+    )
 
 
 async def background(app: web.Application):
@@ -680,7 +699,7 @@ def make_app() -> web.Application:
         The app, with an empty snapshot until the first refresh.
     """
     app = web.Application()
-    app[SNAPSHOT] = Snapshot()
+    app[LATEST] = Latest()
     app.router.add_get("/", page)
     app.cleanup_ctx.append(background)
     return app
