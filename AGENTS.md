@@ -284,7 +284,7 @@ apps/
 
 - Read config through `apps.shared.src.config.load_app_config()`; do not parse `config.toml` elsewhere.
 - `THE_BOT_CONFIG` in the environment names a config file to read instead of the submodule's, for a host whose config is not committed (the accountant reads the trading host's copy).
-- The accountant export (`apps/accountant/src/export.py`) writes finished orders and trades to PostgreSQL at `POSTGRES_HOST` (default `localhost`); open every connection through `utils.pg_connect`. Setup: `docs/runbooks/accountant.md`.
+- The accountant export (`apps/accountant/src/export.py`) writes finished orders and trades to PostgreSQL at `POSTGRES_HOST` (default `localhost`); open every connection through `utils.pg_connect`. `apps/accountant/src/web.py` serves the same status `status.py` prints as a web page. Setup: `docs/runbooks/accountant.md`.
 - Every strategy declares `subscriptions`; parameters live under `[strategies.params]`. Stray top-level keys are a config error.
 - New inter-process messages are `msgspec.Struct` events in `apps.shared.src.events` and travel on Redis Streams.
 - Feed handlers (`apps/maker/src/watcher.py`, `balance.py`) publish through `StreamPublisher` and keep writing the legacy snapshot keys.
