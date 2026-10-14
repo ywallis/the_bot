@@ -81,16 +81,22 @@ every 15 seconds. It uses the same `.env` and config as the export.
 1. Add this line with `crontab -e`:
 
    ```
-   */5 * * * * cd <repo> && flock -n ~/services/web.lock <uv> run --frozen -m apps.accountant.src.web --port 8080 >> ~/services/web.log 2>&1
+   */5 * * * * cd <repo> && flock -n ~/services/web.lock <uv> run --frozen -m apps.accountant.src.web --host 0.0.0.0 --port 8080 >> ~/services/web.log 2>&1
    ```
 
 2. Open `http://<archive host>:8080/` from the local network. The page has
    no login. Do not expose the port outside the local network.
+   Without `--host`, the page listens on `127.0.0.1` only.
 
 An imbalance is pending if an open order has its client order id. The page
 lists only orders that the bot made. It counts the imbalances on orders
 made by hand. The "marked at last price" column adds the inventory change
 at the last trade price to the quote gain.
+
+An imbalance shows "unknown" if the open orders of a venue could not be
+listed. Do not close an unknown imbalance by hand. Its order can still rest
+on that venue. If the database cannot be read, the page says so. An empty
+table always means no row.
 
 ## 5. After a strategy change
 
