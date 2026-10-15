@@ -58,6 +58,16 @@ TRADE_DEDUPE_SIZE = 2000
 # priced off it. A crossed book is never published; one that stays crossed
 # this long is rebuilt from a fresh snapshot.
 CROSSED_RESYNC_S = 2.0
+# Seconds a book may go without an update before it is dropped and
+# resubscribed. After a reconnect CCXT can leave a book's watch pending
+# forever without raising, while the trades on the same connection resume:
+# a recorder lost one venue's book for twelve hours that way on 2026-10-14.
+# Healthy books were seen silent for at most two minutes, so a quiet book
+# costs an occasional snapshot and a dead one is back within a minute.
+BOOK_STALL_S = 60.0
+# Consecutive stalls after which the client is reconnected as well, for a
+# connection that went quiet as a whole.
+STALLS_BEFORE_RECONNECT = 2
 
 
 async def publish_book(
@@ -300,9 +310,13 @@ async def watch_ob(
         Levels per side to publish.
     """
     crossed_since: int | None = None
+    stalls = 0
     while True:
         try:
-            order_book = await client.watch_order_book(ticker)
+            order_book = await asyncio.wait_for(
+                client.watch_order_book(ticker), BOOK_STALL_S
+            )
+            stalls = 0
             ts_recv = now_ns()
             if is_crossed(order_book):
                 crossed_since = crossed_since or ts_recv
@@ -323,6 +337,18 @@ async def watch_ob(
             await publish_book(
                 redis, publisher, client.id, ticker, order_book, ts_recv, depth
             )
+        except TimeoutError:
+            stalls += 1
+            reconnect = stalls >= STALLS_BEFORE_RECONNECT
+            logger.error(
+                f"{client.id} {ticker} book silent for {BOOK_STALL_S}s, "
+                f"{'reconnecting' if reconnect else 'resubscribing'}"
+            )
+            await resync_book(client, ticker)
+            if reconnect:
+                stalls = 0
+                await client.close()
+            await asyncio.sleep(RETRY_DELAY_S)
         except BaseException as e:  # noqa: B036, narrowed in handle_feed_error
             await handle_feed_error(e, client, "watch_ob", ticker)
 
