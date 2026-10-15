@@ -23,12 +23,17 @@ class StopWatching(Exception):
     """Raised by fake clients to break out of a watch loop."""
 
 
+# Scripted result that never arrives, like a watch CCXT leaves pending.
+HANG = object()
+
+
 class FakeClient:
     """
     A CCXT-like client that replays scripted results then stops.
 
     Every ``watch_*`` method returns the next scripted result, raising it if
-    it is an exception and raising ``StopWatching`` once the script runs out.
+    it is an exception, waiting forever if it is ``HANG``, and raising
+    ``StopWatching`` once the script runs out.
     A watch loop swallows the errors it knows how to recover from, so the
     only reliable way to end one in a test is an error it does not know.
     """
@@ -61,6 +66,8 @@ class FakeClient:
         if not self._results:
             raise StopWatching()
         result = self._results.pop(0)
+        if result is HANG:
+            await asyncio.Event().wait()
         if isinstance(result, Exception):
             raise result
         return result

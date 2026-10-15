@@ -7,7 +7,7 @@ import pytest
 from fakeredis import aioredis as fakeredis
 
 from apps.maker.src import watcher
-from apps.maker.tests.conftest import FakeClient, StopWatching
+from apps.maker.tests.conftest import HANG, FakeClient, StopWatching
 from apps.shared.src import events
 from apps.shared.src.config import parse_app_config
 from apps.shared.src.errors import ChecksumError, NetworkError, UnsubscribeError
@@ -130,6 +130,59 @@ async def test_watch_ob_resyncs_a_book_that_stays_crossed(monkeypatch):
     assert client.unwatched == ["BASE/QUOTE"]
     assert "BASE/QUOTE" not in client.orderbooks
     assert await redis.xlen("md:book:venue_a:BASE/QUOTE") == 1
+
+
+@pytest.mark.asyncio
+async def test_watch_ob_resyncs_a_book_that_goes_silent(monkeypatch):
+    """A watch that never returns is dropped and resubscribed, not awaited forever."""
+    monkeypatch.setattr(watcher, "BOOK_STALL_S", 0.01)
+    monkeypatch.setattr(watcher, "RETRY_DELAY_S", 0)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+    client = FakeClient("venue_a", [order_book(1.0), HANG, order_book(1.1)])
+    client.orderbooks["BASE/QUOTE"] = object()
+
+    with pytest.raises(StopWatching):
+        await watcher.watch_ob(client, "BASE/QUOTE", redis, publisher, depth=2)
+
+    assert client.unwatched == ["BASE/QUOTE"]
+    assert "BASE/QUOTE" not in client.orderbooks
+    assert client.closed == 0
+    assert await redis.xlen("md:book:venue_a:BASE/QUOTE") == 2
+
+
+@pytest.mark.asyncio
+async def test_watch_ob_reconnects_after_consecutive_stalls(monkeypatch):
+    """A book still silent after a resubscription has its client reconnected."""
+    monkeypatch.setattr(watcher, "BOOK_STALL_S", 0.01)
+    monkeypatch.setattr(watcher, "RETRY_DELAY_S", 0)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+    client = FakeClient("venue_a", [HANG, HANG, order_book(1.0)])
+
+    with pytest.raises(StopWatching):
+        await watcher.watch_ob(client, "BASE/QUOTE", redis, publisher, depth=2)
+
+    assert client.unwatched == ["BASE/QUOTE", "BASE/QUOTE"]
+    assert client.closed == 1
+    assert await redis.xlen("md:book:venue_a:BASE/QUOTE") == 1
+
+
+@pytest.mark.asyncio
+async def test_watch_ob_counts_only_consecutive_stalls(monkeypatch):
+    """An update between two stalls means the connection works: no reconnect."""
+    monkeypatch.setattr(watcher, "BOOK_STALL_S", 0.01)
+    monkeypatch.setattr(watcher, "RETRY_DELAY_S", 0)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+    client = FakeClient("venue_a", [HANG, order_book(1.0), HANG, order_book(1.1)])
+
+    with pytest.raises(StopWatching):
+        await watcher.watch_ob(client, "BASE/QUOTE", redis, publisher, depth=2)
+
+    assert len(client.unwatched) == 2
+    assert client.closed == 0
+    assert await redis.xlen("md:book:venue_a:BASE/QUOTE") == 2
 
 
 @pytest.mark.asyncio
