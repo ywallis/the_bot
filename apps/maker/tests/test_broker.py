@@ -4,14 +4,18 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from ccxt.async_support import RateLimitExceeded
 
+from apps.maker.src import broker
 from apps.maker.src.broker import (
+    fetch_all_open,
     process_message,
     redis_subscriber,
     results_worker,
     worker,
 )
 from apps.maker.src.enums import MessageType
+
 from apps.shared.src.structs import CustomExchange
 
 
@@ -194,3 +198,51 @@ async def test_wind_down_stops_every_task():
     assert subscriber.cancelled()
     assert results.done() and workers[0].done()
     assert published == [("t-1_lmb_es", "order|{'id': 'venue-1'}")]
+
+
+@pytest.mark.asyncio
+async def test_a_repeated_init_does_not_repeat_the_start_up(monkeypatch):
+    """A second INIT re-sends open orders without reloading or reconfiguring."""
+    init = {"type": "message", "data": "INIT"}
+
+    async def listen():
+        yield init
+        yield init
+
+    pubsub = AsyncMock()
+    pubsub.listen = listen
+    redis = AsyncMock()
+    load = AsyncMock()
+    configure = AsyncMock()
+    fetch = AsyncMock(return_value={"orders": []})
+    monkeypatch.setattr(broker, "parse_message", lambda _: {"exchange": "INIT"})
+    monkeypatch.setattr(broker, "load_clients", load)
+    monkeypatch.setattr(broker, "configure_all", configure)
+    monkeypatch.setattr(broker, "fetch_all_open", fetch)
+
+    await redis_subscriber(redis, pubsub, {})
+
+    load.assert_awaited_once()
+    configure.assert_awaited_once()
+    assert fetch.await_count == 2
+    assert [c.args[0] for c in redis.publish.await_args_list] == ["INIT", "INIT"]
+
+
+@pytest.mark.asyncio
+async def test_a_rate_limited_fetch_waits_before_asking_again(monkeypatch):
+    """A refused open orders fetch is retried after a pause, not at once."""
+    client = AsyncMock()
+    client.fetch_open_orders.side_effect = [RateLimitExceeded("429"), []]
+    sleeps: list[float] = []
+
+    async def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(broker, "symbols_per_venue", {"venue_x": {"BASE/QUOTE"}})
+    monkeypatch.setattr(broker.asyncio, "sleep", sleep)
+
+    batch = await fetch_all_open({"venue_x": client})
+
+    assert batch["orders"] == []
+    assert client.fetch_open_orders.await_count == 2
+    assert sleeps == [broker.FETCH_BACKOFF_S]
