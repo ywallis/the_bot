@@ -29,6 +29,7 @@ from apps.shared.src.errors import (
     CancelledError,
     ChecksumError,
     ExchangeClosedByUser,
+    ExchangeError,
     NetworkError,
     UnsubscribeError,
 )
@@ -54,6 +55,11 @@ RESUBSCRIBE_ERRORS: tuple[type[BaseException], ...] = (
 )
 # Errors that mean the connection is dead and the client should be recycled.
 RECONNECT_ERRORS: tuple[type[BaseException], ...] = (NetworkError,)
+# A venue about to reset the socket says so in an error event, and CCXT
+# raises it as a plain ExchangeError. On 2026-10-15 one announced a service
+# upgrade and asked clients to reconnect; the watcher treated it as fatal,
+# which stopped the whole system.
+RECONNECT_HINT = "reconnect"
 RETRY_DELAY_S = 0.5
 # Trades remembered per stream to drop the cache CCXT replays on resubscribe.
 TRADE_DEDUPE_SIZE = 2000
@@ -203,6 +209,23 @@ async def resync_book(client: CustomExchange, ticker: str) -> None:
         orderbooks.pop(ticker, None)
 
 
+def asks_to_reconnect(error: BaseException) -> bool:
+    """
+    Return whether a venue error asks the client to reconnect.
+
+    Parameters
+    ----------
+    error : BaseException
+        The caught error.
+
+    Returns
+    -------
+    bool
+        True for an ``ExchangeError`` whose message asks for a reconnect.
+    """
+    return isinstance(error, ExchangeError) and RECONNECT_HINT in str(error).lower()
+
+
 async def handle_feed_error(
     error: BaseException, client: CustomExchange, feed: str, ticker: str
 ) -> None:
@@ -236,7 +259,7 @@ async def handle_feed_error(
         logger.warning(
             f"{name} in {feed} for {client.id} {ticker}, resubscribing: {error}"
         )
-    elif isinstance(error, RECONNECT_ERRORS):
+    elif isinstance(error, RECONNECT_ERRORS) or asks_to_reconnect(error):
         logger.error(
             f"{name} in {feed} for {client.id} {ticker}, reconnecting: {error}"
         )

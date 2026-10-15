@@ -10,7 +10,12 @@ from apps.maker.src import watcher
 from apps.maker.tests.conftest import HANG, FakeClient, StopWatching
 from apps.shared.src import events
 from apps.shared.src.config import parse_app_config
-from apps.shared.src.errors import ChecksumError, NetworkError, UnsubscribeError
+from apps.shared.src.errors import (
+    ChecksumError,
+    ExchangeError,
+    NetworkError,
+    UnsubscribeError,
+)
 from apps.shared.src.events import BookEvent, TradeEvent
 from apps.shared.src.streams import StreamPublisher
 
@@ -229,6 +234,31 @@ def test_trade_key_falls_back_without_id():
         2.0,
         3.0,
     )
+
+
+@pytest.mark.asyncio
+async def test_watch_ob_reconnects_when_the_venue_asks(monkeypatch):
+    """A venue error announcing a socket reset reconnects instead of crashing."""
+    monkeypatch.setattr(watcher, "RETRY_DELAY_S", 0)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+    notice = ExchangeError('venue_x {"event":"error","msg":"Please reconnect."}')
+    client = FakeClient("venue_x", [order_book(1.0), notice, order_book(2.0)])
+
+    with pytest.raises(StopWatching):
+        await watcher.watch_ob(client, "BASE/USDT", redis, publisher, depth=20)
+
+    assert client.closed == 1
+    assert await redis.xlen("md:book:venue_x:BASE/USDT") == 2
+
+
+@pytest.mark.asyncio
+async def test_watch_ob_reraises_other_venue_errors():
+    """A venue error that does not ask for a reconnect still crashes the handler."""
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    client = FakeClient("venue_x", [ExchangeError("venue_x symbol not found")])
+    with pytest.raises(ExchangeError):
+        await watcher.watch_ob(client, "BASE/USDT", redis, StreamPublisher(10), 20)
 
 
 @pytest.mark.asyncio
