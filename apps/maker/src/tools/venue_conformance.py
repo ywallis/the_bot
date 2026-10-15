@@ -46,7 +46,8 @@ from typing import Any
 import ccxt.pro as ccxt  # pyright: ignore[reportMissingTypeStubs]
 from dotenv import load_dotenv
 
-from apps.maker.src.watcher import RECONNECT_ERRORS, RESUBSCRIBE_ERRORS, trade_key
+from apps.maker.src.watcher import RECONNECT_ERRORS, RESUBSCRIBE_ERRORS
+from apps.shared.src.ccxt_events import trade_key
 from apps.shared.src.config import (
     SPOT_MARKET,
     SWAP_MARKET,

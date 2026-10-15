@@ -109,6 +109,61 @@ def book_event_from_ccxt(
     )
 
 
+def trade_key(trade: dict[str, Any]) -> tuple[Any, ...]:
+    """
+    Return the identity of a CCXT trade for deduplication.
+
+    Parameters
+    ----------
+    trade : dict[str, Any]
+        CCXT unified trade.
+
+    Returns
+    -------
+    tuple[Any, ...]
+        The venue trade id if present, otherwise timestamp, price and
+        amount. Venues that send no ids fall back to the latter.
+    """
+    trade_id = trade.get("id")
+    if trade_id is not None:
+        return ("id", str(trade_id))
+    return ("fields", trade.get("timestamp"), trade.get("price"), trade.get("amount"))
+
+
+def usable_trades(trades: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """
+    Keep the trades a ``TradeEvent`` can be built from.
+
+    Every recorder of public trades goes through this, so a recording made
+    from Redis and one made straight from the venue hold the same trades.
+
+    Parameters
+    ----------
+    trades : list[dict[str, Any]]
+        CCXT unified trades, oldest first.
+
+    Returns
+    -------
+    tuple[list[dict[str, Any]], int]
+        The usable trades, in order, and how many were skipped for lacking a
+        price or a size.
+    """
+    usable: list[dict[str, Any]] = []
+    for trade in trades:
+        if trade.get("price") is None:
+            # CCXT 4.5.77 to 4.5.85 parse the unified-account public trade
+            # message's size from "v" but look for its price under "P" while
+            # the message carries "p", so every trade came without a price
+            # and the whole feed was lost on 2026-10-10.
+            raw_price = (trade.get("info") or {}).get("p")
+            if raw_price is not None:
+                trade = {**trade, "price": float(raw_price)}
+        if trade.get("price") is None or trade.get("amount") is None:
+            continue
+        usable.append(trade)
+    return usable, len(trades) - len(usable)
+
+
 def trade_event_from_ccxt(
     venue: str,
     symbol: str,
