@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from types import SimpleNamespace
 
 import pytest
 from fakeredis import aioredis as fakeredis
@@ -250,6 +251,86 @@ async def test_watch_ob_reconnects_when_the_venue_asks(monkeypatch):
 
     assert client.closed == 1
     assert await redis.xlen("md:book:venue_x:BASE/USDT") == 2
+
+
+class FakeClock:
+    """A ``time`` stand-in whose ``monotonic`` only moves when told to."""
+
+    def __init__(self) -> None:
+        """Start the clock at an arbitrary instant."""
+        self.now = 1000.0
+
+    def monotonic(self) -> float:
+        """Return the current fake instant."""
+        return self.now
+
+
+@pytest.fixture
+def clock(monkeypatch) -> FakeClock:
+    """Drive the watcher's backoff clock by hand."""
+    fake = FakeClock()
+    monkeypatch.setattr(watcher, "time", SimpleNamespace(monotonic=fake.monotonic))
+    return fake
+
+
+NOTICE = ExchangeError('venue_x {"event":"error","msg":"Please reconnect."}')
+
+
+def test_reconnect_requests_in_a_row_back_off_up_to_a_cap(clock):
+    """Each request doubles the wait, which stops at the cap."""
+    client = FakeClient("venue_x", [])
+    delays = []
+    for _ in range(9):
+        assert watcher.hold_for_reconnect(NOTICE, client)
+        delays.append(watcher.retry_delay(client))
+        clock.now += delays[-1]
+    assert delays == [0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 60.0, 60.0]
+
+
+def test_reconnect_requests_past_the_limit_are_raised(clock):
+    """A venue that keeps asking still stops the system in the end."""
+    client = FakeClient("venue_x", [])
+    for _ in range(watcher.RECONNECT_HINT_LIMIT):
+        watcher.hold_for_reconnect(NOTICE, client)
+        clock.now += watcher.RECONNECT_MAX_DELAY_S
+    with pytest.raises(ExchangeError):
+        watcher.hold_for_reconnect(NOTICE, client)
+
+
+def test_a_quiet_spell_resets_the_backoff(clock):
+    """A request long after the previous one starts from the shortest wait."""
+    client = FakeClient("venue_x", [])
+    for _ in range(4):
+        watcher.hold_for_reconnect(NOTICE, client)
+        clock.now += watcher.RECONNECT_MAX_DELAY_S
+    clock.now += watcher.RECONNECT_RESET_S
+    watcher.hold_for_reconnect(NOTICE, client)
+    assert watcher.retry_delay(client) == watcher.RETRY_DELAY_S
+
+
+@pytest.mark.asyncio
+async def test_every_loop_on_a_client_waits_out_its_backoff(clock, monkeypatch):
+    """Sibling loops neither close the client again nor reopen it early."""
+    slept = []
+
+    async def sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    monkeypatch.setattr(watcher.asyncio, "sleep", sleep)
+    client = FakeClient("venue_x", [])
+    for _ in range(3):
+        watcher.hold_for_reconnect(NOTICE, client)
+        clock.now += watcher.retry_delay(client)
+
+    await watcher.handle_feed_error(NOTICE, client, "watch_ob", "BASE/USDT")
+    clock.now += 1.0
+    await watcher.handle_feed_error(NOTICE, client, "watch_trades", "BASE/USDT")
+    await watcher.handle_feed_error(
+        UnsubscribeError("dropped"), client, "watch_trades", "BASE/USDT"
+    )
+
+    assert client.closed == 1
+    assert slept == [4.0, 3.0, 3.0]
 
 
 @pytest.mark.asyncio

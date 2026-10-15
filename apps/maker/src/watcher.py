@@ -10,7 +10,10 @@ the migration.
 import asyncio
 import json
 import logging
+import time
+import weakref
 from collections.abc import Awaitable
+from dataclasses import dataclass
 from typing import Any
 
 from redis.asyncio import ConnectionPool, Redis
@@ -61,6 +64,15 @@ RECONNECT_ERRORS: tuple[type[BaseException], ...] = (NetworkError,)
 # which stopped the whole system.
 RECONNECT_HINT = "reconnect"
 RETRY_DELAY_S = 0.5
+# A venue mid-upgrade keeps asking for a reconnect until the upgrade ends.
+# Each request in a row doubles the wait before the client may reopen, up to
+# RECONNECT_MAX_DELAY_S, and the request after RECONNECT_HINT_LIMIT of them is
+# raised so a venue that never comes back still stops the system. A request
+# more than RECONNECT_RESET_S after the previous one starts the count again;
+# it must exceed RECONNECT_MAX_DELAY_S or the count resets during a wait.
+RECONNECT_HINT_LIMIT = 10
+RECONNECT_MAX_DELAY_S = 60.0
+RECONNECT_RESET_S = 300.0
 # Trades remembered per stream to drop the cache CCXT replays on resubscribe.
 TRADE_DEDUPE_SIZE = 2000
 # Seconds a venue's local book may stay crossed before it is dropped and
@@ -226,6 +238,83 @@ def asks_to_reconnect(error: BaseException) -> bool:
     return isinstance(error, ExchangeError) and RECONNECT_HINT in str(error).lower()
 
 
+@dataclass
+class ReconnectBackoff:
+    """Reconnects a venue asked for in a row, and when the client may reopen."""
+
+    count: int = 0
+    last_at: float = 0.0
+    hold_until: float = 0.0
+
+
+# Keyed by client, because every loop on a client must wait out its backoff:
+# CCXT reopens the socket on the next ``watch_*`` call from any of them.
+backoffs: weakref.WeakKeyDictionary[CustomExchange, ReconnectBackoff] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def hold_for_reconnect(error: BaseException, client: CustomExchange) -> bool:
+    """
+    Start a reconnect backoff for a venue's request, unless one is running.
+
+    Parameters
+    ----------
+    error : BaseException
+        The venue error asking for a reconnect.
+    client : CustomExchange
+        The exchange client.
+
+    Returns
+    -------
+    bool
+        True when this request starts a new backoff and the client must be
+        closed, False when a sibling loop already did for the same request.
+
+    Raises
+    ------
+    BaseException
+        The same error, once more than ``RECONNECT_HINT_LIMIT`` requests
+        arrived in a row.
+    """
+    now = time.monotonic()
+    state = backoffs.setdefault(client, ReconnectBackoff())
+    if now < state.hold_until:
+        return False
+    if now - state.last_at > RECONNECT_RESET_S:
+        state.count = 0
+    state.count += 1
+    state.last_at = now
+    if state.count > RECONNECT_HINT_LIMIT:
+        logger.error(
+            f"{client.id} asked for {state.count} reconnects in a row, giving up"
+        )
+        raise error
+    delay = min(RETRY_DELAY_S * 2 ** (state.count - 1), RECONNECT_MAX_DELAY_S)
+    state.hold_until = now + delay
+    return True
+
+
+def retry_delay(client: CustomExchange) -> float:
+    """
+    Return how long a loop waits before its next call on the client.
+
+    Parameters
+    ----------
+    client : CustomExchange
+        The exchange client.
+
+    Returns
+    -------
+    float
+        ``RETRY_DELAY_S``, or the rest of a running reconnect backoff if that
+        is longer.
+    """
+    state = backoffs.get(client)
+    held = state.hold_until - time.monotonic() if state is not None else 0.0
+    return max(RETRY_DELAY_S, held)
+
+
 async def handle_feed_error(
     error: BaseException, client: CustomExchange, feed: str, ticker: str
 ) -> None:
@@ -259,7 +348,14 @@ async def handle_feed_error(
         logger.warning(
             f"{name} in {feed} for {client.id} {ticker}, resubscribing: {error}"
         )
-    elif isinstance(error, RECONNECT_ERRORS) or asks_to_reconnect(error):
+    elif asks_to_reconnect(error):
+        if hold_for_reconnect(error, client):
+            logger.error(
+                f"{name} in {feed} for {client.id} {ticker}, reconnecting in "
+                f"{retry_delay(client):.1f}s: {error}"
+            )
+            await client.close()
+    elif isinstance(error, RECONNECT_ERRORS):
         logger.error(
             f"{name} in {feed} for {client.id} {ticker}, reconnecting: {error}"
         )
@@ -267,7 +363,7 @@ async def handle_feed_error(
     else:
         logger.error(f"Error in {feed} for {client.id} {ticker}: {error}")
         raise error
-    await asyncio.sleep(RETRY_DELAY_S)
+    await asyncio.sleep(retry_delay(client))
 
 
 async def watch_ob(
