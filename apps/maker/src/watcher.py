@@ -16,7 +16,12 @@ from typing import Any
 from redis.asyncio import ConnectionPool, Redis
 
 import apps.shared.src.logging_config as logging_config
-from apps.shared.src.ccxt_events import book_event_from_ccxt, trade_event_from_ccxt
+from apps.shared.src.ccxt_events import (
+    book_event_from_ccxt,
+    trade_event_from_ccxt,
+    trade_key,
+    usable_trades,
+)
 from apps.shared.src.config import BOOK_FEED, TRADE_FEED, AppConfig, load_app_config
 from apps.maker.src.structs import LimitedSet
 from apps.shared.src.errors import (
@@ -62,9 +67,10 @@ CROSSED_RESYNC_S = 2.0
 # resubscribed. After a reconnect CCXT can leave a book's watch pending
 # forever without raising, while the trades on the same connection resume:
 # a recorder lost one venue's book for twelve hours that way on 2026-10-14.
-# Healthy books were seen silent for at most two minutes, so a quiet book
-# costs an occasional snapshot and a dead one is back within a minute.
-BOOK_STALL_S = 60.0
+# Healthy books were seen silent for at most two minutes, so the limit sits
+# above that: a quiet book on a working connection is never resubscribed,
+# and a dead one is back within three minutes.
+BOOK_STALL_S = 150.0
 # Consecutive stalls after which the client is reconnected as well, for a
 # connection that went quiet as a whole.
 STALLS_BEFORE_RECONNECT = 2
@@ -115,27 +121,6 @@ async def publish_book(
         await pipe.execute()
 
 
-def trade_key(trade: dict[str, Any]) -> tuple[Any, ...]:
-    """
-    Return the identity of a CCXT trade for deduplication.
-
-    Parameters
-    ----------
-    trade : dict[str, Any]
-        CCXT unified trade.
-
-    Returns
-    -------
-    tuple[Any, ...]
-        The venue trade id if present, otherwise timestamp, price and
-        amount. Venues that send no ids fall back to the latter.
-    """
-    trade_id = trade.get("id")
-    if trade_id is not None:
-        return ("id", str(trade_id))
-    return ("fields", trade.get("timestamp"), trade.get("price"), trade.get("amount"))
-
-
 async def publish_trades(
     redis: Redis,
     publisher: StreamPublisher,
@@ -171,19 +156,13 @@ async def publish_trades(
     int
         Number of trades published.
     """
+    usable, skipped = usable_trades(trades)
+    if skipped:
+        logger.warning(
+            f"Skipping {skipped} {venue} {symbol} trades without price or size"
+        )
     fresh: list[dict[str, Any]] = []
-    for trade in trades:
-        if trade.get("price") is None:
-            # CCXT 4.5.77 to 4.5.85 parse the unified-account public trade
-            # message's size from "v" but look for its price under "P" while
-            # the message carries "p", so every trade came without a price
-            # and the whole feed was lost on 2026-10-10.
-            raw_price = (trade.get("info") or {}).get("p")
-            if raw_price is not None:
-                trade = {**trade, "price": float(raw_price)}
-        if trade.get("price") is None or trade.get("amount") is None:
-            logger.warning(f"Skipping a {venue} {symbol} trade without price or size")
-            continue
+    for trade in usable:
         if seen is not None:
             key = trade_key(trade)
             if key in seen:

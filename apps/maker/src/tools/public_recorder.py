@@ -39,7 +39,13 @@ from typing import Any
 
 import ccxt.pro as ccxt  # pyright: ignore[reportMissingTypeStubs]
 
-from apps.shared.src.ccxt_events import book_event_from_ccxt, trade_event_from_ccxt
+from apps.maker.src.structs import LimitedSet
+from apps.shared.src.ccxt_events import (
+    book_event_from_ccxt,
+    trade_event_from_ccxt,
+    trade_key,
+    usable_trades,
+)
 from apps.shared.src.config import SWAP_MARKET, is_contract
 from apps.shared.src.events import (
     BookEvent,
@@ -64,6 +70,9 @@ WATCHDOG_TICK_S = 10.0
 SEAL_GRACE_S = 5.0
 # Seconds to wait after a feed error before watching again.
 RETRY_DELAY_S = 2.0
+# Trades remembered per symbol to drop the cache CCXT replays on resubscribe,
+# as the trading watcher does.
+TRADE_DEDUPE_SIZE = 2000
 
 
 class BookStalled(Exception):
@@ -121,6 +130,7 @@ class PublicRecorder:
         self.last_book: dict[str, float] = {}
         self._writers: dict[str, StreamWriter] = {}
         self._seq: dict[str, int] = {}
+        self._seen: dict[str, LimitedSet] = {}
 
     def next_seq(self, stream: str) -> int:
         """
@@ -197,7 +207,11 @@ class PublicRecorder:
 
     def record_trades(self, symbol: str, trades: list[dict[str, Any]]) -> int:
         """
-        Write a batch of trades, skipping any without a price or a side.
+        Write a batch of trades, skipping replayed ones and unusable ones.
+
+        The filter and the deduplication are the trading watcher's, so both
+        recordings of a market hold the same trades. A trade without a side
+        is kept, as the watcher keeps it; the simulators skip it.
 
         Parameters
         ----------
@@ -212,11 +226,15 @@ class PublicRecorder:
             Number of trades written.
         """
         stream = trade_stream(self.venue, symbol)
+        seen = self._seen.setdefault(symbol, LimitedSet(TRADE_DEDUPE_SIZE))
         ts_recv = now_ns()
+        usable, _ = usable_trades(trades)
         written = 0
-        for trade in trades:
-            if trade.get("price") is None or trade.get("side") not in ("buy", "sell"):
+        for trade in usable:
+            key = trade_key(trade)
+            if key in seen:
                 continue
+            seen.add(key)
             event = trade_event_from_ccxt(
                 self.venue, symbol, trade, seq=self.next_seq(stream), ts_recv=ts_recv
             )

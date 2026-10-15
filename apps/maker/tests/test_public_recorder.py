@@ -87,12 +87,14 @@ def test_a_crossed_or_one_sided_book_is_not_recorded(tmp_path):
     assert not stream_path(tmp_path, book_stream("venue_a", "BASE/QUOTE")).exists()
 
 
-def test_trades_without_a_price_or_a_side_are_skipped(tmp_path):
-    """A trade the simulators cannot place on a side is dropped."""
+def test_trades_are_filtered_as_the_trading_watcher_filters_them(tmp_path):
+    """A trade without a price or size is dropped, one without a side kept."""
     recorder = pr.PublicRecorder(tmp_path, "venue_a", ["BASE/QUOTE"])
+    no_size = trade("3")
+    no_size["amount"] = None
     written = recorder.record_trades(
         "BASE/QUOTE",
-        [trade("1"), trade("2", side=None), trade("3", price=None), trade("4", "sell")],
+        [trade("1"), trade("2", side=None), no_size, trade("4", price=None)],
     )
     recorder.close()
 
@@ -101,8 +103,96 @@ def test_trades_without_a_price_or_a_side_are_skipped(tmp_path):
     assert all(isinstance(e, TradeEvent) for e in events)
     assert [(e.trade_id, e.side, e.seq) for e in events] == [
         ("1", Side.BUY, 1),
-        ("4", Side.SELL, 2),
+        ("2", None, 2),
     ]
+
+
+def test_a_trade_ccxt_left_without_a_price_takes_it_from_info(tmp_path):
+    """The raw price fallback of the trading watcher applies here too."""
+    recorder = pr.PublicRecorder(tmp_path, "venue_a", ["BASE/QUOTE"])
+    missed = trade("1", price=None)
+    missed["info"] = {"p": "1.5"}
+    assert recorder.record_trades("BASE/QUOTE", [missed]) == 1
+    recorder.close()
+
+    events = read(tmp_path, trade_stream("venue_a", "BASE/QUOTE"))
+    assert [e.price for e in events] == [1.5]
+
+
+def test_replayed_trades_are_written_once(tmp_path):
+    """A cache CCXT replays after a resubscription does not double the prints."""
+    recorder = pr.PublicRecorder(tmp_path, "venue_a", ["BASE/QUOTE", "OTHER/QUOTE"])
+    assert recorder.record_trades("BASE/QUOTE", [trade("1"), trade("2")]) == 2
+    assert recorder.record_trades("BASE/QUOTE", [trade("2"), trade("3")]) == 1
+    assert recorder.record_trades("OTHER/QUOTE", [trade("1")]) == 1
+    recorder.close()
+
+    events = read(tmp_path, trade_stream("venue_a", "BASE/QUOTE"))
+    assert [e.trade_id for e in events] == ["1", "2", "3"]
+
+
+class ScriptedClient:
+    """A client whose watches return or raise scripted results, then stop."""
+
+    def __init__(self, books: list, trades: list) -> None:
+        """Script the book and trade results in order."""
+        self.books = books
+        self.trades = trades
+
+    @staticmethod
+    def _next(script: list):
+        """Return or raise the next result, cancelling once the script ends."""
+        if not script:
+            raise asyncio.CancelledError()
+        result = script.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    async def watch_order_book(self, symbol: str) -> dict:
+        """Return the next scripted book."""
+        return self._next(self.books)
+
+    async def watch_trades(self, symbol: str) -> list:
+        """Return the next scripted batch of trades."""
+        return self._next(self.trades)
+
+
+@pytest.mark.asyncio
+async def test_watch_books_keeps_recording_after_an_error(tmp_path, monkeypatch):
+    """A feed error is logged and the book is watched again."""
+    monkeypatch.setattr(pr, "RETRY_DELAY_S", 0)
+    recorder = pr.PublicRecorder(tmp_path, "venue_a", ["BASE/QUOTE"])
+    client = ScriptedClient(
+        [order_book(1.0), RuntimeError("drop"), order_book(1.1)], []
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await pr.watch_books(client, recorder, "BASE/QUOTE")
+    recorder.close()
+
+    events = read(tmp_path, book_stream("venue_a", "BASE/QUOTE"))
+    assert [e.bids[0][0] for e in events] == [1.0, 1.1]
+
+
+@pytest.mark.asyncio
+async def test_watch_trades_drops_the_cache_replayed_after_an_error(
+    tmp_path, monkeypatch
+):
+    """Trades replayed after a feed error are written only once."""
+    monkeypatch.setattr(pr, "RETRY_DELAY_S", 0)
+    recorder = pr.PublicRecorder(tmp_path, "venue_a", ["BASE/QUOTE"])
+    client = ScriptedClient(
+        [],
+        [[trade("1")], RuntimeError("drop"), [trade("1"), trade("2")]],
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await pr.watch_trades(client, recorder, "BASE/QUOTE")
+    recorder.close()
+
+    events = read(tmp_path, trade_stream("venue_a", "BASE/QUOTE"))
+    assert [e.trade_id for e in events] == ["1", "2"]
 
 
 def test_a_silent_book_raises_once_past_the_limit(tmp_path):
