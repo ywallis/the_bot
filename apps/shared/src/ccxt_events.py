@@ -109,6 +109,25 @@ def book_event_from_ccxt(
     )
 
 
+def is_crossed(order_book: dict[str, Any]) -> bool:
+    """
+    Tell whether a venue's own book has its best bid above its best ask.
+
+    Parameters
+    ----------
+    order_book : dict[str, Any]
+        CCXT unified order book.
+
+    Returns
+    -------
+    bool
+        True if both sides are present and the best bid is above the best ask.
+    """
+    bids = order_book.get("bids") or []
+    asks = order_book.get("asks") or []
+    return bool(bids and asks) and bids[0][0] > asks[0][0]
+
+
 def trade_key(trade: dict[str, Any]) -> tuple[Any, ...]:
     """
     Return the identity of a CCXT trade for deduplication.

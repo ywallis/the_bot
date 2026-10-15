@@ -18,6 +18,7 @@ from redis.asyncio import ConnectionPool, Redis
 import apps.shared.src.logging_config as logging_config
 from apps.shared.src.ccxt_events import (
     book_event_from_ccxt,
+    is_crossed,
     trade_event_from_ccxt,
     trade_key,
     usable_trades,
@@ -182,25 +183,6 @@ async def publish_trades(
     return len(fresh)
 
 
-def is_crossed(order_book: dict[str, Any]) -> bool:
-    """
-    Tell whether a venue's own book has its best bid above its best ask.
-
-    Parameters
-    ----------
-    order_book : dict[str, Any]
-        CCXT unified order book.
-
-    Returns
-    -------
-    bool
-        True if both sides are present and the best bid is above the best ask.
-    """
-    bids = order_book.get("bids") or []
-    asks = order_book.get("asks") or []
-    return bool(bids and asks) and bids[0][0] > asks[0][0]
-
-
 async def resync_book(client: CustomExchange, ticker: str) -> None:
     """
     Drop the local book of a ticker so the next watch starts from a snapshot.
@@ -317,6 +299,10 @@ async def watch_ob(
                 redis, publisher, client.id, ticker, order_book, ts_recv, depth
             )
         except TimeoutError:
+            # The resubscription brings a fresh snapshot, so a book crossed
+            # before the stall starts its window again rather than being
+            # resynced a second time on the first crossed update after it.
+            crossed_since = None
             stalls += 1
             reconnect = stalls >= STALLS_BEFORE_RECONNECT
             logger.error(

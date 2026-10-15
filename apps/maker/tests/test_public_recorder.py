@@ -74,6 +74,14 @@ def test_books_are_recorded_in_the_trading_recorders_layout(tmp_path):
     assert events[0].ts_exch == 1_757_160_000_000
 
 
+def test_a_locked_book_is_recorded_as_the_trading_watcher_publishes_it(tmp_path):
+    """Only a bid above the ask is crossed: a bid equal to the ask is kept."""
+    recorder = pr.PublicRecorder(tmp_path, "venue_a", ["BASE/QUOTE"])
+    locked = order_book(1.0)
+    locked["asks"] = [[1.0, 1.0]]
+    assert recorder.record_book("BASE/QUOTE", locked)
+
+
 def test_a_crossed_or_one_sided_book_is_not_recorded(tmp_path):
     """Only a book with both sides and the bid below the ask is written."""
     recorder = pr.PublicRecorder(tmp_path, "venue_a", ["BASE/QUOTE"])
@@ -232,9 +240,12 @@ class HangingClient:
         """Script how many book updates arrive before the watch hangs."""
         self.books = books
         self.closed = False
+        self.trades_cancelled = False
+        self.markets: dict = {}
 
     async def load_markets(self) -> None:
-        """Pretend to load markets."""
+        """List the one spot market these tests watch."""
+        self.markets = {"BASE/QUOTE": {}}
 
     async def watch_order_book(self, symbol: str) -> dict:
         """Return a book until the script runs out, then wait forever."""
@@ -245,8 +256,12 @@ class HangingClient:
         return order_book(1.0)
 
     async def watch_trades(self, symbol: str) -> list:
-        """Wait forever, like a market without prints."""
-        await asyncio.Event().wait()
+        """Wait forever, like a market without prints, noting a cancellation."""
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.trades_cancelled = True
+            raise
         return []
 
     async def close(self) -> None:
@@ -266,7 +281,45 @@ async def test_run_exits_with_the_stall_status_when_a_book_hangs(tmp_path, monke
 
     assert status == pr.STALL_EXIT_CODE
     assert client.closed
+    assert client.trades_cancelled, "every watch ends before the files close"
     assert len(read(tmp_path, book_stream("venue_a", "BASE/QUOTE"))) == 3
+
+
+@pytest.mark.asyncio
+async def test_run_records_under_the_venue_name(tmp_path, monkeypatch):
+    """A config venue id that differs from the CCXT id names the directory."""
+    client = HangingClient(books=1)
+    monkeypatch.setattr(pr, "make_client", lambda venue, symbols: client)
+
+    await asyncio.wait_for(
+        pr.run(tmp_path, "venue_a", ["BASE/QUOTE"], 0.05, venue_name="venue_b"), 5
+    )
+
+    assert len(read(tmp_path, book_stream("venue_b", "BASE/QUOTE"))) == 1
+    assert not (tmp_path / "md" / "book" / "venue_a").exists()
+
+
+@pytest.mark.asyncio
+async def test_run_refuses_a_symbol_the_venue_does_not_list(tmp_path, monkeypatch):
+    """A typo exits at once with the config status, not after a stall."""
+    client = HangingClient(books=1)
+    monkeypatch.setattr(pr, "make_client", lambda venue, symbols: client)
+
+    status = await asyncio.wait_for(
+        pr.run(tmp_path, "venue_a", ["BASE/QUOTE", "TYPO/QUOTE"], stall_s=60), 5
+    )
+
+    assert status == pr.CONFIG_EXIT_CODE
+    assert client.closed
+    assert not (tmp_path / "md").exists()
+
+
+def test_parse_args_reads_the_venue_name():
+    """The venue name is optional and defaults to the CCXT id."""
+    plain = pr.parse_args(["data", "venue_a", "BASE/QUOTE"])
+    named = pr.parse_args(["data", "venue_a", "BASE/QUOTE", "--venue-name", "x"])
+    assert plain.venue_name is None
+    assert named.venue_name == "x"
 
 
 def test_make_client_sends_contracts_to_the_futures_markets(monkeypatch):
