@@ -43,6 +43,10 @@ logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
 
+# Seconds before the n-th retry of a failed open orders fetch, times n - 1.
+FETCH_BACKOFF_S = 1.0
+
+
 async def fetch_all_open(clients: dict[str, CustomExchange]) -> OrderBatchMessage:
     """Fetch all currently open orders on all clients.
 
@@ -78,6 +82,9 @@ async def fetch_all_open(clients: dict[str, CustomExchange]) -> OrderBatchMessag
                         raise Exception(
                             f"Fetching orders failed: client {client}, attempt n. {attempt}"
                         )
+                    # A rate limit refusal is a NetworkError too, and asking
+                    # again at once is refused again.
+                    await asyncio.sleep(FETCH_BACKOFF_S * (attempt - 1))
 
     logger.debug(f"Orders were retrieved from exchanges: {all_orders}")
 
@@ -232,6 +239,11 @@ async def redis_subscriber(
 
     logger.debug(f"Subscribed to Redis channel: {BROKER_CHANNEL}")
 
+    # The order manager asks again when a reply is slow, so the second INIT
+    # of a slow start must not repeat the start-up. Orders are not routed
+    # while an INIT is served, and the venues' settings are already applied.
+    started = False
+
     try:
         async for message in pubsub.listen():
             if message["type"] == "message":
@@ -247,13 +259,15 @@ async def redis_subscriber(
                     # Should only check at message processor initialization
                     elif exchange == "INIT":
                         logger.info("INIT message received")
-                        await load_clients()
-                        # Margin mode, leverage and position mode are set
-                        # before the first order and fail the broker if a
-                        # venue refuses: a hedge at the wrong leverage is
-                        # worse than no hedge, and the orchestrator winds
-                        # everything down when this process dies.
-                        await configure_all(authenticated_clients)
+                        if not started:
+                            await load_clients()
+                            # Margin mode, leverage and position mode are set
+                            # before the first order and fail the broker if a
+                            # venue refuses: a hedge at the wrong leverage is
+                            # worse than no hedge, and the orchestrator winds
+                            # everything down when this process dies.
+                            await configure_all(authenticated_clients)
+                            started = True
                         try:
                             all_open_orders = await fetch_all_open(
                                 authenticated_clients

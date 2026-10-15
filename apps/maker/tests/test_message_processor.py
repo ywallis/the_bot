@@ -881,6 +881,38 @@ async def test_get_open_orders_asks_again_when_the_broker_missed_it(
 
 
 @pytest.mark.asyncio
+async def test_recollection_gives_up_on_shutdown(
+    manager: OrderManager, mocker: MockerFixture
+):
+    """SIGTERM ends the wait for a broker that never replies."""
+    calls: list[str] = []
+    mock_redis = init_redis([], calls)
+    mocker.patch("apps.maker.src.message_processor.Redis", return_value=mock_redis)
+    mocker.patch("apps.maker.src.message_processor.INIT_REPLY_TIMEOUT_S", 0.01)
+
+    recollect = asyncio.create_task(manager.recollect_unless_stopped())
+    await asyncio.sleep(0.05)
+    assert not recollect.done()
+    manager.shutdown_event.set()
+
+    assert await asyncio.wait_for(recollect, timeout=1) is None
+    mock_redis.pubsub.return_value.__aexit__.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recollection_returns_the_broker_reply(
+    manager: OrderManager, order_batch_raw: dict, mocker: MockerFixture
+):
+    """Without a shutdown the broker's open orders come back."""
+    mock_redis = init_redis([reply(order_batch_raw)], [])
+    mocker.patch("apps.maker.src.message_processor.Redis", return_value=mock_redis)
+
+    open_orders = await manager.recollect_unless_stopped()
+
+    assert open_orders is not None and "BASE_venue_z" in open_orders
+
+
+@pytest.mark.asyncio
 async def test_get_lock_is_created_once(manager: OrderManager):
     """One lock per strategy, created on demand."""
     lock = manager.get_lock("lmb_eb")

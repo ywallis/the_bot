@@ -1182,6 +1182,29 @@ class OrderManager:
             open_orders[order["strategy"]] = order
         return open_orders
 
+    async def recollect_unless_stopped(self) -> dict[str, OrderMessage] | None:
+        """
+        Ask the broker for its open orders, giving up on SIGTERM.
+
+        ``get_open_orders`` asks until the broker replies. A broker that never
+        does would keep this process from stopping until the orchestrator
+        kills it, past the sweep and the event flush of a normal shutdown.
+
+        Returns
+        -------
+        dict[str, OrderMessage] | None
+            Open orders keyed by strategy, or None if a shutdown came first.
+        """
+        recollect = asyncio.create_task(self.get_open_orders())
+        stop = asyncio.create_task(self.shutdown_event.wait())
+        await asyncio.wait({recollect, stop}, return_when=asyncio.FIRST_COMPLETED)
+        stop.cancel()
+        if recollect.done():
+            return recollect.result()
+        recollect.cancel()
+        await asyncio.gather(recollect, return_exceptions=True)
+        return None
+
     def adopt(self, open_orders: dict[str, OrderMessage]) -> None:
         """
         Put orders recollected at startup into the book.
@@ -1321,7 +1344,11 @@ async def main(config: AppConfig) -> None:
 
     # Let the broker boot before asking it what is open at the venues.
     await asyncio.sleep(2)
-    open_orders = await manager.get_open_orders()
+    open_orders = await manager.recollect_unless_stopped()
+    if open_orders is None:
+        logger.warning("Stopped before the broker reported its open orders")
+        await redis.aclose()
+        return
     if open_orders:
         logger.info(f"Pre-existing open order were found: {open_orders}")
         manager.adopt(open_orders)
