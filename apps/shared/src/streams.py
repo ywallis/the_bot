@@ -10,8 +10,10 @@ The rest of the module owns the on-disk layout of recordings, including
 directory depends on. See ``docs/design/event-driven-framework.md`` section 7.
 """
 
+import json
 from collections import defaultdict
 from compression import zstd
+from datetime import datetime, timezone
 from io import BufferedIOBase
 from pathlib import Path
 from typing import Any
@@ -46,6 +48,12 @@ from apps.shared.src.events import (
 # may still append to them and compressed once sealed and shipped.
 FILE_SUFFIX = ".jsonl"
 COMPRESSED_SUFFIX = ".jsonl.zst"
+# One file per UTC hour. Small enough that data does not sit long on the
+# trading host and that a backtest range is a filename filter, large enough
+# that compression is unaffected: the zstd ratio on book data is flat above
+# roughly 300 KB and an hour of any active feed is far past that.
+BUCKET_FORMAT = "%Y-%m-%dT%H"
+BUCKET_SECONDS = 3600
 
 
 class StreamPublisher:
@@ -418,3 +426,152 @@ def stream_path(root: Path, stream: str) -> Path:
         if part in ("", ".", ".."):
             raise ValueError(f"Stream name {stream!r} is not a valid path")
     return root.joinpath(*parts)
+
+
+def bucket_of_entry(entry_id: str) -> str:
+    """
+    Return the UTC hour bucket a stream entry was added in.
+
+    Parameters
+    ----------
+    entry_id : str
+        Redis stream id, ``<ms>-<seq>``.
+
+    Returns
+    -------
+    str
+        ``YYYY-MM-DDTHH``.
+    """
+    ms = int(entry_id.split("-", 1)[0])
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime(BUCKET_FORMAT)
+
+
+def bucket_end(bucket: str) -> float:
+    """
+    Return the epoch second at which a bucket stops accepting entries.
+
+    Parameters
+    ----------
+    bucket : str
+        ``YYYY-MM-DDTHH``.
+
+    Returns
+    -------
+    float
+        Seconds since the epoch.
+    """
+    start = datetime.strptime(bucket, BUCKET_FORMAT).replace(tzinfo=timezone.utc)
+    return start.timestamp() + BUCKET_SECONDS
+
+
+def format_line(entry_id: str, event_type: str, data: bytes) -> bytes:
+    """
+    Build one JSON Lines record without re-encoding the payload.
+
+    Parameters
+    ----------
+    entry_id : str
+        Redis stream id.
+    event_type : str
+        Value of the entry's ``type`` field.
+    data : bytes
+        Raw JSON payload from the entry's ``data`` field.
+
+    Returns
+    -------
+    bytes
+        The line, newline terminated.
+    """
+    head = json.dumps({"id": entry_id, "type": event_type}, separators=(",", ":"))
+    return b"".join((head[:-1].encode(), b',"data":', data, b"}\n"))
+
+
+class StreamWriter:
+    """
+    Append-only writer for one stream, rotating files by UTC hour.
+
+    Attributes
+    ----------
+    directory : Path
+        Directory the bucket files live in.
+    """
+
+    def __init__(self, directory: Path) -> None:
+        """
+        Initialize the writer.
+
+        Parameters
+        ----------
+        directory : Path
+            Directory returned by ``stream_path``. Created on first write.
+        """
+        self.directory = directory
+        self._bucket: str | None = None
+        self._bucket_end: float = 0.0
+        self._file: Any = None
+
+    def write(self, entry_id: str, event_type: str, data: bytes) -> None:
+        """
+        Append one entry, opening a new file when the bucket changes.
+
+        Files are opened for append, so an entry belonging to a bucket this
+        writer already sealed reopens it rather than truncating it. That
+        happens when the recorder is lagging far enough behind Redis to
+        cross a bucket boundary.
+
+        Parameters
+        ----------
+        entry_id : str
+            Redis stream id.
+        event_type : str
+            Value of the entry's ``type`` field.
+        data : bytes
+            Raw JSON payload.
+        """
+        bucket = bucket_of_entry(entry_id)
+        if bucket != self._bucket:
+            self.close()
+            self.directory.mkdir(parents=True, exist_ok=True)
+            self._file = open(self.directory / f"{bucket}{FILE_SUFFIX}", "ab")
+            self._bucket = bucket
+            self._bucket_end = bucket_end(bucket)
+        self._file.write(format_line(entry_id, event_type, data))
+
+    def seal_if_elapsed(self, now: float, grace_s: float) -> bool:
+        """
+        Close the open file if its bucket ended more than ``grace_s`` ago.
+
+        Rotation is otherwise driven by entry arrival, so a stream that goes
+        quiet would hold its file open indefinitely and pin the data on the
+        trading host. Sealing on a timer bounds that wait for every stream
+        regardless of how often it produces.
+
+        Parameters
+        ----------
+        now : float
+            Current epoch second.
+        grace_s : float
+            How long past the end of a bucket to keep accepting entries.
+
+        Returns
+        -------
+        bool
+            True if a file was sealed.
+        """
+        if self._file is None or now < self._bucket_end + grace_s:
+            return False
+        self.close()
+        return True
+
+    def flush(self) -> None:
+        """Flush buffered lines to the operating system."""
+        if self._file is not None:
+            self._file.flush()
+
+    def close(self) -> None:
+        """Flush and close the current file, if any."""
+        if self._file is not None:
+            self._file.close()
+            self._file = None
+            self._bucket = None
+            self._bucket_end = 0.0
