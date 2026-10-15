@@ -19,3 +19,10 @@ class BrokerError(Exception):
 
         """
         return f"[Error {self.code}]: {self.message}"
+
+
+class BrokerTimeout(BrokerError):
+    """No reply from the broker in time; the request may still have landed."""
+
+    def __init__(self, message: str):
+        super().__init__(message, code=504)

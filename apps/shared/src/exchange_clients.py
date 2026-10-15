@@ -15,6 +15,12 @@ import ccxt.pro as ccxt  # pyright: ignore[reportMissingTypeStubs]
 from dotenv import load_dotenv
 
 import apps.shared.src.logging_config as logging_config
+from apps.shared.src.client_limits import (
+    CLIENT_RETRIES_ON_FAILURE,
+    CLIENT_TIMEOUT_MS,
+    RATE_LIMITER,
+    RATE_WINDOW_MS,
+)
 from apps.shared.src.config import VenueConfig, load_app_config
 from apps.shared.src.errors import NetworkError
 from apps.shared.src.structs import CustomExchange
@@ -28,21 +34,6 @@ logger = logging.getLogger(__name__)
 # retry in seconds is n times this.
 LOAD_ATTEMPTS = 5
 LOAD_BACKOFF_S = 2.0
-
-# CCXT's default leaky bucket refills only while requests are queued, so
-# after any idle spell the next request still waits a full ``rateLimit``:
-# about 50 ms on every order, measured from the trading host on 2026-10-14.
-# A rolling window counts what was sent in the last window instead, so an
-# idle client sends at once. Its budget is ``window / rateLimit`` requests,
-# the leaky bucket's average rate, and a short window keeps a burst at that
-# rate too; CCXT's default of 60 s would let a minute's budget out at once.
-# The budget must still cover the costliest single endpoint, or that request
-# never fits in the window: a market load costs 25 at a 50 ms rateLimit on
-# one venue, which a 1 s window (budget 20) refuses forever. Five seconds
-# gives a budget of 100 at that rateLimit. An endpoint that costs more still
-# never fits, so check the costs a new venue declares against this budget.
-RATE_LIMITER = "rollingWindow"
-RATE_WINDOW_MS = 5000
 
 
 async def load_clients():
@@ -85,7 +76,7 @@ def ccxt_params(
     Build the constructor arguments for a CCXT client.
 
     Every client throttles with a rolling window rather than CCXT's default
-    leaky bucket; see ``RATE_LIMITER``.
+    leaky bucket; see ``client_limits.RATE_LIMITER``.
 
     Parameters
     ----------
@@ -156,8 +147,8 @@ def build_client(venue: VenueConfig) -> CustomExchange:
         )
     )
     if not requires_password:
-        auth_client.options["maxRetriesOnFailure"] = 1
-        auth_client.timeout = 30000
+        auth_client.options["maxRetriesOnFailure"] = CLIENT_RETRIES_ON_FAILURE
+        auth_client.timeout = CLIENT_TIMEOUT_MS
     # The feed handlers publish on ``client.id``; a second entry for one
     # exchange must publish under its own venue id or the two wallets'
     # balances and orders land on one stream.

@@ -268,6 +268,7 @@ apps/
 │   │   ├── events.py       # Event schemas, JSON codec and Redis Stream names (cross-language contract)
 │   │   ├── ccxt_events.py  # Converters from CCXT structures to Book/Trade/Balance/OrderEvent
 │   │   ├── ccxt_orders.py  # has-map-driven order listing over REST, shared by maker and accountant
+│   │   ├── client_limits.py # CCXT client throttle, timeout and retries, and the worst case of one REST call
 │   │   ├── fees.py         # Fee schedule model, fee-currency resolution and CCXT loaders
 │   │   ├── streams.py      # StreamPublisher (XADD with seq and trimming), stream_tail, enumeration, paths
 │   │   ├── runtime.py      # Strategy runtime: Clock, Strategy base class, Runtime (XREAD loop, submit/cancel)

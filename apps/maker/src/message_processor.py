@@ -35,9 +35,10 @@ from redis.asyncio import ConnectionPool, Redis
 from redis.exceptions import ResponseError
 
 import apps.shared.src.logging_config as logging_config
+from apps.maker.src.ccxt_abstractions import broker_request_bound_s
 from apps.maker.src.constants import BROKER_CHANNEL
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
-from apps.maker.src.errors import BrokerError
+from apps.maker.src.errors import BrokerError, BrokerTimeout
 from apps.maker.src.structs import (
     CancellationMessage,
     OrderBatchMessage,
@@ -94,11 +95,16 @@ NEW = ">"
 # manager waiting forever with every intent unread.
 INIT_REPLY_TIMEOUT_S = 15.0
 # Seconds the order manager waits for the broker's reply to an order or a
-# cancellation. Only a broker that died or hung gets near it: the broker
-# tries a request five times, each bounded by the client's 30 s timeout.
-# Without a bound, a reply lost on 2026-10-15 held a strategy's lock for an
-# hour and every quote it sent meanwhile was dropped as superseded.
-BROKER_REPLY_TIMEOUT_S = 180.0
+# cancellation. Without a bound, a reply lost on 2026-10-15 held a
+# strategy's lock for an hour and every quote it sent meanwhile was dropped
+# as superseded. The bound is the broker's own worst case, every attempt
+# throttled and timed out, plus a margin for its queue and for Redis, so a
+# broker that is slow but working still answers inside it. That is over
+# five minutes: the timeout unblocks a strategy whose reply was lost, it
+# does not make a slow venue fast. What the timeout leaves is an order in
+# an unknown state, kept as unconfirmed rather than taken as rejected.
+BROKER_QUEUE_MARGIN_S = 30.0
+BROKER_REPLY_TIMEOUT_S = broker_request_bound_s() + BROKER_QUEUE_MARGIN_S
 
 # Tag carrying the broker-protocol order type of an order recollected from a
 # venue at startup, so it is classified the same way it was when placed. New
@@ -394,6 +400,10 @@ class OrderManager:
     resting : dict[str, OrderKey]
         The order each strategy currently has resting, for intents that
         supersede without naming what they supersede.
+    unconfirmed : dict[OrderKey, TrackedOrder]
+        Orders whose placement the broker never answered, until the order
+        watcher reports them. Such an order may rest at the venue, so one
+        that left the book in the meantime is taken back when it shows up.
     locks : dict[str, asyncio.Lock]
         One lock per strategy, serialising its cancel-then-place sequences.
     queued : dict[str, QueuedIntent]
@@ -433,6 +443,7 @@ class OrderManager:
         self.publisher = StreamPublisher(maxlen=config.oms.stream_maxlen)
         self.orders: dict[OrderKey, TrackedOrder] = {}
         self.resting: dict[str, OrderKey] = {}
+        self.unconfirmed: dict[OrderKey, TrackedOrder] = {}
         self.locks: dict[str, asyncio.Lock] = {}
         self.queued: dict[str, QueuedIntent] = {}
         self.tasks: list[asyncio.Task] = []
@@ -747,13 +758,15 @@ class OrderManager:
         """
         Cancel the order a superseding intent replaces, if it is still open.
 
-        Whatever rests under the intent's strategy key is cancelled whether
-        or not the intent names it. A strategy's idea of what rests can lag
-        this process: when two quotes queue behind a busy strategy the older
-        one is rejected unplaced, and the newer one names it as the order it
-        replaces while the venue still holds the quote before both. Only the
-        resting slot knows that order, and a strategy key never holds more
-        than one.
+        Every quote the book holds under the intent's strategy key is
+        cancelled, whether or not the intent names it. A strategy's idea of
+        what rests can lag this process: when two quotes queue behind a busy
+        strategy the older one is rejected unplaced, and the newer one names
+        it as the order it replaces while the venue still holds the quote
+        before both. The resting slot alone is not enough either. A quote
+        whose cancellation failed, or whose placement was never confirmed
+        and was taken back later, stays in the book behind a newer one, and
+        only this sweep reaches it again.
 
         Parameters
         ----------
@@ -766,6 +779,13 @@ class OrderManager:
         resting = self.resting.get(intent.strategy)
         if resting is not None and resting not in keys:
             keys.append(resting)
+        keys += [
+            key
+            for key, tracked in self.orders.items()
+            if tracked.intent.strategy == intent.strategy
+            and replaces(tracked.intent)
+            and key not in keys
+        ]
         open_keys = [key for key in keys if key in self.orders]
         if not open_keys:
             logger.debug(f"Nothing to supersede for {intent.strategy}")
@@ -826,6 +846,9 @@ class OrderManager:
         ts_broker_send = now_ns()
         try:
             confirmation = await self.place_order(broker_order_from_intent(intent))
+        except BrokerTimeout as error:
+            self.hold_unconfirmed(tracked, error)
+            return False
         except BrokerError as error:
             ts_broker_ack = now_ns()
             self.forget(tracked.key)
@@ -855,6 +878,64 @@ class OrderManager:
             venue_ack_ns(confirmation),
         )
         return True
+
+    def hold_unconfirmed(self, tracked: TrackedOrder, error: BrokerTimeout) -> None:
+        """
+        Keep an order whose placement the broker never answered.
+
+        No answer is not a refusal. The broker can still be retrying, and
+        its last attempt can leave the order resting at the venue after
+        this process stopped listening. Rejecting it here used to forget
+        it: the strategy quoted again, and the order watcher's report of
+        the first quote was dropped as unknown, so nothing ever cancelled
+        it. It stays in the book and in its strategy's slot instead, with
+        no venue order id, until the order watcher says what it became.
+
+        Parameters
+        ----------
+        tracked : TrackedOrder
+            The order, already in the book.
+        error : BrokerTimeout
+            The timeout.
+        """
+        intent = tracked.intent
+        logger.error(
+            f"No broker reply for {tracked.key}, keeping it unconfirmed until "
+            f"the venue reports it: {error}"
+        )
+        if intent.order_type is OrderKind.MARKET:
+            # It never rests, so there is nothing to cancel either way.
+            self.forget(tracked.key)
+            return
+        self.unconfirmed[tracked.key] = tracked
+        if replaces(intent):
+            self.resting[intent.strategy] = tracked.key
+
+    def confirm(self, event: OrderEvent) -> None:
+        """
+        Take back an unconfirmed order the venue reports as still open.
+
+        Only an event carrying a venue order id comes from the venue. The
+        events this process publishes for an unconfirmed order carry none,
+        including the cancellation that names it by client id. A venue that
+        does not know that id refuses it, the broker takes the refusal for
+        a fill, and the order leaves the book while it may still rest.
+
+        Parameters
+        ----------
+        event : OrderEvent
+            An order event from ``oms:events``.
+        """
+        if event.venue_order_id is None:
+            return
+        key: OrderKey = (event.venue, event.intent_id)
+        held = self.unconfirmed.pop(key, None)
+        if held is None or key in self.orders or event.state in TERMINAL_STATES:
+            return
+        logger.warning(f"{key} rests at the venue after all, back in the book")
+        self.orders[key] = held
+        if replaces(held.intent):
+            self.resting.setdefault(held.intent.strategy, key)
 
     async def reject(self, intent: OrderIntent, reason: str) -> None:
         """
@@ -985,6 +1066,7 @@ class OrderManager:
         event : OrderEvent
             The event.
         """
+        self.confirm(event)
         key: OrderKey = (event.venue, event.intent_id)
         tracked = self.orders.get(key)
         if tracked is None:
@@ -1044,8 +1126,9 @@ class OrderManager:
 
         Raises
         ------
-        BrokerError
-            If no reply comes within ``BROKER_REPLY_TIMEOUT_S``.
+        BrokerTimeout
+            If no reply comes within ``BROKER_REPLY_TIMEOUT_S``. The request
+            may still have reached the venue.
         """
         flattened = json.dumps(dict(msg), default=str)
 
@@ -1062,7 +1145,7 @@ class OrderManager:
             await pubsub.unsubscribe(msg["id"])
 
         if response is None:
-            raise BrokerError(
+            raise BrokerTimeout(
                 message=f"No reply from the broker for {msg['id']} in "
                 f"{BROKER_REPLY_TIMEOUT_S} s"
             )
@@ -1239,15 +1322,19 @@ class OrderManager:
 
     async def cancel_all_open(self) -> None:
         """
-        Cancel every resting order on the way down.
+        Cancel every quote in the book on the way down.
 
-        Only orders that rest are cancelled. A unique order is placed to
-        execute once and is deliberately left alone, which is what the
-        engine did before intents existed and what its strategies expect.
+        Every quote is cancelled, not only those in a resting slot: a quote
+        whose cancellation failed, or whose placement was taken back after a
+        timeout, can sit in the book behind a newer one. A unique order is
+        placed to execute once and is deliberately left alone, which is what
+        the engine did before intents existed and what its strategies
+        expect.
         """
         cancellations = [
             asyncio.create_task(self.cancel_order(key, "shutting down"))
-            for key in list(self.resting.values())
+            for key, tracked in list(self.orders.items())
+            if replaces(tracked.intent)
         ]
         if not cancellations:
             return

@@ -7,6 +7,7 @@ import apps.shared.src.logging_config as logging_config
 from apps.maker.src.enums import OrderSide, OrderType
 from apps.maker.src.errors import BrokerError
 from apps.maker.src.structs import CancellationMessage, OrderMessage
+from apps.shared.src.client_limits import request_bound_s
 from apps.shared.src.errors import (
     BadRequest,
     ExchangeError,
@@ -19,6 +20,25 @@ from apps.shared.src.structs import CustomExchange
 # Initializing centralized logging
 logging_config.setup_logging()
 logger = logging.getLogger(__name__)
+
+# Times the broker sends an order or a cancellation before it gives up, and
+# the pause between two sends.
+REQUEST_ATTEMPTS = 5
+RETRY_PAUSE_S = 0.2
+
+
+def broker_request_bound_s() -> float:
+    """
+    Return the longest the broker works on one order or cancellation.
+
+    Returns
+    -------
+    float
+        Seconds from the broker starting the request to it giving up.
+    """
+    return REQUEST_ATTEMPTS * request_bound_s() + (REQUEST_ATTEMPTS - 1) * (
+        RETRY_PAUSE_S
+    )
 
 
 async def cancel_order_return_confirmation(
@@ -45,7 +65,7 @@ async def cancel_order_return_confirmation(
     """
     last_error: Exception = Exception()
 
-    for attempt in range(5):
+    for attempt in range(REQUEST_ATTEMPTS):
         try:
             cancellation_confirmation = await client.cancel_order(
                 symbol=cancellation["pair"], id=cancellation["id"]
@@ -66,14 +86,14 @@ async def cancel_order_return_confirmation(
                 f"Cancellation timed out, attempt num.:{attempt + 1}. Error was: {e}"
             )
             last_error = e
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(RETRY_PAUSE_S)
 
         except (ExchangeError, NetworkError) as e:
             logger.error(
                 f"Cancellation rejected by exchange, attempt num.:{attempt + 1}. Error was: {e}"
             )
             last_error = e
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(RETRY_PAUSE_S)
 
         else:
             return cancellation_confirmation
@@ -206,7 +226,7 @@ async def create_and_return_order(
         # hedge came out short: 13.35 bought for a 14.5 fill on 2026-10-10.
         price = None
 
-    for attempt in range(5):
+    for attempt in range(REQUEST_ATTEMPTS):
         try:
             order_confirmation = await client.create_order(
                 symbol=order["pair"],
@@ -220,14 +240,14 @@ async def create_and_return_order(
         except RequestTimeout as e:
             logger.error(f"Order timed out, attempt num.:{attempt + 1}. Error was: {e}")
             last_error = e
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(RETRY_PAUSE_S)
 
         except (ExchangeError, NetworkError) as e:
             logger.error(
                 f"Order rejected by exchange, attempt num.:{attempt + 1}. Error was: {e}"
             )
             last_error = e
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(RETRY_PAUSE_S)
 
         else:
             return order_confirmation

@@ -76,6 +76,22 @@ async def test_process_message_unknown_type():
 
 
 @pytest.mark.asyncio
+async def test_process_message_answers_an_unexpected_error(order_1):
+    """Any failure is still a reply, so the order manager is not left waiting."""
+    results_queue = asyncio.Queue()
+
+    with patch(
+        "apps.maker.src.broker.create_and_return_order",
+        new=AsyncMock(side_effect=KeyError("id")),
+    ):
+        await process_message(order_1, results_queue, AsyncMock())
+        result = await results_queue.get()
+
+    assert result[0] == order_1["id"]
+    assert result[1] == MessageType.ERROR
+
+
+@pytest.mark.asyncio
 async def test_worker(order_1):
     """Test the worker function."""
     queue = asyncio.Queue()

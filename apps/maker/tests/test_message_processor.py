@@ -14,8 +14,10 @@ from pytest_mock import MockerFixture
 
 from apps.maker.src.constants import BROKER_CHANNEL
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
-from apps.maker.src.errors import BrokerError
+from apps.maker.src.errors import BrokerError, BrokerTimeout
+from apps.maker.src.ccxt_abstractions import broker_request_bound_s
 from apps.maker.src.message_processor import (
+    BROKER_REPLY_TIMEOUT_S,
     LEGACY_ORDER_TYPE_TAG,
     OrderManager,
     broker_order_from_intent,
@@ -937,13 +939,177 @@ async def test_send_to_broker_keeps_a_reply_sent_at_once(
 async def test_send_to_broker_gives_up_on_a_silent_broker(
     manager: OrderManager, mocker: MockerFixture
 ):
-    """No reply is a broker error after the timeout, not an endless wait."""
+    """No reply is a timeout after the bound, not an endless wait."""
     mocker.patch("apps.maker.src.message_processor.BROKER_REPLY_TIMEOUT_S", 0.05)
 
-    with pytest.raises(BrokerError):
+    with pytest.raises(BrokerTimeout):
         await asyncio.wait_for(
             manager.send_to_broker(broker_order_from_intent(order_intent())), 5
         )
+
+
+def test_the_reply_timeout_outlasts_a_working_broker():
+    """A broker still retrying a throttled, timing out venue is waited for."""
+    assert BROKER_REPLY_TIMEOUT_S > broker_request_bound_s()
+
+
+def silent_for(broker: FakeBroker, *intent_ids: str) -> Any:
+    """Return a broker that never answers the placement of some intents."""
+
+    async def send(msg: Any) -> Response:
+        if msg["kind"] == MessageType.ORDER and msg["id"] in intent_ids:
+            raise BrokerTimeout(message=f"No reply for {msg['id']}")
+        return await broker(msg)
+
+    return send
+
+
+def refusing_cancels_of(broker: FakeBroker, *order_ids: str) -> Any:
+    """Return a broker that refuses to cancel some venue order ids."""
+
+    async def send(msg: Any) -> Response:
+        if msg["kind"] == MessageType.CANCELLATION and msg["id"] in order_ids:
+            await broker(msg)
+            return Response(kind=MessageType.ERROR, text="cannot cancel")
+        return await broker(msg)
+
+    return send
+
+
+async def replay_own_events(manager: OrderManager) -> None:
+    """Feed the manager the events it published, as its follower would."""
+    for event in await events_on(manager, ORDER_EVENTS_STREAM):
+        manager.apply_order_event(event)
+
+
+@pytest.mark.asyncio
+async def test_an_unanswered_placement_is_kept_not_rejected(manager: OrderManager):
+    """No reply may still mean a resting order, so it stays in the slot."""
+    manager.send_to_broker = silent_for(FakeBroker(), "first")
+    await submit(manager, order_intent(intent_id="first"))
+
+    key = ("venue_x", "first")
+    states = [e.state for e in await events_on(manager, ORDER_EVENTS_STREAM)]
+    assert states == [OrderState.ACCEPTED]
+    assert key in manager.orders
+    assert key in manager.unconfirmed
+    assert manager.resting["lmb_eb"] == key
+    assert await pending_count(manager) == 0
+
+
+@pytest.mark.asyncio
+async def test_an_unanswered_market_order_is_not_kept(manager: OrderManager):
+    """A market order never rests, so there is nothing to keep for it."""
+    manager.send_to_broker = silent_for(FakeBroker(), "taker")
+    intent = msgspec.structs.replace(
+        order_intent(intent_id="taker", legacy=None), order_type=OrderKind.MARKET
+    )
+    await submit(manager, intent)
+
+    assert manager.orders == {}
+    assert manager.unconfirmed == {}
+
+
+@pytest.mark.asyncio
+async def test_an_unanswered_quote_is_cancelled_by_client_id_when_superseded(
+    manager: OrderManager, broker: FakeBroker
+):
+    """With no venue id known, the next quote cancels it by its own id."""
+    manager.send_to_broker = silent_for(broker, "first")
+    await submit(manager, order_intent(intent_id="first"))
+    await submit(manager, order_intent(intent_id="second"))
+
+    assert [m["id"] for m in broker.cancellations] == ["first"]
+    assert list(manager.orders) == [("venue_x", "second")]
+    assert manager.resting["lmb_eb"] == ("venue_x", "second")
+
+
+@pytest.mark.asyncio
+async def test_an_unanswered_quote_reported_late_is_taken_back_and_swept(
+    manager: OrderManager, broker: FakeBroker
+):
+    """
+    The venue reporting it after it left the book puts it back.
+
+    The cancellation by client id is refused by a venue that only knows its
+    own ids, which the broker takes for a fill. The order manager's own
+    events about it carry no venue id and must not settle it.
+    """
+    manager.send_to_broker = silent_for(broker, "first")
+    await submit(manager, order_intent(intent_id="first"))
+    await submit(manager, order_intent(intent_id="second"))
+    await replay_own_events(manager)
+    assert ("venue_x", "first") in manager.unconfirmed
+
+    manager.apply_order_event(order_event("first", OrderState.OPEN, filled=Decimal(0)))
+
+    first = manager.orders[("venue_x", "first")]
+    assert first.venue_order_id == "venue-first"
+    assert manager.unconfirmed == {}
+    assert manager.resting["lmb_eb"] == ("venue_x", "second")
+
+    await manager.cancel_all_open()
+
+    assert sorted(m["id"] for m in broker.cancellations) == [
+        "first",
+        "venue-first",
+        "venue-second",
+    ]
+    assert manager.orders == {}
+
+
+@pytest.mark.asyncio
+async def test_an_unanswered_quote_reported_finished_is_let_go(
+    manager: OrderManager, broker: FakeBroker
+):
+    """A late report that it filled settles it without bringing it back."""
+    manager.send_to_broker = silent_for(broker, "first")
+    await submit(manager, order_intent(intent_id="first"))
+    await submit(manager, order_intent(intent_id="second"))
+
+    manager.apply_order_event(order_event("first", OrderState.FILLED))
+
+    assert ("venue_x", "first") not in manager.orders
+    assert manager.unconfirmed == {}
+
+
+@pytest.mark.asyncio
+async def test_a_quote_whose_cancel_failed_is_cancelled_by_the_next_one(
+    manager: OrderManager, broker: FakeBroker
+):
+    """A quote left behind by a failed cancel is not forgotten by its slot."""
+    manager.send_to_broker = refusing_cancels_of(broker, "venue-first")
+    await submit(manager, order_intent(intent_id="first"))
+    await submit(manager, order_intent(intent_id="second"))
+    assert ("venue_x", "first") in manager.orders
+
+    manager.send_to_broker = broker  # ty: ignore[invalid-assignment]
+    await submit(manager, order_intent(intent_id="third"))
+
+    assert sorted(m["id"] for m in broker.cancellations[-2:]) == [
+        "venue-first",
+        "venue-second",
+    ]
+    assert list(manager.orders) == [("venue_x", "third")]
+
+
+@pytest.mark.asyncio
+async def test_shutdown_sweeps_a_quote_whose_cancel_failed(
+    manager: OrderManager, broker: FakeBroker
+):
+    """The sweep reads the book, not only the resting slots."""
+    manager.send_to_broker = refusing_cancels_of(broker, "venue-first")
+    await submit(manager, order_intent(intent_id="first"))
+    await submit(manager, order_intent(intent_id="second"))
+
+    manager.send_to_broker = broker  # ty: ignore[invalid-assignment]
+    await manager.cancel_all_open()
+
+    assert sorted(m["id"] for m in broker.cancellations[-2:]) == [
+        "venue-first",
+        "venue-second",
+    ]
+    assert manager.orders == {}
 
 
 @pytest.mark.asyncio

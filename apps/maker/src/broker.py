@@ -164,6 +164,13 @@ async def process_message(
     except BrokerError as e:
         # Sad flow
         await results_queue.put((message["id"], MessageType.ERROR, e))
+    except Exception as e:  # noqa: BLE001, the order manager waits on a reply
+        # Raised in a task nobody awaits, anything else would vanish and
+        # leave the order manager waiting out its timeout for an answer.
+        logger.exception(f"Unexpected error processing {message['id']}")
+        await results_queue.put(
+            (message["id"], MessageType.ERROR, BrokerError(f"Unexpected error: {e}"))
+        )
 
 
 async def worker(
