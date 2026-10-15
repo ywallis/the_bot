@@ -1,7 +1,10 @@
 """Tests for CCXT client construction."""
 
+import asyncio
+
 import pytest
 from ccxt.async_support import RateLimitExceeded
+from ccxt.async_support.base.exchange import Exchange
 
 from apps.shared.src import exchange_clients
 from apps.shared.src.config import VenueConfig
@@ -18,17 +21,49 @@ def test_ccxt_params_with_password_and_options():
         "apiKey": "k",
         "secret": "s",
         "password": "p",
+        "rateLimiterAlgorithm": "rollingWindow",
+        "rollingWindowSize": exchange_clients.RATE_WINDOW_MS,
         "options": {"watchOrderBook": {"checksum": False}},
     }
 
 
 def test_ccxt_params_minimal():
-    """No password and no options yields just the key pair."""
+    """No password and no options yields the key pair and the rate limiter."""
     venue = VenueConfig(id="venue_x", name="Venue X")
     assert ccxt_params(venue, "k", "s", None, requires_password=False) == {
         "apiKey": "k",
         "secret": "s",
+        "rateLimiterAlgorithm": "rollingWindow",
+        "rollingWindowSize": exchange_clients.RATE_WINDOW_MS,
     }
+
+
+async def throttle_wait(client: Exchange) -> float:
+    """Return the seconds the client's rate limiter holds one request."""
+    loop = asyncio.get_running_loop()
+    start = loop.time()
+    await client.throttle()
+    return loop.time() - start
+
+
+@pytest.mark.asyncio
+async def test_an_idle_client_is_not_throttled(monkeypatch):
+    """After an idle spell the next request leaves at once, a burst still waits."""
+    # 50 ms per request in a 100 ms window: a budget of two requests.
+    monkeypatch.setattr(exchange_clients, "RATE_WINDOW_MS", 100)
+    venue = VenueConfig(id="venue_x", name="Venue X")
+    params = ccxt_params(venue, "k", "s", None, requires_password=False)
+    client = Exchange({**params, "rateLimit": 50})
+    try:
+        await client.throttle()
+        await asyncio.sleep(0.15)
+        # CCXT's leaky bucket holds this one for a full rateLimit.
+        assert await throttle_wait(client) < 0.01
+        assert await throttle_wait(client) < 0.01
+        # Over budget: held until the first request leaves the window.
+        assert await throttle_wait(client) > 0.05
+    finally:
+        await client.close()
 
 
 def test_a_swap_venue_addresses_the_futures_account():

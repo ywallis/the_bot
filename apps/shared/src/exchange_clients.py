@@ -29,6 +29,16 @@ logger = logging.getLogger(__name__)
 LOAD_ATTEMPTS = 5
 LOAD_BACKOFF_S = 2.0
 
+# CCXT's default leaky bucket refills only while requests are queued, so
+# after any idle spell the next request still waits a full ``rateLimit``:
+# about 50 ms on every order, measured from the trading host on 2026-10-14.
+# A rolling window counts what was sent in the last window instead, so an
+# idle client sends at once. Its budget is ``window / rateLimit`` requests,
+# the leaky bucket's average rate, and a short window keeps a burst at that
+# rate too; CCXT's default of 60 s would let a minute's budget out at once.
+RATE_LIMITER = "rollingWindow"
+RATE_WINDOW_MS = 1000
+
 
 async def load_clients():
     """
@@ -69,6 +79,9 @@ def ccxt_params(
     """
     Build the constructor arguments for a CCXT client.
 
+    Every client throttles with a rolling window rather than CCXT's default
+    leaky bucket; see ``RATE_LIMITER``.
+
     Parameters
     ----------
     venue : VenueConfig
@@ -90,7 +103,12 @@ def ccxt_params(
     dict[str, object]
         Keyword arguments for the CCXT exchange class.
     """
-    params: dict[str, object] = {"apiKey": key, "secret": secret}
+    params: dict[str, object] = {
+        "apiKey": key,
+        "secret": secret,
+        "rateLimiterAlgorithm": RATE_LIMITER,
+        "rollingWindowSize": RATE_WINDOW_MS,
+    }
     if requires_password:
         params["password"] = password
     options = venue.client_options
