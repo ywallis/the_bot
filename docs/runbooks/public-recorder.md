@@ -48,6 +48,10 @@ it without changes (`docs/runbooks/archive-host.md`).
    ARGS=<data> <venue> BASE/QUOTE OTHER/QUOTE
    ```
 
+4. If a config venue has a `ccxt_id` that is not its `id`, add
+   `--venue-name <id>` to `ARGS`. The files then go to the same directory as
+   the files of the trading recorder.
+
 ## 3. Run the groups under systemd
 
 1. If you have root, write `/etc/systemd/system/the-bot-rec@.service`.
@@ -100,6 +104,10 @@ it without changes (`docs/runbooks/archive-host.md`).
    Books of markets that you removed from all groups also show here.
 
 ## 4. Stalls and restarts
+
+If the venue does not list a symbol of the group, the process exits with
+status 2 and names the symbol. Systemd does not start it again. Correct the
+`ARGS` line and start the group.
 
 A book that writes nothing for three minutes makes its process exit with
 status 3. Systemd starts it again with new connections and snapshots. This

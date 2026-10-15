@@ -19,7 +19,12 @@ futures markets; spot and contract symbols cannot share one process. One
 process holds one connection, and some venues silently drop subscriptions
 past a handful per connection, so record a long list in groups of ten.
 
-A book that stays silent for ``--stall-s`` seconds makes the process exit
+Files are written under ``--venue-name``, which defaults to the CCXT id. Set
+it to the config's venue id when that differs from its ``ccxt_id``, as for a
+futures wallet, so both recordings of a market share one directory.
+
+A symbol the venue does not list makes the process exit with status 2. A
+book that stays silent for ``--stall-s`` seconds makes the process exit
 with status 3, for its supervisor to restart it with fresh connections and
 snapshots. After a reconnect CCXT can leave a book's watch pending forever
 without raising while the trades on the same connection resume: a recording
@@ -42,6 +47,7 @@ import ccxt.pro as ccxt  # pyright: ignore[reportMissingTypeStubs]
 from apps.maker.src.structs import LimitedSet
 from apps.shared.src.ccxt_events import (
     book_event_from_ccxt,
+    is_crossed,
     trade_event_from_ccxt,
     trade_key,
     usable_trades,
@@ -64,6 +70,10 @@ BOOK_DEPTH = 20
 STALL_S = 180.0
 # Exit status of a stalled process, distinct from a crash in the journal.
 STALL_EXIT_CODE = 3
+# Exit status of a command line the venue cannot serve, the same as for a
+# command line argparse rejects. A restart cannot fix either, so the systemd
+# unit lists it in ``RestartPreventExitStatus``.
+CONFIG_EXIT_CODE = 2
 # Seconds between watchdog checks, at most.
 WATCHDOG_TICK_S = 10.0
 # Seconds past the end of an hour before a quiet stream's file is closed.
@@ -88,7 +98,7 @@ class PublicRecorder:
     root : Path
         Recording root directory.
     venue : str
-        CCXT id, used as the venue in stream names.
+        Venue in stream names, the CCXT id unless told otherwise.
     symbols : list[str]
         CCXT symbols recorded.
     stall_s : float
@@ -113,7 +123,7 @@ class PublicRecorder:
         root : Path
             Recording root directory.
         venue : str
-            CCXT id, used as the venue in stream names.
+            Venue in stream names, the CCXT id unless told otherwise.
         symbols : list[str]
             CCXT symbols to record.
         stall_s : float
@@ -176,6 +186,9 @@ class PublicRecorder:
         """
         Write a book update unless it is one-sided or crossed.
 
+        A locked book, bid equal to ask, is written, as the trading watcher
+        publishes it.
+
         Parameters
         ----------
         symbol : str
@@ -190,7 +203,7 @@ class PublicRecorder:
         """
         bids = order_book.get("bids") or []
         asks = order_book.get("asks") or []
-        if not bids or not asks or bids[0][0] >= asks[0][0]:
+        if not bids or not asks or is_crossed(order_book):
             return False
         stream = book_stream(self.venue, symbol)
         event = book_event_from_ccxt(
@@ -369,9 +382,20 @@ def make_client(venue: str, symbols: list[str]) -> Any:
     return getattr(ccxt, venue)({"newUpdates": True, "options": options})
 
 
-async def run(root: Path, venue: str, symbols: list[str], stall_s: float) -> int:
+async def run(
+    root: Path,
+    venue: str,
+    symbols: list[str],
+    stall_s: float,
+    venue_name: str | None = None,
+) -> int:
     """
     Record until a book stalls, then return the stall exit status.
+
+    The watches start only once the markets are loaded and every symbol is
+    known, so neither a slow ``load_markets`` nor a typo counts as a stall.
+    They run in a task group, which cancels every watch before the files
+    are closed: no update is written after ``close``.
 
     Parameters
     ----------
@@ -383,27 +407,35 @@ async def run(root: Path, venue: str, symbols: list[str], stall_s: float) -> int
         CCXT symbols.
     stall_s : float
         Seconds a book may stay silent.
+    venue_name : str | None
+        Venue in the stream names. None uses the CCXT id.
 
     Returns
     -------
     int
-        ``STALL_EXIT_CODE``.
+        ``CONFIG_EXIT_CODE`` if the venue does not list a symbol,
+        ``STALL_EXIT_CODE`` otherwise.
     """
     client = make_client(venue, symbols)
-    recorder = PublicRecorder(root, venue, symbols, stall_s)
-    tasks = [watchdog(recorder)]
-    for symbol in symbols:
-        tasks += [
-            watch_books(client, recorder, symbol),
-            watch_trades(client, recorder, symbol),
-        ]
+    recorder: PublicRecorder | None = None
     try:
         await client.load_markets()
-        await asyncio.gather(*tasks)
-    except BookStalled as e:
-        print(f"{e}, exiting for a restart", flush=True)
+        unknown = [symbol for symbol in symbols if symbol not in client.markets]
+        if unknown:
+            print(f"{venue} does not list {', '.join(unknown)}", flush=True)
+            return CONFIG_EXIT_CODE
+        recorder = PublicRecorder(root, venue_name or venue, symbols, stall_s)
+        try:
+            async with asyncio.TaskGroup() as group:
+                group.create_task(watchdog(recorder))
+                for symbol in symbols:
+                    group.create_task(watch_books(client, recorder, symbol))
+                    group.create_task(watch_trades(client, recorder, symbol))
+        except* BookStalled as stalled:
+            print(f"{stalled.exceptions[0]}, exiting for a restart", flush=True)
     finally:
-        recorder.close()
+        if recorder is not None:
+            recorder.close()
         try:
             await asyncio.wait_for(client.close(), RETRY_DELAY_S)
         except Exception as e:  # noqa: BLE001, exiting anyway
@@ -423,7 +455,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     Returns
     -------
     argparse.Namespace
-        ``root``, ``venue``, ``symbols`` and ``stall_s``.
+        ``root``, ``venue``, ``symbols``, ``stall_s`` and ``venue_name``.
     """
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("root", type=Path, help="recording root directory")
@@ -434,6 +466,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=float,
         default=STALL_S,
         help="seconds a book may stay silent before the process exits",
+    )
+    parser.add_argument(
+        "--venue-name",
+        help="venue in the stream names, the config venue id (default: CCXT id)",
     )
     return parser.parse_args(argv)
 
@@ -448,7 +484,11 @@ def main(argv: list[str]) -> None:
         Arguments without the program name.
     """
     args = parse_args(argv)
-    sys.exit(asyncio.run(run(args.root, args.venue, args.symbols, args.stall_s)))
+    sys.exit(
+        asyncio.run(
+            run(args.root, args.venue, args.symbols, args.stall_s, args.venue_name)
+        )
+    )
 
 
 if __name__ == "__main__":

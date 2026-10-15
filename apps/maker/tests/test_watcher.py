@@ -169,6 +169,22 @@ async def test_watch_ob_reconnects_after_consecutive_stalls(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_watch_ob_restarts_the_crossed_window_after_a_stall(monkeypatch):
+    """A book crossed before a stall is not resynced again on the first update."""
+    monkeypatch.setattr(watcher, "BOOK_STALL_S", 0.05)
+    monkeypatch.setattr(watcher, "CROSSED_RESYNC_S", 0.02)
+    monkeypatch.setattr(watcher, "RETRY_DELAY_S", 0)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    publisher = StreamPublisher(maxlen=100)
+    client = FakeClient("venue_a", [crossed_book(), HANG, crossed_book()])
+
+    with pytest.raises(StopWatching):
+        await watcher.watch_ob(client, "BASE/QUOTE", redis, publisher, depth=2)
+
+    assert client.unwatched == ["BASE/QUOTE"], "only the stall resubscribed"
+
+
+@pytest.mark.asyncio
 async def test_watch_ob_counts_only_consecutive_stalls(monkeypatch):
     """An update between two stalls means the connection works: no reconnect."""
     monkeypatch.setattr(watcher, "BOOK_STALL_S", 0.01)
