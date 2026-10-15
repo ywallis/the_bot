@@ -93,6 +93,12 @@ NEW = ">"
 # the broker subscribes is lost, and on 2026-10-15 that left the order
 # manager waiting forever with every intent unread.
 INIT_REPLY_TIMEOUT_S = 15.0
+# Seconds the order manager waits for the broker's reply to an order or a
+# cancellation. Only a broker that died or hung gets near it: the broker
+# tries a request five times, each bounded by the client's 30 s timeout.
+# Without a bound, a reply lost on 2026-10-15 held a strategy's lock for an
+# hour and every quote it sent meanwhile was dropped as superseded.
+BROKER_REPLY_TIMEOUT_S = 180.0
 
 # Tag carrying the broker-protocol order type of an order recollected from a
 # venue at startup, so it is classified the same way it was when placed. New
@@ -100,7 +106,7 @@ INIT_REPLY_TIMEOUT_S = 15.0
 LEGACY_ORDER_TYPE_TAG = "legacy_order_type"
 
 
-async def init_reply(pubsub: Any, timeout_s: float) -> str | None:
+async def broker_reply(pubsub: Any, timeout_s: float) -> str | None:
     """
     Wait for the broker's reply on a subscribed pubsub, up to a deadline.
 
@@ -1035,26 +1041,32 @@ class OrderManager:
         -------
         Response
             The broker's reply.
+
+        Raises
+        ------
+        BrokerError
+            If no reply comes within ``BROKER_REPLY_TIMEOUT_S``.
         """
         flattened = json.dumps(dict(msg), default=str)
-        response: str = ""
 
-        await self.redis.publish(BROKER_CHANNEL, flattened)
-        logger.info(
-            f"Sending message with id {msg['id']} and type {msg['kind']} to broker."
-        )
         async with self.redis.pubsub() as pubsub:
+            # Subscribed before sending: the broker answers in tens of
+            # milliseconds, and a reply published before the subscription is
+            # lost for good.
             await pubsub.subscribe(msg["id"])
-            async for message in pubsub.listen():
-                if message["type"] == "message":
-                    data = message["data"]
-                    response = data.decode() if isinstance(data, bytes) else data
-                    logger.debug(
-                        f"Received reply from broker for msg {msg['id']}: {response}"
-                    )
-                    break
+            await self.redis.publish(BROKER_CHANNEL, flattened)
+            logger.info(
+                f"Sending message with id {msg['id']} and type {msg['kind']} to broker."
+            )
+            response = await broker_reply(pubsub, BROKER_REPLY_TIMEOUT_S)
             await pubsub.unsubscribe(msg["id"])
 
+        if response is None:
+            raise BrokerError(
+                message=f"No reply from the broker for {msg['id']} in "
+                f"{BROKER_REPLY_TIMEOUT_S} s"
+            )
+        logger.debug(f"Received reply from broker for msg {msg['id']}: {response}")
         return identify_response(response)
 
     async def place_order(self, msg: OrderMessage) -> dict[str, Any]:
@@ -1166,7 +1178,7 @@ class OrderManager:
                         BROKER_CHANNEL, json.dumps(dict(trigger), default=str)
                     )
                     logger.info("Asking broker for all open orders.")
-                    response = await init_reply(pubsub, INIT_REPLY_TIMEOUT_S)
+                    response = await broker_reply(pubsub, INIT_REPLY_TIMEOUT_S)
                     if response is None:
                         logger.error(
                             f"No reply from the broker to open orders request "

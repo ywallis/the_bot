@@ -913,6 +913,40 @@ async def test_recollection_returns_the_broker_reply(
 
 
 @pytest.mark.asyncio
+async def test_send_to_broker_keeps_a_reply_sent_at_once(
+    manager: OrderManager, mocker: MockerFixture
+):
+    """A broker that answers before the request call returns is still heard."""
+    message = broker_order_from_intent(order_intent())
+    publish = manager.redis.publish
+
+    async def instant_broker(channel: Any, payload: Any) -> int:
+        received = await publish(channel, payload)
+        if channel == BROKER_CHANNEL:
+            await publish(message["id"], "order|{'id': 'venue-1'}")
+        return received
+
+    mocker.patch.object(manager.redis, "publish", side_effect=instant_broker)
+
+    response = await asyncio.wait_for(manager.send_to_broker(message), 5)
+
+    assert response["kind"] == MessageType.ORDER
+
+
+@pytest.mark.asyncio
+async def test_send_to_broker_gives_up_on_a_silent_broker(
+    manager: OrderManager, mocker: MockerFixture
+):
+    """No reply is a broker error after the timeout, not an endless wait."""
+    mocker.patch("apps.maker.src.message_processor.BROKER_REPLY_TIMEOUT_S", 0.05)
+
+    with pytest.raises(BrokerError):
+        await asyncio.wait_for(
+            manager.send_to_broker(broker_order_from_intent(order_intent())), 5
+        )
+
+
+@pytest.mark.asyncio
 async def test_get_lock_is_created_once(manager: OrderManager):
     """One lock per strategy, created on demand."""
     lock = manager.get_lock("lmb_eb")
