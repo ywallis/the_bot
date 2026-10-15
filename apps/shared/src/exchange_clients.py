@@ -36,8 +36,13 @@ LOAD_BACKOFF_S = 2.0
 # idle client sends at once. Its budget is ``window / rateLimit`` requests,
 # the leaky bucket's average rate, and a short window keeps a burst at that
 # rate too; CCXT's default of 60 s would let a minute's budget out at once.
+# The budget must still cover the costliest single endpoint, or that request
+# never fits in the window: a market load costs 25 at a 50 ms rateLimit on
+# one venue, which a 1 s window (budget 20) refuses forever. Five seconds
+# gives a budget of 100 at that rateLimit. An endpoint that costs more still
+# never fits, so check the costs a new venue declares against this budget.
 RATE_LIMITER = "rollingWindow"
-RATE_WINDOW_MS = 1000
+RATE_WINDOW_MS = 5000
 
 
 async def load_clients():
