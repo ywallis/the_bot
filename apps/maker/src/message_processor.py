@@ -88,10 +88,44 @@ PENDING = "0"
 # Start position for entries no consumer in the group has read yet.
 NEW = ">"
 
+# Seconds the order manager waits for the broker's reply to its start-up
+# request for open orders before asking again. A request published before
+# the broker subscribes is lost, and on 2026-10-15 that left the order
+# manager waiting forever with every intent unread.
+INIT_REPLY_TIMEOUT_S = 15.0
+
 # Tag carrying the broker-protocol order type of an order recollected from a
 # venue at startup, so it is classified the same way it was when placed. New
 # intents never carry it: ``replace_of`` says what they are.
 LEGACY_ORDER_TYPE_TAG = "legacy_order_type"
+
+
+async def init_reply(pubsub: Any, timeout_s: float) -> str | None:
+    """
+    Wait for the broker's reply on a subscribed pubsub, up to a deadline.
+
+    Parameters
+    ----------
+    pubsub : Any
+        A redis-py pubsub already subscribed to the reply channel.
+    timeout_s : float
+        Seconds to wait.
+
+    Returns
+    -------
+    str | None
+        The reply, decoded, or None if none came in time.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    while (remaining := deadline - loop.time()) > 0:
+        message = await pubsub.get_message(
+            ignore_subscribe_messages=True, timeout=remaining
+        )
+        if message is not None and message["type"] == "message":
+            data = message["data"]
+            return data.decode() if isinstance(data, bytes) else data
+    return None
 
 
 @dataclass
@@ -1120,25 +1154,32 @@ class OrderManager:
             amount=Decimal(0),
         )
         async with Redis(connection_pool=self.pool) as redis:
-            await redis.publish(BROKER_CHANNEL, json.dumps(dict(trigger), default=str))
-
-            logger.info("Asking broker for all open orders.")
             async with redis.pubsub() as pubsub:
-                logger.debug("Waiting for answer on channel INIT")
+                # Subscribed before asking, so a fast reply is not lost; asked
+                # again on a timeout, so a request the broker missed is not.
                 await pubsub.subscribe("INIT")
-                async for message in pubsub.listen():
-                    if message["type"] == "message":
-                        data = message["data"]
-                        response = data.decode() if isinstance(data, bytes) else data
-                        logger.debug(f"Received init reply from broker: {response}")
-                        order_batch = cast(OrderBatchMessage, parse_message(response))
-                        for order in order_batch["orders"]:
-                            if order.get("order_type") == OrderType.UNIQUE:
-                                continue
-                            open_orders[order["strategy"]] = order
-                        break
+                response: str | None = None
+                attempt = 0
+                while response is None:
+                    attempt += 1
+                    await redis.publish(
+                        BROKER_CHANNEL, json.dumps(dict(trigger), default=str)
+                    )
+                    logger.info("Asking broker for all open orders.")
+                    response = await init_reply(pubsub, INIT_REPLY_TIMEOUT_S)
+                    if response is None:
+                        logger.error(
+                            f"No reply from the broker to open orders request "
+                            f"{attempt} in {INIT_REPLY_TIMEOUT_S} s, asking again"
+                        )
                 await pubsub.unsubscribe("INIT")
 
+        logger.debug(f"Received init reply from broker: {response}")
+        order_batch = cast(OrderBatchMessage, parse_message(response))
+        for order in order_batch["orders"]:
+            if order.get("order_type") == OrderType.UNIQUE:
+                continue
+            open_orders[order["strategy"]] = order
         return open_orders
 
     def adopt(self, open_orders: dict[str, OrderMessage]) -> None:

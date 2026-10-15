@@ -12,6 +12,7 @@ import pytest_asyncio
 from fakeredis import aioredis as fakeredis
 from pytest_mock import MockerFixture
 
+from apps.maker.src.constants import BROKER_CHANNEL
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
 from apps.maker.src.errors import BrokerError
 from apps.maker.src.message_processor import (
@@ -789,34 +790,55 @@ async def test_place_order_rejects_an_unreadable_confirmation(manager: OrderMana
         await manager.place_order(broker_order_from_intent(order_intent()))
 
 
+def init_redis(replies: list[dict | None], calls: list[str]) -> MagicMock:
+    """Return a Redis double whose INIT pubsub yields ``replies`` in turn."""
+    mock_redis = MagicMock()
+    mock_pubsub = MagicMock()
+    mock_redis.__aenter__.return_value = mock_redis
+    mock_pubsub.__aenter__.return_value = mock_pubsub
+
+    async def publish(channel: str, _payload: str) -> None:
+        calls.append(f"publish {channel}")
+
+    async def subscribe(channel: str) -> None:
+        calls.append(f"subscribe {channel}")
+
+    queue = list(replies)
+
+    async def get_message(**kwargs: Any) -> dict | None:
+        message = queue.pop(0) if queue else None
+        if message is None:
+            # Nothing arrived: a real pubsub blocks until its timeout.
+            await asyncio.sleep(kwargs.get("timeout") or 0)
+        return message
+
+    mock_redis.publish = AsyncMock(side_effect=publish)
+    mock_pubsub.subscribe = AsyncMock(side_effect=subscribe)
+    mock_pubsub.unsubscribe = AsyncMock()
+    mock_pubsub.get_message = get_message
+    mock_redis.pubsub.return_value = mock_pubsub
+    return mock_redis
+
+
+def reply(batch: dict) -> dict:
+    """Return a pubsub message carrying an open orders batch."""
+    return {"type": "message", "data": json.dumps(batch, default=str).encode()}
+
+
 @pytest.mark.asyncio
 async def test_get_open_orders(
     manager: OrderManager, order_batch_raw: dict, mocker: MockerFixture
 ):
     """Open orders are recollected from the broker at startup."""
-    mock_redis = MagicMock()
-    mock_pubsub = MagicMock()
-    mock_redis.__aenter__.return_value = mock_redis
-    mock_pubsub.__aenter__.return_value = mock_pubsub
-    mock_redis.publish = AsyncMock()
-    mock_pubsub.subscribe = AsyncMock()
-    mock_pubsub.unsubscribe = AsyncMock()
-
-    import json
-
-    async def mock_listen():
-        yield {"type": "message", "data": json.dumps(order_batch_raw).encode("utf-8")}
-
-    mock_pubsub.listen = mock_listen
-    mock_redis.pubsub.return_value = mock_pubsub
+    calls: list[str] = []
+    mock_redis = init_redis([reply(order_batch_raw)], calls)
     mocker.patch("apps.maker.src.message_processor.Redis", return_value=mock_redis)
 
     open_orders = await manager.get_open_orders()
 
     assert "BASE_venue_z" in open_orders
     mock_redis.publish.assert_called_once()
-    mock_pubsub.subscribe.assert_called_once_with("INIT")
-    mock_pubsub.unsubscribe.assert_called_once_with("INIT")
+    mock_redis.pubsub.return_value.unsubscribe.assert_called_once_with("INIT")
 
 
 @pytest.mark.asyncio
@@ -824,27 +846,38 @@ async def test_get_open_orders_empty(
     manager: OrderManager, empty_open_orders: OrderBatchMessage, mocker: MockerFixture
 ):
     """Recollection with nothing open returns nothing."""
-    mock_redis = MagicMock()
-    mock_pubsub = MagicMock()
-    mock_redis.__aenter__.return_value = mock_redis
-    mock_pubsub.__aenter__.return_value = mock_pubsub
-    mock_redis.publish = AsyncMock()
-    mock_pubsub.subscribe = AsyncMock()
-    mock_pubsub.unsubscribe = AsyncMock()
-
-    import json
-
-    async def mock_listen():
-        yield {
-            "type": "message",
-            "data": json.dumps(dict(empty_open_orders), default=str).encode("utf-8"),
-        }
-
-    mock_pubsub.listen = mock_listen
-    mock_redis.pubsub.return_value = mock_pubsub
+    mock_redis = init_redis([reply(dict(empty_open_orders))], [])
     mocker.patch("apps.maker.src.message_processor.Redis", return_value=mock_redis)
 
     assert await manager.get_open_orders() == {}
+
+
+@pytest.mark.asyncio
+async def test_get_open_orders_subscribes_before_asking(
+    manager: OrderManager, empty_open_orders: OrderBatchMessage, mocker: MockerFixture
+):
+    """A reply published as soon as the broker reads the request is not lost."""
+    calls: list[str] = []
+    mock_redis = init_redis([reply(dict(empty_open_orders))], calls)
+    mocker.patch("apps.maker.src.message_processor.Redis", return_value=mock_redis)
+
+    await manager.get_open_orders()
+
+    assert calls == ["subscribe INIT", f"publish {BROKER_CHANNEL}"]
+
+
+@pytest.mark.asyncio
+async def test_get_open_orders_asks_again_when_the_broker_missed_it(
+    manager: OrderManager, empty_open_orders: OrderBatchMessage, mocker: MockerFixture
+):
+    """A request the broker never read is repeated after the timeout."""
+    calls: list[str] = []
+    mock_redis = init_redis([None, reply(dict(empty_open_orders))], calls)
+    mocker.patch("apps.maker.src.message_processor.Redis", return_value=mock_redis)
+    mocker.patch("apps.maker.src.message_processor.INIT_REPLY_TIMEOUT_S", 0.01)
+
+    assert await manager.get_open_orders() == {}
+    assert calls.count(f"publish {BROKER_CHANNEL}") == 2
 
 
 @pytest.mark.asyncio
