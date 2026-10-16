@@ -219,7 +219,8 @@ class OmsConfig(msgspec.Struct, frozen=True):
     block_ms : int
         How long a blocking ``XREADGROUP`` waits when no intent is available.
     batch : int
-        Maximum intents fetched per read.
+        Maximum intents fetched per read. It also sizes the order manager's
+        Redis pool, which holds a connection for every intent of one read.
     stream_maxlen : int
         Approximate maximum length of ``oms:events`` and ``oms:latency``.
     max_intent_age_s : float
