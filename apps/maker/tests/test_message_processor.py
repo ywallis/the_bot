@@ -10,8 +10,9 @@ import msgspec
 import pytest
 import pytest_asyncio
 from fakeredis import aioredis as fakeredis
+from fakeredis.aioredis import FakeAsyncRedisConnection
 from pytest_mock import MockerFixture
-from redis.asyncio import BlockingConnectionPool
+from redis.asyncio import BlockingConnectionPool, Redis
 
 from apps.maker.src.constants import BROKER_CHANNEL
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
@@ -20,10 +21,12 @@ from apps.maker.src.ccxt_abstractions import broker_request_bound_s
 from apps.maker.src.message_processor import (
     BROKER_REPLY_TIMEOUT_S,
     LEGACY_ORDER_TYPE_TAG,
-    REDIS_CONNECTIONS,
+    LONG_LIVED_CONNECTIONS,
+    REDIS_CONNECTION_WAIT_S,
     OrderManager,
     broker_order_from_intent,
     build_pool,
+    pool_size,
     legacy_order_type,
     replaces,
     venue_ack_ns,
@@ -768,12 +771,109 @@ async def test_a_drained_pending_list_hands_over_to_new_entries(
     assert [m["id"] for m in replayed.orders] == ["in flight", "after restart"]
 
 
-def test_the_pool_waits_for_a_free_connection():
-    """A burst of intents queues for connections instead of failing on them."""
-    pool = build_pool(config())
+def test_the_pool_holds_a_full_batch_and_outwaits_the_broker():
+    """
+    One read of intents never queues, and a queued caller never gives up.
+
+    Every intent of a read can hold a pubsub while it waits on the broker,
+    and a connection is held for at most one reply timeout.
+    """
+    settings = config()
+    pool = build_pool(settings)
 
     assert isinstance(pool, BlockingConnectionPool)
-    assert pool.max_connections == REDIS_CONNECTIONS
+    assert pool.max_connections == pool_size(settings.oms)
+    assert pool.max_connections > settings.oms.batch
+    assert pool.timeout == REDIS_CONNECTION_WAIT_S
+    assert REDIS_CONNECTION_WAIT_S > BROKER_REPLY_TIMEOUT_S
+
+
+async def pubsub_broker(redis: Any, gate: asyncio.Event, seen: list[str]) -> None:
+    """
+    Answer every order on the broker channel once the gate opens.
+
+    It runs on its own client, as the real broker does, so its connections
+    do not count against the order manager's pool.
+    """
+    async with redis.pubsub() as pubsub:
+        await pubsub.subscribe(BROKER_CHANNEL)
+        replies: list[asyncio.Task] = []
+        while True:
+            message = await pubsub.get_message(
+                ignore_subscribe_messages=True, timeout=1
+            )
+            if message is None:
+                continue
+            order_id = json.loads(message["data"])["id"]
+            seen.append(order_id)
+
+            async def reply(channel: str) -> None:
+                await gate.wait()
+                await redis.publish(channel, f"order|{{'id': 'venue-{channel}'}}")
+
+            replies.append(asyncio.create_task(reply(order_id)))
+
+
+@pytest.mark.asyncio
+async def test_a_flood_larger_than_the_pool_queues_and_is_all_acknowledged():
+    """
+    More intents in flight than the pool holds all reach the broker.
+
+    The pool raised MaxConnectionsError at its limit, which failed the
+    intents past it, and the acknowledgement of a failed intent needs a
+    connection too, so their entries stayed pending. Here the broker holds
+    every reply until more requests wait on it than there are connections.
+    The ones past the pool must queue rather than fail, and once the broker
+    answers every intent must be placed and acknowledged.
+    """
+    server = fakeredis.FakeServer()
+    settings = config()
+    pool = build_pool(
+        settings, connection_class=FakeAsyncRedisConnection, server=server
+    )
+    manager = OrderManager(settings, Redis(connection_pool=pool), pool)
+    broker_redis = fakeredis.FakeRedis(server=server)
+    gate = asyncio.Event()
+    seen: list[str] = []
+    broker = asyncio.create_task(pubsub_broker(broker_redis, gate, seen))
+    await manager.ensure_group()
+    await manager.consume_once()
+    flood = pool.max_connections + 5
+    publisher = StreamPublisher(maxlen=1000)
+    for n in range(flood):
+        intent = order_intent(intent_id=f"t-{n}", legacy=None)
+        await publisher.publish(broker_redis, intent)
+
+    async def read_intents() -> None:
+        # The reader also queues for a connection while the flood holds
+        # them all, so it runs beside the test rather than in its way.
+        while True:
+            await manager.consume_once()
+            await asyncio.sleep(0.01)
+
+    reader = asyncio.create_task(read_intents())
+    try:
+        async with asyncio.timeout(5):
+            while len(manager.tasks) < flood:
+                await asyncio.sleep(0.01)
+        await asyncio.sleep(0.2)
+        assert 0 < len(seen) < flood
+
+        gate.set()
+        async with asyncio.timeout(5):
+            while len(manager.orders) < flood:
+                await asyncio.sleep(0.01)
+        reader.cancel()
+        await asyncio.gather(reader, return_exceptions=True)
+        await asyncio.wait_for(settle(manager), 5)
+    finally:
+        for task in (reader, broker):
+            task.cancel()
+        await asyncio.gather(reader, broker, return_exceptions=True)
+        await pool.disconnect()
+
+    assert sorted(seen) == sorted(f"t-{n}" for n in range(flood))
+    assert await pending_count(manager) == 0
 
 
 # Startup and shutdown ------------------------------------------------------

@@ -46,7 +46,12 @@ from apps.maker.src.structs import (
     Response,
 )
 from apps.maker.src.utils import identify_response, parse_message
-from apps.shared.src.config import AppConfig, is_contract, load_app_config
+from apps.shared.src.config import (
+    AppConfig,
+    OmsConfig,
+    is_contract,
+    load_app_config,
+)
 from apps.shared.src.events import (
     INTENTS_STREAM,
     OMS_CONSUMER_GROUP,
@@ -106,14 +111,22 @@ INIT_REPLY_TIMEOUT_S = 15.0
 BROKER_QUEUE_MARGIN_S = 30.0
 BROKER_REPLY_TIMEOUT_S = broker_request_bound_s() + BROKER_QUEUE_MARGIN_S
 
-# Connections the order manager's Redis pool holds, and how long a caller
-# waits for one. Every request to the broker holds a pubsub connection until
-# its reply comes, so a burst of intents needs many at once. The plain pool
-# raised MaxConnectionsError at 20: on 2026-10-16 a start-up backlog killed
-# 24 intent tasks that way, and as the acknowledgement needs a connection
-# too, their entries stayed pending. A blocking pool makes a burst wait.
-REDIS_CONNECTIONS = 64
-REDIS_CONNECTION_WAIT_S = 30.0
+# Every request to the broker holds a pubsub connection until its reply
+# comes, so one read of ``oms.batch`` intents can need that many at once. The
+# pool holds a full batch plus the connections held for the life of the
+# process (the blocking read of intents, the read of order events, and the
+# client that recollects open orders at start) plus spares for the short
+# commands a request issues while it holds its pubsub: the publish to the
+# broker, the acknowledgement and the event it writes.
+LONG_LIVED_CONNECTIONS = 3
+SPARE_CONNECTIONS = 8
+
+# How long a caller waits for a free connection. A connection is held for at
+# most one reply timeout, so a caller that waits longer than that never gives
+# up while a request ahead of it can still be answered. A caller that gave up
+# would fail its intent, and the acknowledgement of a failed intent needs a
+# connection too, so the entry would stay pending.
+REDIS_CONNECTION_WAIT_S = BROKER_REPLY_TIMEOUT_S + BROKER_QUEUE_MARGIN_S
 
 # Tag carrying the broker-protocol order type of an order recollected from a
 # venue at startup, so it is classified the same way it was when placed. New
@@ -1437,7 +1450,25 @@ class OrderManager:
         logger.info("All open tasks sucessfully closed")
 
 
-def build_pool(config: AppConfig) -> BlockingConnectionPool:
+def pool_size(oms: OmsConfig) -> int:
+    """
+    Return how many connections the order manager's Redis pool holds.
+
+    Parameters
+    ----------
+    oms : OmsConfig
+        The order manager settings.
+
+    Returns
+    -------
+    int
+        Enough connections for every intent of one read to wait on the
+        broker at once, with the long-lived connections and spares beside.
+    """
+    return oms.batch + LONG_LIVED_CONNECTIONS + SPARE_CONNECTIONS
+
+
+def build_pool(config: AppConfig, **connection: Any) -> BlockingConnectionPool:
     """
     Build the order manager's Redis connection pool.
 
@@ -1445,19 +1476,23 @@ def build_pool(config: AppConfig) -> BlockingConnectionPool:
     ----------
     config : AppConfig
         The application configuration.
+    **connection : Any
+        Further arguments for each connection, such as a test's fake
+        connection class.
 
     Returns
     -------
     BlockingConnectionPool
-        A pool of ``REDIS_CONNECTIONS`` in which a caller waits up to
-        ``REDIS_CONNECTION_WAIT_S`` for a free connection.
+        A pool of ``pool_size`` connections in which a caller waits up to
+        ``REDIS_CONNECTION_WAIT_S`` for a free one.
     """
     return BlockingConnectionPool(
         host=config.redis.host,
         port=config.redis.port,
         db=0,
-        max_connections=REDIS_CONNECTIONS,
+        max_connections=pool_size(config.oms),
         timeout=REDIS_CONNECTION_WAIT_S,
+        **connection,
     )
 
 
