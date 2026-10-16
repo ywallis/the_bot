@@ -90,6 +90,23 @@ def test_a_base_fee_on_a_sell_takes_more_than_the_amount():
     assert prepared["asset_net_q"] == "10.01"
 
 
+def test_a_fee_reported_as_negative_is_still_charged_on_a_buy():
+    """A venue that signs its fee negative still takes it from the asset."""
+    item = trade(fee={"cost": -0.01, "currency": "BTC"})
+    prepared = prepare_items_for_pg(fake_client(), [item])[0]
+    assert prepared["usdt_value"] == "20.0"
+    assert prepared["asset_net_q"] == "9.99"
+    assert prepared["fee_cost"] == "0.01"
+
+
+def test_a_fee_reported_as_negative_is_still_charged_on_a_sell():
+    """A negative quote fee on a sell still reduces the USDT received."""
+    item = trade(side="sell", fee={"cost": -0.02, "currency": "USDT"})
+    prepared = prepare_items_for_pg(fake_client(), [item])[0]
+    assert prepared["usdt_value"] == "19.98"
+    assert prepared["asset_net_q"] == "10.0"
+
+
 def test_a_fee_in_a_third_asset_leaves_both_legs_alone():
     """A discount token fee is paid in kind; base and USDT flows are untouched."""
     item = trade(fee={"cost": 0.5, "currency": "TKN"})
