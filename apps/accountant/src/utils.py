@@ -104,6 +104,13 @@ def _reported_fee(item: ccxtItem) -> tuple[float, str]:
     either may be absent or zero. The last non-zero entry wins, so a
     multi-entry list resolves to the fee that was actually charged.
 
+    The cost is returned as a magnitude. Some venues report a fee they
+    charged as a negative cost, and CCXT passes the sign through; taken as
+    it came, it was added to the balance instead of taken from it. On
+    2026-10-16 that overstated a venue's base by twice its fees and its
+    USDT by twice its quote fees. No configured venue pays a maker rebate,
+    which this reading would book as a fee.
+
     Parameters
     ----------
     item : ccxtItem
@@ -112,8 +119,8 @@ def _reported_fee(item: ccxtItem) -> tuple[float, str]:
     Returns
     -------
     tuple[float, str]
-        Cost and currency, with an empty currency when nothing was
-        reported.
+        Cost, never negative, and currency, with an empty currency when
+        nothing was reported.
     """
     cost = 0.0
     currency = ""
@@ -127,7 +134,7 @@ def _reported_fee(item: ccxtItem) -> tuple[float, str]:
         if _float_or_zero(part.get("cost")) != 0.0:
             cost = _float_or_zero(part.get("cost"))
             currency = str(part.get("currency"))
-    return cost, currency
+    return abs(cost), currency
 
 
 def prepare_items_for_pg(
