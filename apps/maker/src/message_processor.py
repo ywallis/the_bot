@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, cast
 
-from redis.asyncio import ConnectionPool, Redis
+from redis.asyncio import BlockingConnectionPool, ConnectionPool, Redis
 from redis.exceptions import ResponseError
 
 import apps.shared.src.logging_config as logging_config
@@ -105,6 +105,15 @@ INIT_REPLY_TIMEOUT_S = 15.0
 # an unknown state, kept as unconfirmed rather than taken as rejected.
 BROKER_QUEUE_MARGIN_S = 30.0
 BROKER_REPLY_TIMEOUT_S = broker_request_bound_s() + BROKER_QUEUE_MARGIN_S
+
+# Connections the order manager's Redis pool holds, and how long a caller
+# waits for one. Every request to the broker holds a pubsub connection until
+# its reply comes, so a burst of intents needs many at once. The plain pool
+# raised MaxConnectionsError at 20: on 2026-10-16 a start-up backlog killed
+# 24 intent tasks that way, and as the acknowledgement needs a connection
+# too, their entries stayed pending. A blocking pool makes a burst wait.
+REDIS_CONNECTIONS = 64
+REDIS_CONNECTION_WAIT_S = 30.0
 
 # Tag carrying the broker-protocol order type of an order recollected from a
 # venue at startup, so it is classified the same way it was when placed. New
@@ -477,7 +486,8 @@ class OrderManager:
 
         The first reads use the consumer's pending list, which holds the
         entries a previous incarnation of this process read but never
-        acknowledged. Once that is empty the cursor moves to new entries and
+        acknowledged. Once a read of it comes back empty, from its start or
+        from past the last entry read, the cursor moves to new entries and
         stays there.
 
         While draining the pending list the cursor advances past each entry
@@ -506,7 +516,12 @@ class OrderManager:
         # redis-py types the reply as list or dict (RESP3); the client is
         # RESP2 here so it is always the list form.
         for _stream, entries in cast(list[Any], response or []):
-            if not entries and self.cursor == PENDING:
+            # Empty while still on the pending list, whether at its start or
+            # past the last entry read from it, means it is drained. Testing
+            # for the start only left a drain that had advanced re-reading
+            # the end of the list forever: pending reads do not block, and
+            # on 2026-10-16 that spun with every new intent unread.
+            if not entries and self.cursor != NEW:
                 logger.info("No intents left pending, following new entries")
                 self.cursor = NEW
                 continue
@@ -1422,6 +1437,30 @@ class OrderManager:
         logger.info("All open tasks sucessfully closed")
 
 
+def build_pool(config: AppConfig) -> BlockingConnectionPool:
+    """
+    Build the order manager's Redis connection pool.
+
+    Parameters
+    ----------
+    config : AppConfig
+        The application configuration.
+
+    Returns
+    -------
+    BlockingConnectionPool
+        A pool of ``REDIS_CONNECTIONS`` in which a caller waits up to
+        ``REDIS_CONNECTION_WAIT_S`` for a free connection.
+    """
+    return BlockingConnectionPool(
+        host=config.redis.host,
+        port=config.redis.port,
+        db=0,
+        max_connections=REDIS_CONNECTIONS,
+        timeout=REDIS_CONNECTION_WAIT_S,
+    )
+
+
 async def main(config: AppConfig) -> None:
     """
     Run the order manager and its event follower.
@@ -1432,9 +1471,7 @@ async def main(config: AppConfig) -> None:
         The application configuration.
     """
     logger.debug("Order manager starting")
-    pool = ConnectionPool(
-        host=config.redis.host, port=config.redis.port, db=0, max_connections=20
-    )
+    pool = build_pool(config)
     redis = Redis(decode_responses=True, connection_pool=pool)
     manager = OrderManager(config, redis, pool)
 

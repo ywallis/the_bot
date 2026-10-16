@@ -11,6 +11,7 @@ import pytest
 import pytest_asyncio
 from fakeredis import aioredis as fakeredis
 from pytest_mock import MockerFixture
+from redis.asyncio import BlockingConnectionPool
 
 from apps.maker.src.constants import BROKER_CHANNEL
 from apps.maker.src.enums import MessageType, OrderSide, OrderType
@@ -19,8 +20,10 @@ from apps.maker.src.ccxt_abstractions import broker_request_bound_s
 from apps.maker.src.message_processor import (
     BROKER_REPLY_TIMEOUT_S,
     LEGACY_ORDER_TYPE_TAG,
+    REDIS_CONNECTIONS,
     OrderManager,
     broker_order_from_intent,
+    build_pool,
     legacy_order_type,
     replaces,
     venue_ack_ns,
@@ -726,6 +729,51 @@ async def test_the_cursor_moves_from_pending_to_new():
     assert fresh.cursor == "0"
     await fresh.consume_once()
     assert fresh.cursor == ">"
+
+
+@pytest.mark.asyncio
+async def test_a_drained_pending_list_hands_over_to_new_entries(
+    manager: OrderManager, broker: FakeBroker
+):
+    """
+    A drain that advanced past its last pending entry still moves on.
+
+    The cursor leaves "0" as soon as one pending entry is read, so the empty
+    read that ends the drain comes from past that entry. Treating only an
+    empty read from "0" as the end kept a restarted order manager re-reading
+    the end of its pending list, with every new intent unread.
+    """
+    broker.gate = asyncio.Event()
+    publisher = StreamPublisher(maxlen=1000)
+    await publisher.publish(manager.redis, order_intent(intent_id="in flight"))
+    await manager.consume_once()
+    await asyncio.sleep(0)
+    for task in manager.tasks:
+        task.cancel()
+    manager.tasks = []
+    assert await pending_count(manager) == 1
+
+    restarted = OrderManager(config(), manager.redis)
+    await restarted.ensure_group()
+    replayed = FakeBroker()
+    restarted.send_to_broker = replayed  # ty: ignore[invalid-assignment]
+    await restarted.consume_once()
+    await settle(restarted)
+    await restarted.consume_once()
+
+    assert restarted.cursor == ">"
+    await publisher.publish(manager.redis, order_intent(intent_id="after restart"))
+    await restarted.consume_once()
+    await settle(restarted)
+    assert [m["id"] for m in replayed.orders] == ["in flight", "after restart"]
+
+
+def test_the_pool_waits_for_a_free_connection():
+    """A burst of intents queues for connections instead of failing on them."""
+    pool = build_pool(config())
+
+    assert isinstance(pool, BlockingConnectionPool)
+    assert pool.max_connections == REDIS_CONNECTIONS
 
 
 # Startup and shutdown ------------------------------------------------------
